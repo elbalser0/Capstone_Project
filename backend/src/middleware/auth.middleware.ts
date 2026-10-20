@@ -22,6 +22,10 @@ export async function requireLogin(req: Request, _res: Response, next: NextFunct
   let email: string | undefined;
   try {
     const decoded = await firebaseAuth.verifyIdToken(header.slice('Bearer '.length));
+    if (!decoded.email || !decoded.email_verified) {
+      next(new ApiError(401, 'UNVERIFIED_EMAIL', 'Sign in with a verified email address.'));
+      return;
+    }
     email = decoded.email;
   } catch {
     next(new ApiError(401, 'INVALID_TOKEN', 'The login token is invalid or has expired.'));
