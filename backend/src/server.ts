@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './env.js';
 import { app } from './app.js';
 
 const rawPort = process.env.PORT ?? '3000';
