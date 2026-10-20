@@ -1,0 +1,22 @@
+{
+  "name": "assessment-helper-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.8",
+    "express": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
