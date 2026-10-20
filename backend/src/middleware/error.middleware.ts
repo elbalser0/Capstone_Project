@@ -29,6 +29,6 @@ export const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, nex
       return;
     }
   }
-  console.error('Unhandled API error:', error);
+  console.error('Unhandled API error:', error instanceof Error ? error.name : 'unknown');
   res.status(500).json({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'An unexpected error occurred.' } });
 };
