@@ -1,0 +1,79 @@
+# Assessment Helper frontend
+
+React, TypeScript, and Tailwind. Requires Node 20 or newer.
+
+## Run locally
+
+From `App/frontend`:
+
+```sh
+npm ci
+cp .env.example .env
+npm run dev
+```
+
+Open `http://localhost:5173`. The example environment enables the mock API so these pages can be demonstrated while the application endpoints are being built.
+
+## Included pages
+
+- `/login`: email/password form, password visibility toggle, and sign-in errors.
+- `/faculty/evaluation`: faculty identity, evaluation status, deadlines, and observation history.
+- `/committee/dashboard`: committee home with sample KPI results and a current-cycle summary.
+
+Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Sign-up and observation-record buttons are disabled because those screens are outside this sprint. Other later-sprint pages are not included.
+
+The dashboard keeps the existing prototype's KPI cards and CSV export; these are a preview of later dashboard work, not a claim that the backend implements those features.
+
+## Demo accounts
+
+With `VITE_USE_MOCKS=true` and `VITE_AUTH_MODE=demo`, use any nonempty password:
+
+| Account | Access |
+| --- | --- |
+| `maya.lin@demo.edu` | Faculty |
+| `elena.ruiz@demo.edu` | Faculty |
+| `linda.chen@demo.edu` | Faculty and Committee |
+
+These are fictional accounts, not UTD credentials. Demo tokens are only for the mock API and must not be accepted as production authentication.
+
+## Checks
+
+```sh
+npm run typecheck
+npm run build
+```
+
+## Backend integration
+
+Set `VITE_USE_MOCKS=false` in `.env` and restart Vite to send requests through the existing `/api` development proxy to `http://localhost:3000`. The Express package is at the repository root under `backend/`, not inside `App/`.
+
+The backend foundation currently supplies `/api/health`, but not the application endpoints below. Sign-in against that backend stops at a 404 from `/api/me`; connected login and page-data testing remain blocked until the contracts are implemented and agreed with the backend team.
+
+The current screens request:
+
+- `GET /api/me`
+- `GET /api/cycles/current`
+- `GET /api/me/evaluation-status`
+- `GET /api/me/observations?as=observee`
+- `GET /api/me/signup`
+- `GET /api/cycles/latest/kpis`
+- `GET /api/dashboard/due-by-rank`
+- `GET /api/dashboard/outstanding-observations`
+- `GET /api/dashboard/unmatched`
+
+Response types are in `src/api/types.ts`. Roles are `faculty` and `AC`; committee membership adds access without removing faculty access. Backend routes must enforce their own permissions. Client-side route guards are not server authorization.
+
+The frontend authentication adapter currently supports demo mode only. Firebase sign-in/token handling is still pending. Changing `VITE_AUTH_MODE` alone does not implement Firebase.
+
+Vite's proxy is development configuration; production API routing requires separate configuration. If switching away from a previous mock session, clear old site/service-worker data if mock interception persists.
+
+## Mock data
+
+`src/mocks/` contains the existing fixture, handlers, and rules from the frontend prototype. It retains shared support for later workflows, but does not expose their pages. Mock responses do not prove PostgreSQL integration, matching-rule acceptance, or real notifications.
+
+```sh
+npm run data
+npm run data -- --today 2026-10-20
+```
+
+These commands replace the local fixture. The default snapshot uses September 8, 2026 so the displayed cycle is reproducible rather than following the computer's date. Mock changes reset on a full reload. The TypeScript fixture generator supports frontend development; it does not replace the database team's planned Python/CSV import.
