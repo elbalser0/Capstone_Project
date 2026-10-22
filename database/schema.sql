@@ -32,6 +32,9 @@ CREATE TABLE public.professor (
         REFERENCES public.term(term_id),
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
+-- ingnores capitalization
+CREATE UNIQUE INDEX professor_email_lower_unique
+ON public.professor (LOWER(email));
 
 CREATE FUNCTION public.set_professor_eval_interval()
 RETURNS TRIGGER
