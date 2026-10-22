@@ -40,7 +40,7 @@ export async function requireLogin(req: Request, _res: Response, next: NextFunct
 
 // Guard 2: is this professor on the Assessment Committee? Use after requireLogin.
 export function requireAC(req: Request, _res: Response, next: NextFunction) {
-  if (!req.user?.roles.includes('AC')) {
+   if (req.user?.role !== 'AC') {
     next(new ApiError(403, 'FORBIDDEN', 'Only Assessment Committee members can do this.'));
     return;
   }
