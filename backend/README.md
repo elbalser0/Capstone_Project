@@ -62,6 +62,10 @@ start or evaluation term; it can be shown before that future term has a
 database row. Its response includes the season, year, and label, without
 inventing a term ID or academic-calendar dates.
 
+`GET /api/me/signup` returns the signed-in professor's sign-up from the latest
+started evaluation cycle, including its section, proposed dates, and observation
+when present. It returns JSON `null` when no cycle or sign-up exists.
+
 `POST /api/signups` remains a protected scaffold and returns
 `501 NOT_IMPLEMENTED` for valid requests. Sign-ups require a `sectionId` and
 at least one real `YYYY-MM-DD` proposed date; invalid input returns 400 after

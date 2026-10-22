@@ -19,7 +19,7 @@ interface CourseRow {
   room: string | null;
 }
 
-interface CourseSection {
+export interface CourseSection {
   sectionId: string;
   label: string;
   courseNum: string;
