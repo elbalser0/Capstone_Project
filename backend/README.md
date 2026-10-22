@@ -64,7 +64,9 @@ inventing a term ID or academic-calendar dates.
 
 `GET /api/me/signup` returns the signed-in professor's sign-up from the latest
 started evaluation cycle, including its section, proposed dates, and observation
-when present. It returns JSON `null` when no cycle or sign-up exists.
+when present. Proposed dates must be class meetings of that section; inconsistent
+stored dates fail instead of being shown with an invented time. It returns JSON
+`null` when no cycle or sign-up exists.
 
 `POST /api/signups` remains a protected scaffold and returns
 `501 NOT_IMPLEMENTED` for valid requests. Sign-ups require a `sectionId` and

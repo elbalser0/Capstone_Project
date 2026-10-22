@@ -28,11 +28,11 @@ export function mapSignup(row: SignupRow, user: AuthUser, section: CourseSection
       displayName: user.displayName, rank: user.rank, email: user.email,
     },
     section,
-    proposedDates: dates.map((date) => ({
-      date,
-      startTime: section.meetings.find((meeting) => meeting.dayOfWeek === weekdays[new Date(`${date}T00:00:00Z`).getUTCDay()])?.startTime
-        ?? section.meetings[0]?.startTime ?? '',
-    })),
+    proposedDates: dates.map((date) => {
+      const meeting = section.meetings.find((item) => item.dayOfWeek === weekdays[new Date(`${date}T00:00:00Z`).getUTCDay()]);
+      if (!meeting) throw new Error('A proposed date is not a class meeting for this section.');
+      return { date, startTime: meeting.startTime };
+    }),
     submitDate: row.submit_date,
     observation: row.observation_id === null ? null : {
       observationId: String(row.observation_id),

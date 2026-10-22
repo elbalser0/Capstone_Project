@@ -176,6 +176,7 @@ test('a sign-up includes proposed meeting times and any scheduled observation', 
     { date: '2026-11-02', startTime: '08:30' },
     { date: '2026-11-04', startTime: '10:00' },
   ]);
+  assert.throws(() => mapSignup(row, user, section, ['2026-11-03']), /not a class meeting/);
   assert.equal(signup.observation, null);
 
   const observed = mapSignup({
