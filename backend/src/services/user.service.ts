@@ -1,3 +1,5 @@
+import { getPool } from '../db/pool.js';
+
 // Shapes match the frontend's GET /api/me type (App/frontend/src/api/types.ts).
 export type Rank = 'assistant' | 'associate' | 'full';
 export type Role = 'AC' | 'faculty';
@@ -19,19 +21,42 @@ export interface AuthUser {
   role: Role;
 }
 
-const CS: Department = { deptId: 'CS', deptName: 'Computer Science' };
+interface ProfessorRow {
+  netid: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  rank: Rank;
+  dept_id: number;
+  dept_name: string;
+  is_ac: boolean;
+}
 
-// TEMPORARY: demo accounts until the PostgreSQL database is connected.
-// NetIDs match the frontend's mock data so both sides refer to the same people.
-const DEMO_USERS: AuthUser[] = [
-  { netid: 'mli202574', firstName: 'Maya', lastName: 'Lin', displayName: 'Dr. Maya Lin',
-    email: 'maya.lin@demo.edu', rank: 'associate', department: CS, role: 'faculty' },
-  { netid: 'eru150234', firstName: 'Elena', lastName: 'Ruiz', displayName: 'Dr. Elena Ruiz',
-    email: 'elena.ruiz@demo.edu', rank: 'associate', department: CS, role: 'faculty' },
-  { netid: 'lch216317', firstName: 'Linda', lastName: 'Chen', displayName: 'Dr. Linda Chen',
-    email: 'linda.chen@demo.edu', rank: 'associate', department: CS, role: 'AC' },
-];
+function toAuthUser(row: ProfessorRow): AuthUser {
+  return {
+    netid: row.netid,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    displayName: `Dr. ${row.first_name} ${row.last_name}`,
+    email: row.email,
+    rank: row.rank,
+    department: { deptId: String(row.dept_id), deptName: row.dept_name },
+    role: row.is_ac ? 'AC' : 'faculty',
+  };
+}
 
+// Looks up an active professor (and whether they are an active AC member) in the database.
 export async function findUserByEmail(email: string): Promise<AuthUser | undefined> {
-  return DEMO_USERS.find((user) => user.email === email.toLowerCase());
+  const { rows } = await getPool().query<ProfessorRow>(
+    `SELECT p.netid, p.first_name, p.last_name, p.email, p.rank,
+            d.dept_id, d.dept_name,
+            COALESCE(a.is_active, false) AS is_ac
+       FROM professor AS p
+       JOIN department AS d ON d.dept_id = p.dept_id
+       LEFT JOIN ac_member AS a ON a.netid = p.netid
+      WHERE lower(p.email) = lower($1)
+        AND p.is_active = true`,
+    [email],
+  );
+  return rows[0] ? toAuthUser(rows[0]) : undefined;
 }
