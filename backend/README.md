@@ -53,14 +53,20 @@ there are no sections. The current schema does not have a department short code
 or section enrollment; course labels use the department name and `enrollment`
 is `null` until those fields are added.
 
-`GET /api/me/evaluation-status` and `POST /api/signups` remain protected
-scaffolds and return `501 NOT_IMPLEMENTED` for valid requests. Sign-ups require
+`GET /api/me/evaluation-status` returns the professor's due status, last and
+next evaluation terms, and the current cycle when one exists. It uses completed,
+signed observations and the professor's baseline term to calculate the due term.
+The current development database has no cycles yet, so `cycle` is `null` and
+`canSignUp` is `false` there. Future terms must be loaded before due dates beyond
+the current term catalog can be represented exactly.
+
+`POST /api/signups` remains a protected scaffold and returns
+`501 NOT_IMPLEMENTED` for valid requests. Sign-ups require
 a `sectionId` and at least one real `YYYY-MM-DD` date. Invalid inputs return 400
 after authentication. No sign-up is written by this scaffold.
 
-Technical debt: seed/import professors, terms, courses, and sections; configure
-Firebase credentials and verify an authenticated end-to-end request; implement
-evaluation status from cycle/due data and the sign-up transaction from the
+Technical debt: configure Firebase credentials and verify an authenticated
+end-to-end request; implement the sign-up transaction from the
 frontend contract in `App/frontend/src/api/types.ts`. Add the department short
 code and enrollment columns if the UI needs those fields. An authenticated
 Firebase end-to-end test still requires a service-account key and verified ID token.

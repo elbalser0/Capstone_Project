@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { ApiError } from '../middleware/error.middleware.js';
 import { listCourses } from '../services/course.service.js';
+import { getEvaluationStatus } from '../services/evaluation-status.service.js';
 
 export const facultyMeRouter = Router();
 export const signupsRouter = Router();
 
 function pending(): never {
-  // shortcut: due-status rules and sign-up writes need their own database service and tests.
+  // shortcut: sign-up writes need their own database service and tests.
   throw new ApiError(501, 'NOT_IMPLEMENTED', 'This endpoint is awaiting application logic.');
 }
 
@@ -16,7 +17,9 @@ function isIsoDate(value: unknown): value is string {
   return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
 }
 
-facultyMeRouter.get('/evaluation-status', pending);
+facultyMeRouter.get('/evaluation-status', async (req, res) => {
+  res.status(200).json(await getEvaluationStatus(req.user!.netid));
+});
 
 facultyMeRouter.get('/courses', async (req, res) => {
   if (typeof req.query.termId !== 'string' || !/^[1-9]\d*$/.test(req.query.termId)) {
