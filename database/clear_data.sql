@@ -1,14 +1,6 @@
--- WARNING: Deletes all data from the listed tables and
--- any tables included through CASCADE, and resets identity counters.
--- Preserves table definitions. Run only when intentionally resetting data.
+-- WARNING: Deletes all data from the listed tables and preserves table definitions.
+-- Run only when intentionally resetting data.
 BEGIN;
-
-DROP SCHEMA public CASCADE;
-CREATE SCHEMA public;
-
-COMMIT;
-
---reset tables
 TRUNCATE TABLE
     public.observation_answer,
     public.forwarded_observation,
@@ -32,4 +24,5 @@ TRUNCATE TABLE
     public.course,
     public.term,
     public.department
-RESTART IDENTITY CASCADE;
+RESTART IDENTITY;
+COMMIT;
