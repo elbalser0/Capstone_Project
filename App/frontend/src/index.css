@@ -1,0 +1,61 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+
+/* Colors are the exact values from the Figma file (Oct 17 page). */
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+  --color-brand: #b4520f;
+  --color-brand-hover: #9a460d;
+  /* Selected options, ratings and filter chips */
+  --color-brand-50: #fcefe6;
+  /* Step numbers in "What happens next" */
+  --color-orange-50: #fff7ed;
+
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-900: #111827;
+
+  --color-amber-100: #fef3c7;
+  --color-amber-800: #92400e;
+  --color-green-100: #dcfce7;
+  --color-green-800: #166534;
+  --color-red-100: #fee2e2;
+  --color-red-700: #b91c1c;
+  --color-red-800: #991b1b;
+
+  --color-blue-50: #eff6ff;
+  --color-blue-100: #dbeafe;
+  --color-blue-800: #1e40af;
+  --color-blue-900: #1e3a8a;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-white);
+  color: var(--color-gray-900);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* No one-word last lines in wrapped text. In the base layer so nowrap/truncate utilities still win. */
+@layer base {
+  p,
+  li,
+  dd,
+  h2,
+  h3 {
+    text-wrap: pretty;
+  }
+}

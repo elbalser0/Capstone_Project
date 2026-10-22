@@ -1,0 +1,56 @@
+course_id,dept_id,course_num,title,course_level
+1,1,1336,Programming Fundamentals,1000
+2,1,1337,Computer Science I,1000
+3,1,2305,Discrete Mathematics for Computing,2000
+4,1,2336,Computer Science II,2000
+5,1,2340,Computer Architecture,2000
+6,1,3345,Data Structures and Algorithmic Analysis,3000
+7,1,3354,Software Engineering,3000
+8,1,3377,Systems Programming in UNIX,3000
+9,1,4337,Programming Language Paradigms,4000
+10,1,4347,Database Systems,4000
+11,1,4348,Operating Systems Concepts,4000
+12,1,4351,Requirements Engineering,4000
+13,1,4352,Software Architecture and Design,4000
+14,1,4367,Software Testing and Quality Assurance,4000
+15,1,4375,Introduction to Machine Learning,4000
+16,1,4381,Software Project Planning and Management,4000
+17,1,4485,Computer Science Project,4000
+18,1,6320,Natural Language Processing,6000
+19,1,6354,Advanced Software Engineering,6000
+20,1,6363,Design and Analysis of Computer Algorithms,6000
+21,1,6375,Machine Learning,6000
+22,2,1202,Introduction to Electrical Engineering,1000
+23,2,2301,Electric Circuit Analysis,2000
+24,2,2310,Introduction to Digital Systems,2000
+25,2,3302,Signals and Systems,3000
+26,2,3311,Electronic Circuits,3000
+27,2,3320,Digital Circuit Design,3000
+28,2,4304,Computer Architecture Design,4000
+29,2,4325,Control Systems,4000
+30,2,4370,Embedded Systems,4000
+31,2,6304,Advanced Computer Architecture,6000
+32,2,6325,VLSI Design,6000
+33,2,6360,Digital Signal Processing,6000
+34,3,1314,College Algebra,1000
+35,3,2413,Differential Calculus,2000
+36,3,2414,Integral Calculus,2000
+37,3,2418,Linear Algebra,2000
+38,3,2419,Calculus III,2000
+39,3,3310,Theoretical Concepts of Calculus,3000
+40,3,3341,Probability and Statistics,3000
+41,3,3351,Advanced Calculus,3000
+42,3,4301,Mathematical Analysis,4000
+43,3,4334,Numerical Analysis,4000
+44,3,4382,Applied Statistics,4000
+45,3,6301,Real Analysis,6000
+46,3,6313,Numerical Methods,6000
+47,4,1301,College Physics I,1000
+48,4,1302,College Physics II,1000
+49,4,2325,Mechanics,2000
+50,4,2326,Electromagnetism and Waves,2000
+51,4,3311,Classical Mechanics,3000
+52,4,3330,Thermodynamics,3000
+53,4,4301,Quantum Mechanics,4000
+54,4,4328,Electromagnetic Theory,4000
+55,4,6300,Statistical Physics,6000
