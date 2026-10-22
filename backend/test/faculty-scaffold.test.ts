@@ -71,11 +71,16 @@ test('evaluation status uses the signed evaluation term and returns no cycle whe
   assert.equal(recentlyObserved.dueTerm.termId, '4');
   assert.equal(recentlyObserved.lastObservedTerm?.termId, '2');
 
-  const newProfessor = mapEvaluationStatus({ ...professor, baseline_last_eval_term: null }, terms, null);
-  assert.equal(newProfessor.status, 'DUE');
-  assert.equal(newProfessor.lastObservedTerm, null);
+  const neverEvaluated = mapEvaluationStatus({ ...professor, baseline_last_eval_term: null }, terms, null);
+  assert.equal(neverEvaluated.status, 'DUE');
+  assert.equal(neverEvaluated.lastObservedTerm, null);
   const overdue = mapEvaluationStatus({ ...professor, today: '2027-02-01' }, terms, null);
   assert.equal(overdue.status, 'OVERDUE');
+
+  assert.throws(
+    () => mapEvaluationStatus({ ...professor, eval_interval_years: 2, last_completed_term_id: 2 }, terms, null),
+    { status: 503, code: 'TERM_DATA_UNAVAILABLE' },
+  );
 });
 
 test('evaluation status opens sign-up only for due professors without a signup', () => {

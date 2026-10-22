@@ -70,8 +70,11 @@ export function mapEvaluationStatus(professor: ProfessorStatusRow, terms: TermRo
     throw new ApiError(503, 'TERM_DATA_UNAVAILABLE', 'The last evaluation term is unavailable.');
   }
 
-  // shortcut: match the frontend mock's final-term cap until future terms are loaded.
-  const dueIndex = lastIndex < 0 ? currentIndex : Math.min(lastIndex + professor.eval_interval_years * 2, terms.length - 1);
+  // shortcut: a null baseline cannot distinguish first-semester hires from established never-evaluated faculty; add a start-term field.
+  const dueIndex = lastIndex < 0 ? currentIndex : lastIndex + professor.eval_interval_years * 2;
+  if (dueIndex >= terms.length) {
+    throw new ApiError(503, 'TERM_DATA_UNAVAILABLE', 'The next evaluation term is unavailable.');
+  }
   const status: DueStatus = currentIndex < dueIndex ? 'NOT_DUE' : currentIndex === dueIndex ? 'DUE' : 'OVERDUE';
 
   let phase: 'signup' | 'matching' | 'observation' | 'feedback' | 'closed' | null = null;

@@ -54,7 +54,10 @@ use the department name and `enrollment` is `null`.
 `GET /api/me/evaluation-status` returns the professor's due status, last and
 next evaluation terms, and the current cycle when one exists. It uses completed,
 signed observations and the professor's baseline term to calculate the due term.
-Future terms must be loaded before later due dates can be represented exactly.
+The current development database has no cycles yet, so `cycle` is `null` and
+`canSignUp` is `false` there. If the professor's next due semester is beyond the
+loaded term catalog, the endpoint returns `503 TERM_DATA_UNAVAILABLE` rather
+than reporting an earlier term as due.
 
 `POST /api/signups` remains a protected scaffold and returns
 `501 NOT_IMPLEMENTED` for valid requests. Sign-ups require a `sectionId` and
