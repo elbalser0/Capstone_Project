@@ -12,6 +12,7 @@ test('cycle endpoints require a login', async () => {
     const deadlines = { signupDeadline: '2026-11-01', observationDeadline: '2026-11-20', feedbackDeadline: '2026-12-05' };
     const requests: [string, string, unknown?][] = [
       ['GET', '/api/cycles/current'],
+      ['GET', '/api/cycles/1/signups'],
       ['POST', '/api/cycles', { termId: '11', ...deadlines }],
       ['PATCH', '/api/cycles/1', { feedbackDeadline: '2026-12-06' }],
     ];

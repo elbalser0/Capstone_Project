@@ -1,6 +1,6 @@
 import { getPool } from '../db/pool.js';
 
-interface CourseRow {
+export interface CourseRow {
   section_id: number;
   section_num: string;
   class_mode: 'in-person' | 'online';
