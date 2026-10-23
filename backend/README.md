@@ -4,7 +4,7 @@ Initial Express/TypeScript foundation. Run commands from this directory.
 
 ## Setup
 
-Install Node.js and npm (verified locally with Node 20.14.0), then:
+Install Node.js 22 and npm, then:
 
 ```sh
 npm ci
