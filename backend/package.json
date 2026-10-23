@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test test/faculty-scaffold.test.ts",
+    "test": "node --import tsx --test test/*.test.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "db:check": "tsx src/db/check-connection.ts"
