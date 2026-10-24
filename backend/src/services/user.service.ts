@@ -32,12 +32,17 @@ interface ProfessorRow {
   is_ac: boolean;
 }
 
+// "Dr. First Last", the display name used across the API.
+export function displayName(firstName: string, lastName: string): string {
+  return `Dr. ${firstName} ${lastName}`;
+}
+
 function toAuthUser(row: ProfessorRow): AuthUser {
   return {
     netid: row.netid,
     firstName: row.first_name,
     lastName: row.last_name,
-    displayName: `Dr. ${row.first_name} ${row.last_name}`,
+    displayName: displayName(row.first_name, row.last_name),
     email: row.email,
     rank: row.rank,
     department: { deptId: String(row.dept_id), deptName: row.dept_name },
