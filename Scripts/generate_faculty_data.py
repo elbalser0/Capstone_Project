@@ -9,7 +9,7 @@ Output files, in FK-safe load order (one per table):
     1. department.csv     dept_id, dept_name
     2. term.csv           term_id, season, year, start_date, end_date
     3. professor.csv      netid, first_name, last_name, email, rank, dept_id,
-                          eval_interval_years, baseline_last_eval_term, is_active
+                          eval_interval_years, baseline_last_eval_term, start_term, is_active
     4. ac_member.csv      netid, is_active
     5. course.csv         course_id, dept_id, course_num, title, course_level
     6. section.csv        section_id, course_id, term_id, section_num, instructor_id, class_mode
@@ -62,7 +62,7 @@ TABLES = {
     "department":   ["dept_id", "dept_name"],
     "term":         ["term_id", "season", "year", "start_date", "end_date"],
     "professor":    ["netid", "first_name", "last_name", "email", "rank", "dept_id",
-                     "eval_interval_years", "baseline_last_eval_term", "is_active"],
+                     "eval_interval_years", "baseline_last_eval_term", "start_term", "is_active"],
     "ac_member":    ["netid", "is_active"],
     "course":       ["course_id", "dept_id", "course_num", "title", "course_level"],
     "section":      ["section_id", "course_id", "term_id", "section_num", "instructor_id",
@@ -289,6 +289,7 @@ def gen_professors(rng: random.Random, n: int, departments, terms, cur_idx: int)
                 "rank": rank, "dept_id": dept["dept_id"],
                 "eval_interval_years": EVAL_INTERVAL[rank],
                 "baseline_last_eval_term": baseline,
+                "start_term": terms[first_term]["term_id"],
                 "is_active": rng.random() > INACTIVE_RATE or first_term == cur_idx,
                 "_first_term": first_term,
             })
