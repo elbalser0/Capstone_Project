@@ -17,9 +17,11 @@ This folder contains the PostgreSQL scripts for Assessment Helper.
 1. Connect to an empty PostgreSQL database.
 2. Run schema.sql.
 3. Load the sample data using Samuel's data-generation/loading script.
-4. Check the maximum IDs before running reset_identity_after_seed.sql.
-   Its fixed values must be greater than the existing IDs.
-5. Run checkDatabase.sql to inspect the schema.
+4. The seed loader automatically updates the ID counters after loading.
+   If it cannot reset them because of insufficient permissions, it prints
+   ALTER TABLE ... RESTART WITH commands. The table owner should run
+   those exact commands after loading, before the app adds more data.
+6. Run checkDatabase.sql to inspect the schema.
 
 Do not rerun schema.sql on a database where these tables already exist.
 
