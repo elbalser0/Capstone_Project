@@ -18,9 +18,10 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 
 - `/login`: email/password form, password visibility toggle, and sign-in errors.
 - `/faculty/evaluation`: faculty identity, evaluation status, deadlines, and observation history.
+- `/faculty/sign-up`: one-course observation sign-up, preferred class meetings, loading/empty/error states, and submission feedback.
 - `/committee/dashboard`: committee home with sample KPI results and a current-cycle summary.
 
-Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Sign-up and observation-record buttons are disabled because those screens are outside this sprint. Other later-sprint pages are not included.
+Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Eligible faculty can open sign-up from My evaluation. Observation-record buttons remain disabled because that route is not included. Other later-sprint pages are not included.
 
 The dashboard keeps the existing prototype's KPI cards and CSV export; these are a preview of later dashboard work, not a claim that the backend implements those features.
 
@@ -41,13 +42,14 @@ These are fictional accounts, not UTD credentials. Demo tokens are only for the 
 ```sh
 npm run typecheck
 npm run build
+npm test
 ```
 
 ## Backend integration
 
 Set `VITE_USE_MOCKS=false` in `.env` and restart Vite to send requests through the existing `/api` development proxy to `http://localhost:3000`. The Express package is at the repository root under `backend/`, not inside `App/`.
 
-The backend foundation currently supplies `/api/health`, but not the application endpoints below. Sign-in against that backend stops at a 404 from `/api/me`; connected login and page-data testing remain blocked until the contracts are implemented and agreed with the backend team.
+Backend routes are being delivered separately. At the reviewed `main` revision (`9d3b0c1`), evaluation-status and sign-up writes still return 501; the frontend also lacks a real Firebase sign-in adapter. This change verifies the frontend with deterministic HTTP mocks and the browser mock API, not authenticated PostgreSQL persistence. Pending backend PRs must be integrated and their contracts checked before claiming a working real-server sign-up journey.
 
 The current screens request:
 
@@ -56,6 +58,8 @@ The current screens request:
 - `GET /api/me/evaluation-status`
 - `GET /api/me/observations?as=observee`
 - `GET /api/me/signup`
+- `GET /api/me/courses?termId=...`
+- `POST /api/signups` with `{ sectionId, proposedDates }`
 - `GET /api/cycles/latest/kpis`
 - `GET /api/dashboard/due-by-rank`
 - `GET /api/dashboard/outstanding-observations`

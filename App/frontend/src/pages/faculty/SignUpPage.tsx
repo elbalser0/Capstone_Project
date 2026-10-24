@@ -15,7 +15,9 @@ const DAY_INDEX = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5 } as const;
 function meetingDates(section: CourseSection, cycle: Cycle) {
   const days = new Set(section.meetings.map((m) => DAY_INDEX[m.dayOfWeek]));
   const out: string[] = [];
-  for (let d = addDays(cycle.signupDeadline, 1); d <= cycle.observationDeadline; d = addDays(d, 1)) if (days.has(utcDay(d).getUTCDay() as 1)) out.push(d);
+  const first = [addDays(cycle.signupDeadline, 1), section.term.startDate].sort()[1];
+  const last = [cycle.observationDeadline, section.term.endDate].sort()[0];
+  for (let d = first; d <= last; d = addDays(d, 1)) if (days.has(utcDay(d).getUTCDay() as 1)) out.push(d);
   return out;
 }
 
@@ -76,9 +78,12 @@ function AddTimeModal({ sections, cycle, initialSection, initialDates, onClose, 
       <fieldset className="mt-4">
         <legend className="text-sm font-bold text-gray-900">2. Date and time for {section.label}</legend>
         <p className="mt-[5px] text-xs text-gray-500">Class meetings before the observation deadline ({formatShort(cycle.observationDeadline)})</p>
+        {weeks.length === 0 && (
+          <p role="status" className="mt-4 text-sm text-gray-700">No class meetings are available for this section between the sign-up and observation deadlines. Choose another section or contact the Assessment Committee.</p>
+        )}
         <div className="mt-5 -mr-6 flex max-h-[252px] flex-col gap-2 overflow-y-auto pr-6 pb-1">
           {weeks.map(([week, dates]) => (
-            <div key={week} className="flex items-center">
+            <div key={week} className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <span className="w-[132px] shrink-0 text-xs text-gray-500">Week of {formatShort(week)}</span>
               <span className="flex flex-wrap gap-3">
                 {dates.map((d) => {
@@ -140,8 +145,10 @@ export function SignUpPage() {
   const [adding, setAdding] = useState(false);
 
   if (status.error) return <PageError error={status.error} />;
-  if (!status.data || !courses.data) return null;
+  if (!status.data) return <p role="status" className="pt-8 text-sm text-gray-500">Loading sign-up details…</p>;
   if (!status.data.canSignUp || !cycle) return <Navigate to="/faculty/evaluation" replace />;
+  if (courses.error) return <PageError error={courses.error} />;
+  if (!courses.data) return <p role="status" className="pt-8 text-sm text-gray-500">Loading your courses…</p>;
 
   const sections = courses.data;
   const sectionId = chosen ?? sections[0]?.sectionId ?? null;
@@ -155,11 +162,15 @@ export function SignUpPage() {
     create.mutate({ sectionId, proposedDates: dates }, { onSuccess: () => navigate('/faculty/evaluation') });
 
   return (
-    <div className="grid grid-cols-[620px_344px] gap-8 pt-8">
-      <div className="pt-2.5">
-        <p className="text-sm text-gray-900">
-          You teach {sections.length} {sections.length === 1 ? 'class' : 'classes'} in {cycle.term.label}. Choose one, then pick the days and times.
-        </p>
+    <div className="grid grid-cols-1 gap-8 pt-8 xl:grid-cols-[minmax(0,620px)_minmax(0,344px)]">
+      <div className="min-w-0 pt-2.5">
+        {sections.length === 0 ? (
+          <p role="status" className="text-sm text-gray-700">No courses are available for sign-up in {cycle.term.label}. Contact the Assessment Committee if your teaching assignment is missing.</p>
+        ) : (
+          <p className="text-sm text-gray-900">
+            You teach {sections.length} {sections.length === 1 ? 'class' : 'classes'} in {cycle.term.label}. Choose one, then pick the days and times.
+          </p>
+        )}
         <InfoLine className="mt-3">One course per sign-up for now.</InfoLine>
 
         <fieldset className="mt-5">
@@ -217,8 +228,10 @@ export function SignUpPage() {
 
         <ErrorNote error={create.error} className="mt-4" />
         <div className="mt-[27px] flex gap-3">
-          <Button onClick={submit} disabled={!sectionId || dates.length === 0 || create.isPending}>Submit sign-up</Button>
-          <Button variant="secondary" onClick={() => navigate('/faculty/evaluation')}>Cancel</Button>
+          <Button onClick={submit} disabled={!sectionId || dates.length === 0 || create.isPending} aria-busy={create.isPending}>
+            {create.isPending ? 'Submitting sign-up…' : 'Submit sign-up'}
+          </Button>
+          <Button variant="secondary" disabled={create.isPending} onClick={() => navigate('/faculty/evaluation')}>Cancel</Button>
         </div>
       </div>
 
