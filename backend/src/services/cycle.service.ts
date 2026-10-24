@@ -1,5 +1,6 @@
 import { getPool } from '../db/pool.js';
 import { ApiError } from '../middleware/error.middleware.js';
+import { insertEvalDue } from './eval-due.service.js';
 import type { Rank } from './user.service.js';
 
 type Phase = 'signup' | 'matching' | 'observation' | 'feedback' | 'closed';
@@ -129,20 +130,28 @@ export async function createCycle(startedBy: string, termId: number, deadlines: 
   if (cycleExists) throw new ApiError(409, 'CYCLE_EXISTS', 'An evaluation cycle already exists for that term.');
   checkDeadlineOrder(today, deadlines);
 
+  // The cycle and its eval_due rows are saved together, or not at all.
+  const client = await db.connect();
   let cycleId: number;
   try {
-    const inserted = await db.query<{ cycle_id: number }>(`
+    await client.query('BEGIN');
+    const inserted = await client.query<{ cycle_id: number }>(`
       INSERT INTO eval_cycle (term_id, started_by, start_date, signup_deadline, observation_deadline, feedback_deadline)
       VALUES ($1, $2, $3::date, $4::date, $5::date, $6::date)
       RETURNING cycle_id
     `, [termId, startedBy, today, deadlines.signupDeadline, deadlines.observationDeadline, deadlines.feedbackDeadline]);
     cycleId = inserted.rows[0].cycle_id;
+    await insertEvalDue(client, { cycleId, termId, startedBy, startDate: today, ...deadlines });
+    await client.query('COMMIT');
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
     // Two AC members starting the same term at the same moment.
     if ((error as { code?: string }).code === '23505') {
       throw new ApiError(409, 'CYCLE_EXISTS', 'An evaluation cycle already exists for that term.');
     }
     throw error;
+  } finally {
+    client.release();
   }
   return (await fetchCycle('c.cycle_id = $1', [cycleId]))!;
 }
