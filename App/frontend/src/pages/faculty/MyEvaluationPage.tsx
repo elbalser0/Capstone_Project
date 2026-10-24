@@ -53,9 +53,12 @@ function StatusCard({ status }: { status: EvaluationStatus }) {
 }
 
 function statusTag(o: ObservationSummary) {
-  if (o.status === 'completed' && isLocked(o)) return <Tag tone="signed">Signed</Tag>;
-  if (o.status === 'completed') return <Tag tone="neutral">Waiting for your signature</Tag>;
   if (o.status === 'not_completed') return <Tag tone="neutral">Did not happen</Tag>;
+  if (o.status === 'completed' && isLocked(o)) return <Tag tone="signed">Signed</Tag>;
+  if (isLocked(o)) return <Tag tone="neutral">Awaiting completion</Tag>;
+  if (o.observerSignedDate && !o.observeeSignedDate) return <Tag tone="neutral">Waiting for your signature</Tag>;
+  if (o.observeeSignedDate && !o.observerSignedDate) return <Tag tone="neutral">Waiting for observer signature</Tag>;
+  if (o.status === 'completed') return <Tag tone="neutral">Waiting for signatures</Tag>;
   return <Tag tone="neutral">Scheduled {formatDate(o.scheduledDate)}</Tag>;
 }
 

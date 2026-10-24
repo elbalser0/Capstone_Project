@@ -67,6 +67,12 @@ The frontend authentication adapter currently supports demo mode only. Firebase 
 
 Vite's proxy is development configuration; production API routing requires separate configuration. If switching away from a previous mock session, clear old site/service-worker data if mock interception persists.
 
+## Observation status
+
+The evaluation view distinguishes loading, failed requests, empty history, and current-cycle sign-up details. Signature labels use both the observation lifecycle and the available signature dates. When only a sign-up summary is available, the page does not guess whether the record is signed. Observation history is horizontally scrollable on narrower screens; record actions remain disabled until the record route is implemented.
+
+Run `npm test` for page-level regression tests using controlled HTTP responses. These tests do not establish real-backend authentication or database persistence. The evaluation-status, current sign-up, and observee observation-history endpoints must be available before connected status-view acceptance can be verified.
+
 ## Mock data
 
 `src/mocks/` contains the existing fixture, handlers, and rules from the frontend prototype. It retains shared support for later workflows, but does not expose their pages. Mock responses do not prove PostgreSQL integration, matching-rule acceptance, or real notifications.
