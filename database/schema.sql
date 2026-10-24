@@ -30,6 +30,8 @@ CREATE TABLE public.professor (
         CHECK (eval_interval_years > 0),
     baseline_last_eval_term INTEGER
         REFERENCES public.term(term_id),
+    start_term INTEGER
+        REFERENCES public.term(term_id),
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 -- ingnores capitalization
