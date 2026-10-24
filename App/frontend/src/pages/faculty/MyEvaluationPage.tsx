@@ -1,4 +1,5 @@
 
+import { Link } from 'react-router';
 import { useEvaluationStatus, useMyObservations, useMySignup } from '../../api/hooks/faculty';
 import type { EvaluationStatus, ObservationSummary } from '../../api/types';
 import { CalendarIcon, InfoIcon } from '../../components/icons';
@@ -26,9 +27,9 @@ function StatusCard({ status }: { status: EvaluationStatus }) {
           <p className="mt-2 text-sm text-gray-500">{`${RANK_LABEL[status.rank]}, evaluated ${interval}. ${last}`}</p>
         </div>
         {status.canSignUp && (
-          <button type="button" disabled title="Sign-up is not included in this sprint." className={buttonClass('primary', 'mt-8 shrink-0')}>
+          <Link to="/faculty/sign-up" className={buttonClass('primary', 'mt-8 shrink-0')}>
             Sign up to be observed
-          </button>
+          </Link>
         )}
       </div>
       {c && (
