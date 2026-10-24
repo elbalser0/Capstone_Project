@@ -64,7 +64,6 @@ export function mapEvaluationStatus(professor: ProfessorStatusRow, terms: TermRo
       ?? terms[terms.length - 1]);
   if (!currentTerm) throw new ApiError(503, 'TERM_DATA_UNAVAILABLE', 'The current academic term is unavailable.');
 
-  const currentIndex = terms.indexOf(currentTerm);
   const lastTermId = professor.last_completed_term_id ?? professor.baseline_last_eval_term;
   const lastIndex = lastTermId === null ? -1 : terms.findIndex((row) => row.term_id === lastTermId);
   if (lastTermId !== null && lastIndex < 0) {
@@ -76,11 +75,12 @@ export function mapEvaluationStatus(professor: ProfessorStatusRow, terms: TermRo
     throw new ApiError(503, 'TERM_DATA_UNAVAILABLE', 'The professor start term is unavailable.');
   }
   // First evaluation is due two years after starting; later evaluations use the rank interval.
-  const dueIndex = lastIndex < 0 ? startIndex + 4 : lastIndex + professor.eval_interval_years * 2;
-  if (dueIndex >= terms.length) {
-    throw new ApiError(503, 'TERM_DATA_UNAVAILABLE', 'The next evaluation term is unavailable.');
-  }
-  const status: DueStatus = currentIndex < dueIndex ? 'NOT_DUE' : currentIndex === dueIndex ? 'DUE' : 'OVERDUE';
+  const referenceTerm = terms[lastIndex < 0 ? startIndex : lastIndex];
+  const dueYear = referenceTerm.year + (lastIndex < 0 ? 2 : professor.eval_interval_years);
+  const dueSeason = referenceTerm.season;
+  const dueSemester = dueYear * 2 + (dueSeason === 'fall' ? 1 : 0);
+  const currentSemester = currentTerm.year * 2 + (currentTerm.season === 'fall' ? 1 : 0);
+  const status: DueStatus = currentSemester < dueSemester ? 'NOT_DUE' : currentSemester === dueSemester ? 'DUE' : 'OVERDUE';
 
   let phase: 'signup' | 'matching' | 'observation' | 'feedback' | 'closed' | null = null;
   if (cycle) {
@@ -94,7 +94,7 @@ export function mapEvaluationStatus(professor: ProfessorStatusRow, terms: TermRo
     status,
     rank: professor.rank,
     evalIntervalYears: professor.eval_interval_years,
-    dueTerm: term(terms[dueIndex]),
+    dueTerm: { season: dueSeason, year: dueYear, label: `${dueSeason === 'fall' ? 'Fall' : 'Spring'} ${dueYear}` },
     lastObservedTerm: lastIndex < 0 ? null : term(terms[lastIndex]),
     cycle: cycle ? {
       cycleId: String(cycle.cycle_id),

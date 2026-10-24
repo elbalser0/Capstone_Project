@@ -54,7 +54,6 @@ test('evaluation status uses the signed evaluation term and returns no cycle whe
     { term_id: 2, season: 'spring' as const, year: 2026, start_date: '2026-01-12', end_date: '2026-05-08' },
     { term_id: 3, season: 'fall' as const, year: 2026, start_date: '2026-08-24', end_date: '2026-12-11' },
     { term_id: 4, season: 'spring' as const, year: 2027, start_date: '2027-01-12', end_date: '2027-05-08' },
-    { term_id: 5, season: 'fall' as const, year: 2027, start_date: '2027-08-24', end_date: '2027-12-11' },
   ];
   const professor = {
     rank: 'assistant' as const, eval_interval_years: 1,
@@ -62,27 +61,26 @@ test('evaluation status uses the signed evaluation term and returns no cycle whe
   };
   const due = mapEvaluationStatus(professor, terms, null);
   assert.equal(due.status, 'DUE');
-  assert.equal(due.dueTerm.termId, '3');
+  assert.equal(due.dueTerm.label, 'Fall 2026');
   assert.equal(due.lastObservedTerm?.termId, '1');
   assert.equal(due.cycle, null);
   assert.equal(due.canSignUp, false);
 
   const recentlyObserved = mapEvaluationStatus({ ...professor, last_completed_term_id: 2 }, terms, null);
   assert.equal(recentlyObserved.status, 'NOT_DUE');
-  assert.equal(recentlyObserved.dueTerm.termId, '4');
+  assert.equal(recentlyObserved.dueTerm.label, 'Spring 2027');
   assert.equal(recentlyObserved.lastObservedTerm?.termId, '2');
 
   const neverEvaluated = mapEvaluationStatus({ ...professor, baseline_last_eval_term: null }, terms, null);
   assert.equal(neverEvaluated.status, 'NOT_DUE');
-  assert.equal(neverEvaluated.dueTerm.termId, '5');
+  assert.equal(neverEvaluated.dueTerm.label, 'Fall 2027');
   assert.equal(neverEvaluated.lastObservedTerm, null);
   const overdue = mapEvaluationStatus({ ...professor, today: '2027-02-01' }, terms, null);
   assert.equal(overdue.status, 'OVERDUE');
 
-  assert.throws(
-    () => mapEvaluationStatus({ ...professor, eval_interval_years: 2, last_completed_term_id: 2 }, terms, null),
-    { status: 503, code: 'TERM_DATA_UNAVAILABLE' },
-  );
+  const futureDue = mapEvaluationStatus({ ...professor, eval_interval_years: 2, last_completed_term_id: 2 }, terms, null);
+  assert.equal(futureDue.status, 'NOT_DUE');
+  assert.equal(futureDue.dueTerm.label, 'Spring 2028');
 });
 
 test('a new professor is not due until two years after the start term', () => {
@@ -97,11 +95,11 @@ test('a new professor is not due until two years after the start term', () => {
     rank: 'assistant' as const, eval_interval_years: 1,
     baseline_last_eval_term: null, start_term: 1, last_completed_term_id: null, today: '2026-10-22',
   };
-  const firstSemester = mapEvaluationStatus(professor, terms, null);
+  const firstSemester = mapEvaluationStatus(professor, terms.slice(0, 1), null);
   assert.equal(firstSemester.status, 'NOT_DUE');
-  assert.equal(firstSemester.dueTerm.termId, '5');
+  assert.deepEqual(firstSemester.dueTerm, { season: 'fall', year: 2028, label: 'Fall 2028' });
   assert.equal(firstSemester.lastObservedTerm, null);
-  assert.equal(mapEvaluationStatus({ ...professor, rank: 'associate', eval_interval_years: 2 }, terms, null).dueTerm.termId, '5');
+  assert.equal(mapEvaluationStatus({ ...professor, rank: 'associate', eval_interval_years: 2 }, terms.slice(0, 1), null).dueTerm.label, 'Fall 2028');
   assert.equal(mapEvaluationStatus({ ...professor, today: '2028-10-22' }, terms, null).status, 'DUE');
   assert.throws(
     () => mapEvaluationStatus({ ...professor, start_term: null }, terms, null),

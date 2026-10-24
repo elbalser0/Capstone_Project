@@ -57,9 +57,10 @@ signed observations or the professor's baseline term to calculate later due term
 For a professor with no prior evaluation, the first evaluation is due two years
 after `start_term`, so a first-semester professor is `NOT_DUE`.
 The current development database has no cycles yet, so `cycle` is `null` and
-`canSignUp` is `false` there. If the professor's next due semester is beyond the
-loaded term catalog, the endpoint returns `503 TERM_DATA_UNAVAILABLE` rather
-than reporting an earlier term as due.
+`canSignUp` is `false` there. The due semester is calculated from the known
+start or evaluation term; it can be shown before that future term has a
+database row. Its response includes the season, year, and label, without
+inventing a term ID or academic-calendar dates.
 
 `POST /api/signups` remains a protected scaffold and returns
 `501 NOT_IMPLEMENTED` for valid requests. Sign-ups require a `sectionId` and
@@ -68,9 +69,8 @@ authentication. This scaffold writes no sign-up data.
 
 Technical debt: add a department short code and section enrollment if the UI
 needs them. Expand the frontend meeting-day type if weekend sections are used.
-Implement sign-up writes in a separate PR. Load future terms through Fall 2028
-to return the new Fall 2026 hires' due term; until then those requests return
-`503 TERM_DATA_UNAVAILABLE`.
+Implement sign-up writes in a separate PR. Future term rows are still needed
+before scheduling evaluation cycles in those semesters.
 
 ## PostgreSQL connectivity
 
