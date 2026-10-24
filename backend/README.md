@@ -51,15 +51,26 @@ meeting times for a positive integer term ID. It returns `[]` when none match.
 The schema has no department short code or section enrollment, so course labels
 use the department name and `enrollment` is `null`.
 
-`GET /api/me/evaluation-status` and `POST /api/signups` are protected scaffolds
-that return `501 NOT_IMPLEMENTED` for valid requests. Sign-ups require a
-`sectionId` and at least one real `YYYY-MM-DD` proposed date; invalid input
-returns 400 after authentication. This scaffold writes no sign-up data.
+`GET /api/me/evaluation-status` returns the professor's due status, last and
+next evaluation terms, and the current cycle when one exists. It uses completed,
+signed observations or the professor's baseline term to calculate later due terms.
+For a professor with no prior evaluation, the first evaluation is due two years
+after `start_term`, so a first-semester professor is `NOT_DUE`.
+The current development database has no cycles yet, so `cycle` is `null` and
+`canSignUp` is `false` there. The due semester is calculated from the known
+start or evaluation term; it can be shown before that future term has a
+database row. Its response includes the season, year, and label, without
+inventing a term ID or academic-calendar dates.
+
+`POST /api/signups` remains a protected scaffold and returns
+`501 NOT_IMPLEMENTED` for valid requests. Sign-ups require a `sectionId` and
+at least one real `YYYY-MM-DD` proposed date; invalid input returns 400 after
+authentication. This scaffold writes no sign-up data.
 
 Technical debt: add a department short code and section enrollment if the UI
 needs them. Expand the frontend meeting-day type if weekend sections are used.
-Implement evaluation status from cycle/due data and sign-up writes in separate
-PRs.
+Implement sign-up writes in a separate PR. Future term rows are still needed
+before scheduling evaluation cycles in those semesters.
 
 ## PostgreSQL connectivity
 

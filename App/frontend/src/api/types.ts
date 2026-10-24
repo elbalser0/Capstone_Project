@@ -151,8 +151,8 @@ export interface EvaluationStatus {
   status: DueStatus;
   rank: Rank;
   evalIntervalYears: number;
-  /** The semester the next observation is due. */
-  dueTerm: Term;
+  /** Future due semesters may not have a term row or calendar dates yet. */
+  dueTerm: Pick<Term, 'season' | 'year' | 'label'>;
   lastObservedTerm: Term | null;
   cycle: Cycle | null;
   /** True while the cycle's sign-up window is open and this professor is DUE or OVERDUE without a sign-up. */
