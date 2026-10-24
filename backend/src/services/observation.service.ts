@@ -214,9 +214,9 @@ export async function submitSignedForm(observationId: number, user: AuthUser, an
     }
     await client.query(`
       UPDATE observation
-      SET other_comments = $2, observer_signature = $3, observer_signed_date = now(), last_saved_date = now()
+      SET other_comments = $2, observer_signed_date = now(), last_saved_date = now()
       WHERE observation_id = $1
-    `, [observationId, otherComments, user.displayName]);
+    `, [observationId, otherComments]);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -236,10 +236,10 @@ export async function signObservation(observationId: number, user: AuthUser) {
   }
   const updated = await getPool().query(`
     UPDATE observation
-    SET observee_signature = $2, observee_signed_date = now(), status = 'completed', last_saved_date = now()
+    SET observee_signed_date = now(), status = 'completed', last_saved_date = now()
     WHERE observation_id = $1 AND status = 'scheduled'
       AND observer_signed_date IS NOT NULL AND observee_signed_date IS NULL
-  `, [observationId, user.displayName]);
+  `, [observationId]);
   if (!updated.rowCount) {
     if (row.observee_signed_date) throw new ApiError(409, 'LOCKED', 'This record is signed by both and locked.');
     if (row.status !== 'scheduled') throw new ApiError(409, 'NOT_SCHEDULED', 'Only a scheduled observation can be signed.');
