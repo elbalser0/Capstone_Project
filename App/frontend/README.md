@@ -18,9 +18,10 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 
 - `/login`: email/password form, password visibility toggle, and sign-in errors.
 - `/faculty/evaluation`: faculty identity, evaluation status, deadlines, and observation history.
+- `/faculty/sign-up`: pick a course and the class meetings you'd like to be observed in.
 - `/committee/dashboard`: committee home with sample KPI results and a current-cycle summary.
 
-Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Sign-up and observation-record buttons are disabled because those screens are outside this sprint. Other later-sprint pages are not included.
+Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Faculty who are due can open sign-up from My evaluation. The observation record buttons are still disabled. Other later-sprint pages are not included.
 
 The dashboard keeps the existing prototype's KPI cards and CSV export; these are a preview of later dashboard work, not a claim that the backend implements those features.
 
@@ -48,7 +49,7 @@ npm test
 
 Set `VITE_USE_MOCKS=false` in `.env` and restart Vite to send requests through the existing `/api` development proxy to `http://localhost:3000`. The Express package is at the repository root under `backend/`, not inside `App/`.
 
-The backend foundation currently supplies `/api/health`, but not the application endpoints below. Sign-in against that backend stops at a 404 from `/api/me`; connected login and page-data testing remain blocked until the contracts are implemented and agreed with the backend team.
+The evaluation-status and sign-up write routes still return 501 on `main`, and there's no real Firebase sign-in yet, so the frontend only runs against the mock API for now.
 
 The current screens request:
 
@@ -57,6 +58,8 @@ The current screens request:
 - `GET /api/me/evaluation-status`
 - `GET /api/me/observations?as=observee`
 - `GET /api/me/signup`
+- `GET /api/me/courses?termId=...`
+- `POST /api/signups` with `{ sectionId, proposedDates }`
 - `GET /api/cycles/latest/kpis`
 - `GET /api/dashboard/due-by-rank`
 - `GET /api/dashboard/outstanding-observations`
