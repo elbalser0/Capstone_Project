@@ -18,10 +18,10 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 
 - `/login`: email/password form, password visibility toggle, and sign-in errors.
 - `/faculty/evaluation`: faculty identity, evaluation status, deadlines, and observation history.
-- `/faculty/sign-up`: one-course observation sign-up, preferred class meetings, loading/empty/error states, and submission feedback.
+- `/faculty/sign-up`: pick a course and the class meetings you'd like to be observed in.
 - `/committee/dashboard`: committee home with sample KPI results and a current-cycle summary.
 
-Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Eligible faculty can open sign-up from My evaluation. Observation-record buttons remain disabled because that route is not included. Other later-sprint pages are not included.
+Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Faculty who are due can open sign-up from My evaluation. The observation record buttons are still disabled. Other later-sprint pages are not included.
 
 The dashboard keeps the existing prototype's KPI cards and CSV export; these are a preview of later dashboard work, not a claim that the backend implements those features.
 
@@ -49,7 +49,7 @@ npm test
 
 Set `VITE_USE_MOCKS=false` in `.env` and restart Vite to send requests through the existing `/api` development proxy to `http://localhost:3000`. The Express package is at the repository root under `backend/`, not inside `App/`.
 
-Backend routes are being delivered separately. At the reviewed `main` revision (`9d3b0c1`), evaluation-status and sign-up writes still return 501; the frontend also lacks a real Firebase sign-in adapter. This change verifies the frontend with deterministic HTTP mocks and the browser mock API, not authenticated PostgreSQL persistence. Pending backend PRs must be integrated and their contracts checked before claiming a working real-server sign-up journey.
+The evaluation-status and sign-up write routes still return 501 on `main`, and there's no real Firebase sign-in yet, so the frontend only runs against the mock API for now.
 
 The current screens request:
 
