@@ -53,7 +53,9 @@ use the department name and `enrollment` is `null`.
 
 `GET /api/me/evaluation-status` returns the professor's due status, last and
 next evaluation terms, and the current cycle when one exists. It uses completed,
-signed observations and the professor's baseline term to calculate the due term.
+signed observations or the professor's baseline term to calculate later due terms.
+For a professor with no prior evaluation, the first evaluation is due two years
+after `start_term`, so a first-semester professor is `NOT_DUE`.
 The current development database has no cycles yet, so `cycle` is `null` and
 `canSignUp` is `false` there. If the professor's next due semester is beyond the
 loaded term catalog, the endpoint returns `503 TERM_DATA_UNAVAILABLE` rather
@@ -66,8 +68,9 @@ authentication. This scaffold writes no sign-up data.
 
 Technical debt: add a department short code and section enrollment if the UI
 needs them. Expand the frontend meeting-day type if weekend sections are used.
-Implement sign-up writes in a separate PR. A reliable first-semester indicator
-is still needed to distinguish new professors from those with no baseline term.
+Implement sign-up writes in a separate PR. Load future terms through Fall 2028
+to return the new Fall 2026 hires' due term; until then those requests return
+`503 TERM_DATA_UNAVAILABLE`.
 
 ## PostgreSQL connectivity
 

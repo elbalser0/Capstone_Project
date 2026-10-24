@@ -16,6 +16,7 @@ interface ProfessorStatusRow {
   rank: Rank;
   eval_interval_years: number;
   baseline_last_eval_term: number | null;
+  start_term: number | null;
   last_completed_term_id: number | null;
   today: string;
 }
@@ -70,8 +71,12 @@ export function mapEvaluationStatus(professor: ProfessorStatusRow, terms: TermRo
     throw new ApiError(503, 'TERM_DATA_UNAVAILABLE', 'The last evaluation term is unavailable.');
   }
 
-  // shortcut: a null baseline cannot distinguish first-semester hires from established never-evaluated faculty; add a start-term field.
-  const dueIndex = lastIndex < 0 ? currentIndex : lastIndex + professor.eval_interval_years * 2;
+  const startIndex = professor.start_term === null ? -1 : terms.findIndex((row) => row.term_id === professor.start_term);
+  if (lastIndex < 0 && startIndex < 0) {
+    throw new ApiError(503, 'TERM_DATA_UNAVAILABLE', 'The professor start term is unavailable.');
+  }
+  // First evaluation is due two years after starting; later evaluations use the rank interval.
+  const dueIndex = lastIndex < 0 ? startIndex + 4 : lastIndex + professor.eval_interval_years * 2;
   if (dueIndex >= terms.length) {
     throw new ApiError(503, 'TERM_DATA_UNAVAILABLE', 'The next evaluation term is unavailable.');
   }
@@ -117,7 +122,7 @@ export async function getEvaluationStatus(netid: string) {
   const db = getPool();
   const [professorResult, termResult] = await Promise.all([
     db.query<ProfessorStatusRow>(`
-      SELECT p.rank, p.eval_interval_years, p.baseline_last_eval_term,
+      SELECT p.rank, p.eval_interval_years, p.baseline_last_eval_term, p.start_term,
              CURRENT_DATE::text AS today,
              (SELECT ec.term_id
               FROM observation AS o
