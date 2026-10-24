@@ -32,6 +32,12 @@ const facultyKeys = {
   observation: (observationId: string) => ['observations', observationId] as const,
 };
 
+/** Refresh settings a page can add to a read, e.g. polling while answers are still coming in. */
+export interface LiveOptions {
+  refetchInterval?: number | false;
+  refetchOnWindowFocus?: boolean;
+}
+
 // ---------- Observee ----------
 
 /** GET /api/me/evaluation-status: the semester I am due and whether I am overdue. */
@@ -54,13 +60,13 @@ export function useCreateSignup() {
 }
 
 /** GET /api/me/signup: my sign-up for the current cycle, or null. */
-export function useMySignup() {
-  return useQuery({ queryKey: facultyKeys.signup, queryFn: () => api<Signup | null>('/me/signup') });
+export function useMySignup(options: LiveOptions = {}) {
+  return useQuery({ queryKey: facultyKeys.signup, queryFn: () => api<Signup | null>('/me/signup'), ...options });
 }
 
 /** GET /api/signups/{signupId}/candidates: up to 5 eligible observers. */
-export function useCandidates(signupId: string | undefined) {
-  return useQuery(withId(signupId, facultyKeys.candidates, (id) => api<Candidate[]>(`/signups/${id}/candidates`)));
+export function useCandidates(signupId: string | undefined, options: LiveOptions = {}) {
+  return useQuery({ ...withId(signupId, facultyKeys.candidates, (id) => api<Candidate[]>(`/signups/${id}/candidates`)), ...options });
 }
 
 /** POST /api/signups/{signupId}/requests: send requests to all or some candidates. */
@@ -74,8 +80,8 @@ export function useSendRequests(signupId: string) {
 }
 
 /** GET /api/me/requests/outgoing: the requests I sent and their status. */
-export function useOutgoingRequests() {
-  return useQuery({ queryKey: facultyKeys.outgoing, queryFn: () => api<ObservationRequest[]>('/me/requests/outgoing') });
+export function useOutgoingRequests(options: LiveOptions = {}) {
+  return useQuery({ queryKey: facultyKeys.outgoing, queryFn: () => api<ObservationRequest[]>('/me/requests/outgoing'), ...options });
 }
 
 /** GET /api/me/observations?as=observee: observations I received, past and current. */

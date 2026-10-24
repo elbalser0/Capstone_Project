@@ -2,6 +2,7 @@ import { Navigate, createBrowserRouter } from 'react-router';
 import { AppShell, type RouteHandle } from './components/AppShell';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/committee/DashboardPage';
+import { RequestsPage } from './pages/faculty/RequestsPage';
 import { MyEvaluationPage } from './pages/faculty/MyEvaluationPage';
 import { SignUpPage } from './pages/faculty/SignUpPage';
 
@@ -25,6 +26,11 @@ export const router = createBrowserRouter([
         path: '/committee/dashboard',
         element: <DashboardPage />,
         handle: { title: 'Cycle results (KPIs)' } satisfies RouteHandle,
+      },
+      {
+        path: '/faculty/requests',
+        element: <RequestsPage />,
+        handle: { title: 'My requests' } satisfies RouteHandle,
       },
     ],
   },

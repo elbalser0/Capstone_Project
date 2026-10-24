@@ -71,6 +71,12 @@ The frontend authentication adapter currently supports demo mode only. Firebase 
 
 Vite's proxy is development configuration; production API routing requires separate configuration. If switching away from a previous mock session, clear old site/service-worker data if mock interception persists.
 
+## Observation status
+
+The evaluation view distinguishes loading, failed requests, empty history, and current-cycle sign-up details. Signature labels use both the observation lifecycle and the available signature dates. When only a sign-up summary is available, the page does not guess whether the record is signed. Observation history is horizontally scrollable on narrower screens; record actions remain disabled until the record route is implemented.
+
+Run `npm test` for page-level regression tests using controlled HTTP responses. These tests do not establish real-backend authentication or database persistence. The evaluation-status, current sign-up, and observee observation-history endpoints must be available before connected status-view acceptance can be verified.
+
 ## Mock data
 
 `src/mocks/` contains the existing fixture, handlers, and rules from the frontend prototype. It retains shared support for later workflows, but does not expose their pages. Mock responses do not prove PostgreSQL integration, matching-rule acceptance, or real notifications.
@@ -81,3 +87,24 @@ npm run data -- --today 2026-10-20
 ```
 
 These commands replace the local fixture. The default snapshot uses September 8, 2026 so the displayed cycle is reproducible rather than following the computer's date. Mock changes reset on a full reload. The TypeScript fixture generator supports frontend development; it does not replace the database team's planned Python/CSV import.
+
+## My requests (`/faculty/requests`)
+
+Faculty choose observers from their recommended list, send requests, and follow the answers. The page shows one state at a time, from the sign-up, candidate, and outgoing-request reads:
+
+| State | Shown when |
+| --- | --- |
+| No sign-up | `GET /api/me/signup` returns `null` |
+| No observer list yet | no candidates and no requests; before the sign-up deadline it names the deadline, after it the message stays neutral |
+| Choose observers | at least one candidate has no request (candidates whose request expired are listed again) |
+| Requests sent | any request is pending, or accepted while the sign-up has no observation yet |
+| None accepted | requests exist but none is pending or accepted |
+| Matched | the sign-up has an observation |
+
+It sends `POST /api/signups/{signupId}/requests` with the selected `observerNetids`, never an empty list (the API reads an empty or missing list as every candidate). While requests are out, the list is not ready, or none were accepted, it re-reads `GET /api/me/signup`, `GET /api/signups/{signupId}/candidates` and `GET /api/me/requests/outgoing` every 30 seconds and when the window regains focus. It stops once matched or while the professor is choosing.
+
+Not settled with the backend yet:
+
+- The candidates response cannot tell "matching has not run" from "matching found no eligible observers", so after the deadline both show the same neutral message.
+- Resending to an observer whose request expired follows the mock API; the backend has not confirmed it.
+- `GET /api/signups/{signupId}/candidates`, `POST /api/signups/{signupId}/requests` and `GET /api/me/requests/outgoing` are not in the backend yet. This page is verified against the mock API and the tests in `RequestsPage.test.tsx` only.
