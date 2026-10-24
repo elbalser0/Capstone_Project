@@ -1,7 +1,8 @@
+import type { PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { mapCourseRows } from './course.service.js';
-import type { Rank } from './user.service.js';
+import { displayName, type Rank } from './user.service.js';
 
 // Rules from the Business Logic doc: a request expires 48 hours after it is sent,
 // and an observer can accept at most 3 observations per cycle.
@@ -17,6 +18,7 @@ interface RequestRow {
   status: RequestStatus;
   sent_date: Date;
   responded_date: Date | null;
+  db_now: Date;
   section_id: number;
   observer_netid: string;
   observer_first_name: string;
@@ -30,16 +32,22 @@ interface RequestRow {
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+// SQL condition for a request that has not passed its 48 hours. Uses the database clock,
+// the same clock the reads and status checks below use.
+const NOT_EXPIRED = `sent_date > now() - make_interval(hours => ${REQUEST_HOURS})`;
+
 export function expiresAt(sentDate: Date): Date {
   return new Date(sentDate.getTime() + REQUEST_HOURS * 60 * 60 * 1000);
 }
 
-// A pending request older than 48 hours counts as expired.
-export function requestStatus(status: RequestStatus, sentDate: Date, now = new Date()): RequestStatus {
+// A pending request older than 48 hours counts as expired. `now` comes from the database.
+export function requestStatus(status: RequestStatus, sentDate: Date, now: Date): RequestStatus {
   return status === 'pending' && expiresAt(sentDate) <= now ? 'expired' : status;
 }
 
-// Proposed dates come back with the class start time on that weekday.
+// Proposed dates come back with the class start time on that weekday. Proposed dates are
+// checked against the section's meeting days when the sign-up is created (#112), so an
+// empty startTime only appears for inconsistent data; this matches GET /api/cycles/{id}/signups.
 export function withStartTimes(section: CourseSection, dates: string[]) {
   return dates.map((date) => {
     const day = weekdays[new Date(`${date}T00:00:00Z`).getUTCDay()];
@@ -49,9 +57,11 @@ export function withStartTimes(section: CourseSection, dates: string[]) {
 }
 
 function person(netid: string, firstName: string, lastName: string, rank: Rank) {
-  return { netid, firstName, lastName, displayName: `Dr. ${firstName} ${lastName}`, rank };
+  return { netid, firstName, lastName, displayName: displayName(firstName, lastName), rank };
 }
 
+// shortcut: same section query as course.service listCourses, filtered by section IDs.
+// Move it into course.service once #104, #111, and #112 (which also edit that file) are merged.
 async function loadSections(sectionIds: number[]): Promise<Map<string, CourseSection>> {
   if (sectionIds.length === 0) return new Map();
   const { rows } = await getPool().query<CourseRow>(`
@@ -74,7 +84,7 @@ async function loadSections(sectionIds: number[]): Promise<Map<string, CourseSec
 async function fetchRequests(where: string, params: unknown[]) {
   const db = getPool();
   const { rows } = await db.query<RequestRow>(`
-    SELECT r.signup_id, r.status, r.sent_date, r.responded_date, s.section_id,
+    SELECT r.signup_id, r.status, r.sent_date, r.responded_date, now() AS db_now, s.section_id,
            obs.netid AS observer_netid, obs.first_name AS observer_first_name,
            obs.last_name AS observer_last_name, obs.rank AS observer_rank,
            ee.netid AS observee_netid, ee.first_name AS observee_first_name,
@@ -95,18 +105,21 @@ async function fetchRequests(where: string, params: unknown[]) {
       WHERE signup_id = ANY($1::int[]) ORDER BY date
     `, [[...new Set(rows.map((row) => row.signup_id))]]),
   ]);
+  const datesBySignup = new Map<number, string[]>();
+  for (const { signup_id: signupId, date } of dates.rows) {
+    datesBySignup.set(signupId, [...(datesBySignup.get(signupId) ?? []), date]);
+  }
 
   return rows.map((row) => {
     const section = sections.get(String(row.section_id));
     if (!section) throw new Error('The sign-up section is unavailable.');
-    const proposed = dates.rows.filter((item) => item.signup_id === row.signup_id).map((item) => item.date);
     return {
       signupId: String(row.signup_id),
       observer: person(row.observer_netid, row.observer_first_name, row.observer_last_name, row.observer_rank),
       observee: person(row.observee_netid, row.observee_first_name, row.observee_last_name, row.observee_rank),
       section,
-      proposedDates: withStartTimes(section, proposed),
-      status: requestStatus(row.status, row.sent_date),
+      proposedDates: withStartTimes(section, datesBySignup.get(row.signup_id) ?? []),
+      status: requestStatus(row.status, row.sent_date, row.db_now),
       sentDate: row.sent_date.toISOString(),
       respondedDate: row.responded_date ? row.responded_date.toISOString() : null,
       expiresAt: expiresAt(row.sent_date).toISOString(),
@@ -127,26 +140,51 @@ async function getRequest(signupId: number, observerNetid: string) {
   return request;
 }
 
-// PATCH .../confirm: the first observer to confirm is paired; other pending requests are cancelled.
-export async function confirmRequest(signupId: number, observerNetid: string, date: string) {
+// Runs work in a transaction. If ROLLBACK itself fails, the broken connection is
+// discarded instead of going back to the pool, and the original error is kept.
+async function inTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await getPool().connect();
+  let releaseError: Error | undefined;
   try {
     await client.query('BEGIN');
-    // Lock the sign-up so two observers cannot confirm the same sign-up at once.
-    const signup = await client.query<{ cycle_id: number }>(
-      'SELECT cycle_id FROM sign_up WHERE signup_id = $1 FOR UPDATE', [signupId]);
-    const request = await client.query<{ status: RequestStatus; sent_date: Date }>(`
-      SELECT status, sent_date FROM observation_request
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      releaseError = rollbackError as Error;
+    }
+    throw error;
+  } finally {
+    client.release(releaseError);
+  }
+}
+
+// PATCH .../confirm: the first observer to confirm is paired; other pending requests are cancelled.
+export async function confirmRequest(signupId: number, observerNetid: string, date: string) {
+  await inTransaction(async (client) => {
+    // One confirm at a time per observer, so two confirms at once can't pass the limit of 3.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('observer:' || $1))", [observerNetid]);
+    // One confirm at a time per sign-up, so two observers can't both be paired.
+    const signup = await client.query<{ cycle_id: number; today: string }>(
+      'SELECT cycle_id, CURRENT_DATE::text AS today FROM sign_up WHERE signup_id = $1 FOR UPDATE', [signupId]);
+    const request = await client.query<{ status: RequestStatus; sent_date: Date; db_now: Date }>(`
+      SELECT status, sent_date, now() AS db_now FROM observation_request
       WHERE signup_id = $1 AND observer_netid = $2 FOR UPDATE
     `, [signupId, observerNetid]);
     if (!signup.rows[0] || !request.rows[0]) throw new ApiError(404, 'NOT_FOUND', 'Request not found.');
-    const cycleId = signup.rows[0].cycle_id;
+    const { cycle_id: cycleId, today } = signup.rows[0];
 
-    const status = requestStatus(request.rows[0].status, request.rows[0].sent_date);
-    if (status !== 'pending') throw new ApiError(409, 'NOT_PENDING', `This request is ${status}.`);
-
-    const paired = await client.query('SELECT 1 FROM observation WHERE signup_id = $1', [signupId]);
-    if (paired.rowCount) throw new ApiError(409, 'ALREADY_PAIRED', 'Someone else accepted first.');
+    // The pairing and the limit are checked before the request status: both cancel other
+    // requests, so the observer would otherwise only ever see "This request is cancelled."
+    const paired = await client.query<{ observer_netid: string }>(
+      'SELECT observer_netid FROM observation WHERE signup_id = $1', [signupId]);
+    const pairedWithMe = paired.rows[0]?.observer_netid === observerNetid;
+    if (paired.rows[0] && !pairedWithMe) {
+      throw new ApiError(409, 'ALREADY_PAIRED', 'Someone else accepted first.');
+    }
 
     const accepted = await client.query<{ count: number }>(`
       SELECT count(*)::int AS count FROM observation AS o
@@ -154,13 +192,17 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
       WHERE o.observer_netid = $1 AND s.cycle_id = $2
     `, [observerNetid, cycleId]);
     const acceptedCount = accepted.rows[0].count;
-    if (acceptedCount >= MAX_ACCEPTED) {
+    if (!pairedWithMe && acceptedCount >= MAX_ACCEPTED) {
       throw new ApiError(409, 'LIMIT_REACHED', `You have already accepted ${MAX_ACCEPTED} observations this semester.`);
     }
+
+    const status = requestStatus(request.rows[0].status, request.rows[0].sent_date, request.rows[0].db_now);
+    if (status !== 'pending') throw new ApiError(409, 'NOT_PENDING', `This request is ${status}.`);
 
     const proposed = await client.query(
       'SELECT 1 FROM proposed_date WHERE signup_id = $1 AND date = $2::date', [signupId, date]);
     if (!proposed.rowCount) throw new ApiError(400, 'INVALID_DATE', 'Pick one of the proposed dates.');
+    if (date < today) throw new ApiError(400, 'DATE_PASSED', 'That date has already passed.');
 
     const template = await client.query<{ version_id: number }>(`
       SELECT version_id FROM template_version WHERE status = 'live'
@@ -176,26 +218,21 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
       UPDATE observation_request SET status = 'accepted', responded_date = now()
       WHERE signup_id = $1 AND observer_netid = $2
     `, [signupId, observerNetid]);
+    // Expired requests keep their history; only still-open requests are cancelled.
     await client.query(`
       UPDATE observation_request SET status = 'cancelled'
-      WHERE signup_id = $1 AND observer_netid <> $2 AND status = 'pending'
+      WHERE signup_id = $1 AND observer_netid <> $2 AND status = 'pending' AND ${NOT_EXPIRED}
     `, [signupId, observerNetid]);
-    // Reaching the limit cancels this observer's other pending requests in the cycle.
+    // Reaching the limit cancels this observer's other open requests in the cycle.
     if (acceptedCount + 1 >= MAX_ACCEPTED) {
       await client.query(`
         UPDATE observation_request AS r SET status = 'cancelled'
         FROM sign_up AS s
         WHERE s.signup_id = r.signup_id AND s.cycle_id = $1
-          AND r.observer_netid = $2 AND r.status = 'pending'
+          AND r.observer_netid = $2 AND r.status = 'pending' AND r.${NOT_EXPIRED}
       `, [cycleId, observerNetid]);
     }
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
   return getRequest(signupId, observerNetid);
 }
 
@@ -203,9 +240,8 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
 export async function declineRequest(signupId: number, observerNetid: string) {
   const updated = await getPool().query(`
     UPDATE observation_request SET status = 'declined', responded_date = now()
-    WHERE signup_id = $1 AND observer_netid = $2 AND status = 'pending'
-      AND sent_date > now() - make_interval(hours => $3)
-  `, [signupId, observerNetid, REQUEST_HOURS]);
+    WHERE signup_id = $1 AND observer_netid = $2 AND status = 'pending' AND ${NOT_EXPIRED}
+  `, [signupId, observerNetid]);
   const request = await getRequest(signupId, observerNetid);
   if (!updated.rowCount) throw new ApiError(409, 'NOT_PENDING', `This request is ${request.status}.`);
   return request;

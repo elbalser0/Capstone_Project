@@ -49,4 +49,6 @@ test('proposed dates get the class start time for that weekday', () => {
     { date: '2026-10-27', startTime: '14:30' },
     { date: '2026-10-29', startTime: '16:00' },
   ]);
+  // A Wednesday is not a meeting day for this section, so no start time is invented.
+  assert.deepEqual(withStartTimes(section, ['2026-10-28']), [{ date: '2026-10-28', startTime: '' }]);
 });
