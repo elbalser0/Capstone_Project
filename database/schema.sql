@@ -21,7 +21,7 @@ CREATE TABLE public.professor (
     netid TEXT PRIMARY KEY,
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL,
     rank TEXT NOT NULL
         CHECK (rank IN ('assistant', 'associate', 'full')),
     dept_id INTEGER NOT NULL
@@ -36,28 +36,28 @@ CREATE TABLE public.professor (
 CREATE UNIQUE INDEX professor_email_lower_unique
 ON public.professor (LOWER(email));
 
-CREATE FUNCTION public.set_professor_eval_interval()
+CREATE OR REPLACE FUNCTION public.set_professor_eval_interval()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    IF NEW.eval_interval_years IS NULL THEN
-        NEW.eval_interval_years :=
-            CASE NEW.rank
-                WHEN 'assistant' THEN 1
-                WHEN 'associate' THEN 2
-                WHEN 'full' THEN 2
-            END;
-    END IF;
+    NEW.eval_interval_years :=
+        CASE NEW.rank
+            WHEN 'assistant' THEN 1
+            WHEN 'associate' THEN 2
+            WHEN 'full' THEN 2
+        END;
 
     RETURN NEW;
 END;
 $$;
 
 CREATE TRIGGER professor_eval_interval_default
-BEFORE INSERT ON public.professor
+BEFORE INSERT OR UPDATE OF rank
+ON public.professor
 FOR EACH ROW
 EXECUTE FUNCTION public.set_professor_eval_interval();
+
 
 CREATE TABLE public.ac_member (
     netid TEXT PRIMARY KEY
@@ -222,9 +222,9 @@ CREATE TABLE public.alert (
     alert_type TEXT NOT NULL
         CHECK (
             alert_type IN (
-                'no observer',
-                'insufficient observers',
-                'no acceptance'
+                'no_observer',
+                'insufficient_observers',
+                'no_acceptance'
             )
         ),
     created_date TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -268,6 +268,10 @@ CREATE TABLE public.template_version (
     )
 );
 
+CREATE UNIQUE INDEX template_version_one_live_unique
+ON public.template_version (status)
+WHERE status = 'live';
+
 CREATE TABLE public.template_question (
     question_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     version_id INTEGER NOT NULL
@@ -288,13 +292,18 @@ CREATE TABLE public.template_question (
 
 CREATE TABLE public.observation (
     observation_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
     signup_id INTEGER NOT NULL UNIQUE
         REFERENCES public.sign_up(signup_id),
+
     observer_netid TEXT NOT NULL
         REFERENCES public.professor(netid),
+
     version_id INTEGER NOT NULL
         REFERENCES public.template_version(version_id),
+
     scheduled_date DATE NOT NULL,
+
     status TEXT NOT NULL DEFAULT 'scheduled'
         CHECK (
             status IN (
@@ -303,42 +312,32 @@ CREATE TABLE public.observation (
                 'not_completed'
             )
         ),
+
     observee_signed_date TIMESTAMPTZ,
     observer_signed_date TIMESTAMPTZ,
     reason_not_completed TEXT,
     issue_file_key TEXT,
     other_comments TEXT,
-    last_saved_date TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    observer_signature TEXT,
-    observee_signature TEXT,
+    last_saved_date TIMESTAMPTZ,
 
     FOREIGN KEY (signup_id, observer_netid)
         REFERENCES public.observation_request(
             signup_id,
             observer_netid
         ),
+
     FOREIGN KEY (signup_id, scheduled_date)
         REFERENCES public.proposed_date(signup_id, date),
-    CHECK (
-        (observer_signature IS NULL AND observer_signed_date IS NULL)
-        OR
-        (observer_signature IS NOT NULL AND observer_signed_date IS NOT NULL)
-    ),
 
-    CHECK (
-        (observee_signature IS NULL AND observee_signed_date IS NULL)
-        OR
-        (observee_signature IS NOT NULL AND observee_signed_date IS NOT NULL)
-    ),
-    CHECK (
-        status <> 'completed'
-        OR (
-            observer_signature IS NOT NULL
-            AND observee_signature IS NOT NULL
-            AND observer_signed_date IS NOT NULL
-            AND observee_signed_date IS NOT NULL
-        )
-    ),
+    CONSTRAINT observation_completed_requires_signed_dates
+        CHECK (
+            status <> 'completed'
+            OR (
+                observer_signed_date IS NOT NULL
+                AND observee_signed_date IS NOT NULL
+            )
+        ),
+
     CHECK (
         status <> 'not_completed'
         OR NULLIF(BTRIM(reason_not_completed), '') IS NOT NULL
@@ -355,6 +354,73 @@ CREATE TABLE public.observation_answer (
 
     PRIMARY KEY (observation_id, question_id)
 );
+
+-- Validate the question and rating for each observation answer.
+CREATE OR REPLACE FUNCTION public.validate_observation_answer()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    observation_version INTEGER;
+    question_version INTEGER;
+    minimum_rating INTEGER;
+    maximum_rating INTEGER;
+BEGIN
+    SELECT version_id
+    INTO observation_version
+    FROM public.observation
+    WHERE observation_id = NEW.observation_id
+    FOR SHARE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Observation % does not exist',
+            NEW.observation_id;
+    END IF;
+
+    SELECT version_id, rating_min, rating_max
+    INTO question_version, minimum_rating, maximum_rating
+    FROM public.template_question
+    WHERE question_id = NEW.question_id
+    FOR SHARE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Question % does not exist',
+            NEW.question_id;
+    END IF;
+
+    IF question_version IS DISTINCT FROM observation_version THEN
+        RAISE EXCEPTION
+            'Question % does not belong to observation % template version',
+            NEW.question_id, NEW.observation_id;
+    END IF;
+
+    -- Allow an unanswered rating while saving a draft.
+    IF NEW.rating IS NOT NULL THEN
+        IF (minimum_rating IS NOT NULL
+            AND NEW.rating < minimum_rating)
+           OR
+           (maximum_rating IS NOT NULL
+            AND NEW.rating > maximum_rating)
+        THEN
+            RAISE EXCEPTION
+                'Rating % is outside the allowed range % to % for question %',
+                NEW.rating, minimum_rating, maximum_rating,
+                NEW.question_id;
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS observation_answer_validation
+ON public.observation_answer;
+
+CREATE TRIGGER observation_answer_validation
+BEFORE INSERT OR UPDATE
+ON public.observation_answer
+FOR EACH ROW
+EXECUTE FUNCTION public.validate_observation_answer();
 
 CREATE TABLE public.forwarded_observation (
     forward_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -397,6 +463,128 @@ CREATE TABLE public.kpi_result (
 
     PRIMARY KEY (cycle_id, kpi_code)
 );
+-- 1. A sign-up must use a section taught by the observee.
+ALTER TABLE public.section
+    ADD CONSTRAINT section_id_instructor_unique
+    UNIQUE (section_id, instructor_id);
+
+ALTER TABLE public.sign_up
+    ADD CONSTRAINT signup_section_owner_fk
+    FOREIGN KEY (section_id, observee_netid)
+    REFERENCES public.section (section_id, instructor_id);
+
+
+-- 2. Validate the section's term when a sign-up is created or changed.
+-- Also prevent changing the observee to an existing matched observer.
+CREATE OR REPLACE FUNCTION public.validate_signup()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    section_term INTEGER;
+    cycle_term INTEGER;
+BEGIN
+    SELECT term_id
+    INTO section_term
+    FROM public.section
+    WHERE section_id = NEW.section_id
+    FOR SHARE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Section % does not exist',
+            NEW.section_id;
+    END IF;
+
+    SELECT term_id
+    INTO cycle_term
+    FROM public.eval_cycle
+    WHERE cycle_id = NEW.cycle_id
+    FOR SHARE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Evaluation cycle % does not exist',
+            NEW.cycle_id;
+    END IF;
+
+    IF section_term IS DISTINCT FROM cycle_term THEN
+        RAISE EXCEPTION
+            'The section and evaluation cycle must belong to the same term';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM public.observer_match
+        WHERE signup_id = NEW.signup_id
+          AND observer_netid = NEW.observee_netid
+    ) THEN
+        RAISE EXCEPTION
+            'Professor % cannot observe their own sign-up',
+            NEW.observee_netid;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS signup_validation
+ON public.sign_up;
+
+CREATE TRIGGER signup_validation
+BEFORE INSERT OR UPDATE OF section_id, cycle_id, observee_netid
+ON public.sign_up
+FOR EACH ROW
+EXECUTE FUNCTION public.validate_signup();
+
+
+-- 3. Reject a professor being matched as their own observer.
+CREATE OR REPLACE FUNCTION public.prevent_self_observation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    signup_observee TEXT;
+BEGIN
+    SELECT observee_netid
+    INTO signup_observee
+    FROM public.sign_up
+    WHERE signup_id = NEW.signup_id
+    FOR SHARE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Sign-up % does not exist',
+            NEW.signup_id;
+    END IF;
+
+    IF NEW.observer_netid = signup_observee THEN
+        RAISE EXCEPTION
+            'Professor % cannot observe their own sign-up',
+            NEW.observer_netid;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS observer_match_no_self_observation
+ON public.observer_match;
+
+CREATE TRIGGER observer_match_no_self_observation
+BEFORE INSERT OR UPDATE OF signup_id, observer_netid
+ON public.observer_match
+FOR EACH ROW
+EXECUTE FUNCTION public.prevent_self_observation();
+
+CREATE INDEX IF NOT EXISTS section_instructor_idx
+    ON public.section (instructor_id);
+
+CREATE INDEX IF NOT EXISTS section_term_idx
+    ON public.section (term_id);
+
+CREATE INDEX IF NOT EXISTS observer_match_observer_idx
+    ON public.observer_match (observer_netid);
+
+CREATE INDEX IF NOT EXISTS observation_observer_idx
+    ON public.observation (observer_netid);
 
 COMMIT;
 
