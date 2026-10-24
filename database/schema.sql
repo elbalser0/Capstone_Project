@@ -34,7 +34,7 @@ CREATE TABLE public.professor (
         REFERENCES public.term(term_id),
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
--- ingnores capitalization
+
 CREATE UNIQUE INDEX professor_email_lower_unique
 ON public.professor (LOWER(email));
 
@@ -320,7 +320,7 @@ CREATE TABLE public.observation (
     reason_not_completed TEXT,
     issue_file_key TEXT,
     other_comments TEXT,
-    last_saved_date TIMESTAMPTZ,
+    last_saved_date TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     FOREIGN KEY (signup_id, observer_netid)
         REFERENCES public.observation_request(
@@ -587,6 +587,111 @@ CREATE INDEX IF NOT EXISTS observer_match_observer_idx
 
 CREATE INDEX IF NOT EXISTS observation_observer_idx
     ON public.observation (observer_netid);
+
+-- Lock completed observations
+CREATE OR REPLACE FUNCTION public.lock_completed_observation()
+RETURNS trigger LANGUAGE plpgsql AS $function$
+BEGIN
+    IF OLD.status = 'completed' THEN
+        RAISE EXCEPTION 'Observation % is completed and cannot be changed', OLD.observation_id;
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS observation_completed_lock ON public.observation;
+CREATE TRIGGER observation_completed_lock
+BEFORE UPDATE OR DELETE ON public.observation
+FOR EACH ROW EXECUTE FUNCTION public.lock_completed_observation();
+
+-- Lock answers of completed observations
+CREATE OR REPLACE FUNCTION public.lock_completed_observation_answer()
+RETURNS trigger LANGUAGE plpgsql AS $function$
+DECLARE
+    obs_id INTEGER;
+    obs_status TEXT;
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        obs_id := NEW.observation_id;
+    ELSE
+        obs_id := OLD.observation_id;
+    END IF;
+
+    SELECT status INTO obs_status
+    FROM public.observation
+    WHERE observation_id = obs_id;
+
+    IF obs_status = 'completed' THEN
+        RAISE EXCEPTION 'Observation % is completed; its answers cannot be changed', obs_id;
+    END IF;
+
+    IF TG_OP = 'UPDATE' AND NEW.observation_id IS DISTINCT FROM OLD.observation_id THEN
+        SELECT status INTO obs_status
+        FROM public.observation
+        WHERE observation_id = NEW.observation_id;
+        IF obs_status = 'completed' THEN
+            RAISE EXCEPTION 'Observation % is completed; its answers cannot be changed', NEW.observation_id;
+        END IF;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS observation_answer_completed_lock ON public.observation_answer;
+CREATE TRIGGER observation_answer_completed_lock
+BEFORE INSERT OR UPDATE OR DELETE ON public.observation_answer
+FOR EACH ROW EXECUTE FUNCTION public.lock_completed_observation_answer();
+
+-- Block a section term change that would break the term match
+CREATE OR REPLACE FUNCTION public.protect_section_term()
+RETURNS trigger LANGUAGE plpgsql AS $function$
+BEGIN
+    IF NEW.term_id IS DISTINCT FROM OLD.term_id AND EXISTS (
+        SELECT 1
+        FROM public.sign_up s
+        JOIN public.eval_cycle ec ON ec.cycle_id = s.cycle_id
+        WHERE s.section_id = NEW.section_id
+          AND ec.term_id IS DISTINCT FROM NEW.term_id
+    ) THEN
+        RAISE EXCEPTION 'Cannot change term of section %: it has sign-ups in an evaluation cycle of another term', NEW.section_id;
+    END IF;
+    RETURN NEW;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS section_term_protect ON public.section;
+CREATE TRIGGER section_term_protect
+BEFORE UPDATE OF term_id ON public.section
+FOR EACH ROW EXECUTE FUNCTION public.protect_section_term();
+
+-- Block a cycle term change that would break the term match
+CREATE OR REPLACE FUNCTION public.protect_cycle_term()
+RETURNS trigger LANGUAGE plpgsql AS $function$
+BEGIN
+    IF NEW.term_id IS DISTINCT FROM OLD.term_id AND EXISTS (
+        SELECT 1
+        FROM public.sign_up s
+        JOIN public.section sec ON sec.section_id = s.section_id
+        WHERE s.cycle_id = NEW.cycle_id
+          AND sec.term_id IS DISTINCT FROM NEW.term_id
+    ) THEN
+        RAISE EXCEPTION 'Cannot change term of cycle %: it has sign-ups for a section of another term', NEW.cycle_id;
+    END IF;
+    RETURN NEW;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS cycle_term_protect ON public.eval_cycle;
+CREATE TRIGGER cycle_term_protect
+BEFORE UPDATE OF term_id ON public.eval_cycle
+FOR EACH ROW EXECUTE FUNCTION public.protect_cycle_term();
 
 COMMIT;
 
