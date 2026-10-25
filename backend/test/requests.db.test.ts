@@ -47,7 +47,13 @@ async function addAccepted(signupId: number, observer: string) {
 const futureDate = async (days: number) => (await sql(`SELECT ${dayOffset(days)}::text AS d`)).rows[0].d as string;
 
 describe('confirm and decline against the database', { skip }, () => {
+  // Database test files run in parallel and all rebuild the schema, so each one holds
+  // this lock for its whole run and the others wait their turn.
+  let lock: import('pg').PoolClient;
+
   before(async () => {
+    lock = await getPool().connect();
+    await lock.query('SELECT pg_advisory_lock(4485)');
     await sql('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await sql(await readFile(new URL('../../database/schema.sql', import.meta.url), 'utf8'));
   });
@@ -81,6 +87,8 @@ describe('confirm and decline against the database', { skip }, () => {
   });
 
   after(async () => {
+    await lock.query('SELECT pg_advisory_unlock(4485)');
+    lock.release();
     await closePool();
   });
 
