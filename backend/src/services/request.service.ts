@@ -204,6 +204,29 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
     if (!proposed.rowCount) throw new ApiError(400, 'INVALID_DATE', 'Pick one of the proposed dates.');
     if (date < today) throw new ApiError(400, 'DATE_PASSED', 'That date has already passed.');
 
+    // The observer can't be teaching their own class while the observed class meets.
+    // Compares the observee's class on that weekday with the observer's classes in the same term.
+    const conflict = await client.query<{ course_num: string; section_num: string; start_time: string; end_time: string }>(`
+      SELECT oc.course_num, os.section_num, om.start_time::text, om.end_time::text
+      FROM sign_up AS s
+      JOIN section AS es ON es.section_id = s.section_id
+      JOIN meeting_time AS em ON em.section_id = es.section_id
+        AND em.day_of_week = lower(trim(to_char($3::date, 'FMDay')))
+      JOIN section AS os ON os.term_id = es.term_id AND os.instructor_id = $2
+      JOIN course AS oc ON oc.course_id = os.course_id
+      JOIN meeting_time AS om ON om.section_id = os.section_id
+        AND om.day_of_week = em.day_of_week
+        AND om.start_time < em.end_time AND em.start_time < om.end_time
+      WHERE s.signup_id = $1
+      ORDER BY om.start_time
+      LIMIT 1
+    `, [signupId, observerNetid, date]);
+    if (conflict.rows[0]) {
+      const c = conflict.rows[0];
+      throw new ApiError(409, 'SCHEDULE_CONFLICT',
+        `You teach ${c.course_num}.${c.section_num} from ${c.start_time.slice(0, 5)} to ${c.end_time.slice(0, 5)} at that time.`);
+    }
+
     const template = await client.query<{ version_id: number }>(`
       SELECT version_id FROM template_version WHERE status = 'live'
       ORDER BY published_date DESC, version_id DESC LIMIT 1

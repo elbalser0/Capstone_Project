@@ -166,6 +166,45 @@ describe('confirm and decline against the database', { skip }, () => {
     assert.equal(await status(1, 'obsA'), 'pending');
   });
 
+  test('confirm rejects a date when the observer teaches at the same time', async () => {
+    // obsA teaches 10:30-11:20 on Mondays; the observed class meets 10:00-10:50 every day.
+    await sql(`INSERT INTO section (course_id, term_id, section_num, instructor_id, class_mode)
+               VALUES (1, 1, '900', 'obsA', 'in-person')`);
+    await sql(`INSERT INTO meeting_time (section_id, day_of_week, start_time, end_time)
+               VALUES (7, 'monday', '10:30', '11:20'), (7, 'tuesday', '10:50', '12:05')`);
+    await sql(`DELETE FROM proposed_date WHERE signup_id = 1`);
+    const { rows } = await sql(`
+      SELECT d::date::text AS date, lower(trim(to_char(d, 'FMDay'))) AS day
+      FROM generate_series(CURRENT_DATE + 1, CURRENT_DATE + 7, interval '1 day') AS d`);
+    const dayDate = (day: string) => rows.find((row) => row.day === day).date as string;
+    for (const day of ['monday', 'tuesday', 'wednesday']) {
+      await sql('INSERT INTO proposed_date (signup_id, date) VALUES (1, $1)', [dayDate(day)]);
+    }
+    await addRequest(1, 'obsA');
+
+    // Monday overlaps (10:30 starts before 10:50 ends).
+    await assert.rejects(confirmRequest(1, 'obsA', dayDate('monday')),
+      { code: 'SCHEDULE_CONFLICT', message: 'You teach 1337.900 from 10:30 to 11:20 at that time.' });
+    assert.equal(await status(1, 'obsA'), 'pending');
+    // Tuesday's class starts exactly when the observed class ends, so it doesn't overlap.
+    const result = await confirmRequest(1, 'obsA', dayDate('tuesday'));
+    assert.equal(result.status, 'accepted');
+  });
+
+  test('a class in a different term does not count as a conflict', async () => {
+    await sql(`INSERT INTO term (season, year, start_date, end_date)
+               VALUES ('spring', 2021, ${dayOffset(100)}, ${dayOffset(200)})`);
+    await sql(`INSERT INTO section (course_id, term_id, section_num, instructor_id, class_mode)
+               VALUES (1, 2, '901', 'obsA', 'in-person')`);
+    for (const day of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']) {
+      await sql(`INSERT INTO meeting_time (section_id, day_of_week, start_time, end_time)
+                 VALUES (7, $1, '10:00', '10:50')`, [day]);
+    }
+    await addRequest(1, 'obsA');
+    const result = await confirmRequest(1, 'obsA', await futureDate(7));
+    assert.equal(result.status, 'accepted');
+  });
+
   test('decline sets the request to declined', async () => {
     await addRequest(1, 'obsA');
     const result = await declineRequest(1, 'obsA');
