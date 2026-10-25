@@ -34,6 +34,7 @@ interface CycleRow {
   rank: Rank;
   has_match: boolean;
   signup_id: number | null;
+  on_due_roster: boolean;
 }
 
 function term(row: TermRow) {
@@ -113,7 +114,8 @@ export function mapEvaluationStatus(professor: ProfessorStatusRow, terms: TermRo
       surveyOpensDate: nextDay(cycle.observation_deadline),
       phase,
     } : null,
-    canSignUp: Boolean(cycle && status !== 'NOT_DUE' && cycle.signup_id === null && today <= cycle.signup_deadline),
+    // Eligibility is frozen at cycle kickoff; status and dueTerm reflect current professor data.
+    canSignUp: Boolean(cycle && cycle.on_due_roster && cycle.signup_id === null && today <= cycle.signup_deadline),
     signupId: cycle?.signup_id == null ? null : String(cycle.signup_id),
   };
 }
@@ -147,6 +149,8 @@ export async function getEvaluationStatus(netid: string) {
     SELECT c.cycle_id, c.term_id, c.started_by, c.start_date::text,
            c.signup_deadline::text, c.observation_deadline::text, c.feedback_deadline::text,
            p.first_name, p.last_name, p.rank, s.signup_id,
+           EXISTS (SELECT 1 FROM eval_due AS d
+                   WHERE d.cycle_id = c.cycle_id AND d.netid = $1) AS on_due_roster,
            EXISTS (SELECT 1 FROM observer_match AS m
                    JOIN sign_up AS ms ON ms.signup_id = m.signup_id
                    WHERE ms.cycle_id = c.cycle_id) AS has_match

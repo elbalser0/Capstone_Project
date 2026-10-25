@@ -13,6 +13,12 @@ function isIsoDate(value: unknown): value is string {
   return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
 }
 
+function parsePositiveId(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null;
+  const id = Number(value);
+  return Number.isInteger(id) && id <= 2147483647 ? id : null;
+}
+
 facultyMeRouter.get('/evaluation-status', async (req, res) => {
   res.status(200).json(await getEvaluationStatus(req.user!.netid));
 });
@@ -22,11 +28,8 @@ facultyMeRouter.get('/signup', async (req, res) => {
 });
 
 facultyMeRouter.get('/courses', async (req, res) => {
-  if (typeof req.query.termId !== 'string' || !/^[1-9]\d*$/.test(req.query.termId)) {
-    throw new ApiError(400, 'INVALID_TERM_ID', 'termId must be a positive integer.');
-  }
-  const termId = Number(req.query.termId);
-  if (!Number.isSafeInteger(termId)) {
+  const termId = parsePositiveId(req.query.termId);
+  if (termId === null) {
     throw new ApiError(400, 'INVALID_TERM_ID', 'termId must be a positive integer.');
   }
   res.status(200).json(await listCourses(req.user!.netid, termId));
@@ -38,10 +41,10 @@ signupsRouter.post('/', async (req, res) => {
     throw new ApiError(400, 'INVALID_SIGNUP', 'Provide a sectionId and at least one proposed date.');
   }
   const { sectionId, proposedDates } = body as Record<string, unknown>;
-  if (typeof sectionId !== 'string' || !/^[1-9]\d*$/.test(sectionId) ||
-      Number(sectionId) > 2147483647 ||
+  const parsedSectionId = parsePositiveId(sectionId);
+  if (parsedSectionId === null ||
       !Array.isArray(proposedDates) || proposedDates.length === 0 || !proposedDates.every(isIsoDate)) {
     throw new ApiError(400, 'INVALID_SIGNUP', 'Provide a sectionId and proposedDates as YYYY-MM-DD dates.');
   }
-  res.status(201).json(await createSignup(req.user!, Number(sectionId), proposedDates));
+  res.status(201).json(await createSignup(req.user!, parsedSectionId, proposedDates));
 });

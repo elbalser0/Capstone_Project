@@ -75,6 +75,8 @@ deadline. It writes the sign-up and its proposed dates together, returning 201
 with the new sign-up. It returns 409 when sign-up is closed, the professor is
 not on the cycle's due roster, or they already signed up. Cycle creation must
 populate `eval_due` before this write endpoint can accept sign-ups.
+For an active cycle, `GET /api/me/evaluation-status` uses that saved roster for
+`canSignUp`; its `status` and `dueTerm` still reflect current professor records.
 
 Technical debt: add a department short code and section enrollment if the UI
 needs them. Expand the frontend meeting-day type if weekend sections are used.
