@@ -8,6 +8,7 @@ import {
   updateCycle,
   type Deadlines,
 } from '../services/cycle.service.js';
+import { listCycleSignups } from '../services/cycle-signups.service.js';
 
 // Mounted at /api/cycles (after requireLogin)
 export const cyclesRouter = Router();
@@ -30,6 +31,11 @@ function positiveId(value: unknown, code: string, name: string): number {
 
 cyclesRouter.get('/current', async (_req, res) => {
   res.status(200).json(await getCurrentCycle());
+});
+
+cyclesRouter.get('/:cycleId/signups', requireAC, async (req, res) => {
+  const cycleId = positiveId(req.params.cycleId, 'INVALID_CYCLE_ID', 'cycleId');
+  res.status(200).json(await listCycleSignups(cycleId));
 });
 
 cyclesRouter.post('/', requireAC, async (req, res) => {
