@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { AddressInfo } from 'node:net';
+import express from 'express';
 import { getPool } from '../src/db/pool.js';
+import { errorHandler } from '../src/middleware/error.middleware.js';
+import { signupsRouter } from '../src/routes/faculty-scaffold.routes.js';
 import { createSignup, validateSignupDates } from '../src/services/signup.service.js';
 import type { CourseSection } from '../src/services/course.service.js';
 import type { AuthUser } from '../src/services/user.service.js';
@@ -94,6 +98,26 @@ test('signup and proposed dates are written in one transaction', async () => {
     assert.ok(calls.find(({ sql }) => sql.includes('FROM eval_due'))?.sql.includes('FOR SHARE'));
     assert.deepEqual(calls.find(({ sql }) => sql.includes('INSERT INTO proposed_date'))?.params, [9, ['2026-11-02', '2026-11-04']]);
     assert.deepEqual(release, { called: true, error: undefined });
+
+    const routeApp = express();
+    routeApp.use(express.json());
+    routeApp.use((req, _res, next) => { req.user = user; next(); });
+    routeApp.use('/api/signups', signupsRouter);
+    routeApp.use(errorHandler);
+    const server = routeApp.listen(0, '127.0.0.1');
+    try {
+      await new Promise<void>((resolve, reject) => server.once('listening', resolve).once('error', reject));
+      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/signups`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sectionId: '42', proposedDates: ['2026-11-02', '2026-11-04'] }),
+      });
+      assert.equal(response.status, 201);
+      const body = await response.json();
+      assert.equal(body.signupId, '9');
+      assert.deepEqual(body.proposedDates, signup.proposedDates);
+    } finally {
+      if (server.listening) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
 
     calls.length = 0;
     release = { called: false };
