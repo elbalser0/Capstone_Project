@@ -4,13 +4,14 @@ import type { AddressInfo } from 'node:net';
 import { app } from '../src/app.js';
 import { mapCourseRows } from '../src/services/course.service.js';
 import { mapEvaluationStatus } from '../src/services/evaluation-status.service.js';
+import { mapSignup } from '../src/services/signup.service.js';
 
 test('faculty endpoints require a login', async () => {
   const server = app.listen(0, '127.0.0.1');
   try {
     await new Promise<void>((resolve, reject) => server.once('listening', resolve).once('error', reject));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    for (const path of ['/api/me', '/api/me/courses?termId=1', '/api/me/evaluation-status']) {
+    for (const path of ['/api/me', '/api/me/courses?termId=1', '/api/me/evaluation-status', '/api/me/signup']) {
       const response = await fetch(`${base}${path}`);
       assert.equal(response.status, 401, path);
     }
@@ -138,4 +139,53 @@ test('evaluation status opens sign-up only for due professors without a signup',
   const closed = mapEvaluationStatus({ ...professor, today: '2026-11-01' }, terms, cycle);
   assert.equal(closed.canSignUp, false);
   assert.equal(closed.cycle?.phase, 'matching');
+});
+
+test('a sign-up includes proposed meeting times and any scheduled observation', () => {
+  const user = {
+    netid: 'ada', firstName: 'Ada', lastName: 'Lovelace', displayName: 'Dr. Ada Lovelace',
+    email: 'ada@example.edu', rank: 'associate' as const,
+    department: { deptId: '5', deptName: 'Computer Science' }, role: 'faculty' as const,
+  };
+  const section = mapCourseRows([
+    {
+      section_id: 42, section_num: '002', class_mode: 'in-person' as const,
+      course_num: '1337', title: 'Computer Science I', course_level: 1000,
+      dept_name: 'Computer Science', term_id: 7, season: 'fall' as const,
+      year: 2026, start_date: '2026-08-24', end_date: '2026-12-11',
+      day_of_week: 'monday', start_time: '08:30:00', end_time: '09:45:00', room: 'ECSS 2.410',
+    },
+    {
+      section_id: 42, section_num: '002', class_mode: 'in-person' as const,
+      course_num: '1337', title: 'Computer Science I', course_level: 1000,
+      dept_name: 'Computer Science', term_id: 7, season: 'fall' as const,
+      year: 2026, start_date: '2026-08-24', end_date: '2026-12-11',
+      day_of_week: 'wednesday', start_time: '10:00:00', end_time: '11:15:00', room: 'ECSS 2.410',
+    },
+  ])[0];
+  const row = {
+    signup_id: 9, cycle_id: 3, section_id: 42, term_id: 7, submit_date: '2026-10-20',
+    observation_id: null, observation_status: null, scheduled_date: null,
+    observer_netid: null, observer_first_name: null, observer_last_name: null, observer_rank: null,
+  };
+  const signup = mapSignup(row, user, section, ['2026-11-02', '2026-11-04']);
+  assert.equal(signup.signupId, '9');
+  assert.equal(signup.observee.email, 'ada@example.edu');
+  assert.equal(signup.section.sectionId, '42');
+  assert.deepEqual(signup.proposedDates, [
+    { date: '2026-11-02', startTime: '08:30' },
+    { date: '2026-11-04', startTime: '10:00' },
+  ]);
+  assert.throws(() => mapSignup(row, user, section, ['2026-11-03']), /not a class meeting/);
+  assert.equal(signup.observation, null);
+
+  const observed = mapSignup({
+    ...row, observation_id: 12, observation_status: 'scheduled', scheduled_date: '2026-11-04',
+    observer_netid: 'grace', observer_first_name: 'Grace', observer_last_name: 'Hopper', observer_rank: 'full',
+  }, user, section, []);
+  assert.deepEqual(observed.observation, {
+    observationId: '12',
+    observer: { netid: 'grace', firstName: 'Grace', lastName: 'Hopper', displayName: 'Dr. Grace Hopper', rank: 'full' },
+    status: 'scheduled', scheduledDate: '2026-11-04',
+  });
 });

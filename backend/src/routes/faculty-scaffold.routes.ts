@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ApiError } from '../middleware/error.middleware.js';
 import { listCourses } from '../services/course.service.js';
 import { getEvaluationStatus } from '../services/evaluation-status.service.js';
+import { getMySignup } from '../services/signup.service.js';
 
 export const facultyMeRouter = Router();
 export const signupsRouter = Router();
@@ -19,6 +20,10 @@ function isIsoDate(value: unknown): value is string {
 
 facultyMeRouter.get('/evaluation-status', async (req, res) => {
   res.status(200).json(await getEvaluationStatus(req.user!.netid));
+});
+
+facultyMeRouter.get('/signup', async (req, res) => {
+  res.status(200).json(await getMySignup(req.user!));
 });
 
 facultyMeRouter.get('/courses', async (req, res) => {
