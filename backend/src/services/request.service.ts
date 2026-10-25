@@ -1,5 +1,5 @@
-import type { PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
+import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { mapCourseRows } from './course.service.js';
 import { displayName, type Rank } from './user.service.js';
@@ -138,28 +138,6 @@ async function getRequest(signupId: number, observerNetid: string) {
   const [request] = await fetchRequests('r.signup_id = $1 AND r.observer_netid = $2', [signupId, observerNetid]);
   if (!request) throw new ApiError(404, 'NOT_FOUND', 'Request not found.');
   return request;
-}
-
-// Runs work in a transaction. If ROLLBACK itself fails, the broken connection is
-// discarded instead of going back to the pool, and the original error is kept.
-async function inTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await getPool().connect();
-  let releaseError: Error | undefined;
-  try {
-    await client.query('BEGIN');
-    const result = await work(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (rollbackError) {
-      releaseError = rollbackError as Error;
-    }
-    throw error;
-  } finally {
-    client.release(releaseError);
-  }
 }
 
 // PATCH .../confirm: the first observer to confirm is paired; other pending requests are cancelled.

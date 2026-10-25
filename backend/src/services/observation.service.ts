@@ -1,4 +1,5 @@
 import { getPool } from '../db/pool.js';
+import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { mapCourseRows } from './course.service.js';
 import type { AuthUser, Rank } from './user.service.js';
@@ -191,9 +192,7 @@ export async function submitSignedForm(observationId: number, user: AuthUser, an
   if (row.observer_netid !== user.netid) {
     throw new ApiError(403, 'FORBIDDEN', 'Only the observer fills in the observation form.');
   }
-  const client = await getPool().connect();
-  try {
-    await client.query('BEGIN');
+  await inTransaction(async (client) => {
     const current = await client.query<{ status: ObservationStatus; observee_signed_date: Date | null }>(
       'SELECT status, observee_signed_date FROM observation WHERE observation_id = $1 FOR UPDATE', [observationId]);
     if (current.rows[0].observee_signed_date) throw new ApiError(409, 'LOCKED', 'This record is signed by both and locked.');
@@ -217,13 +216,7 @@ export async function submitSignedForm(observationId: number, user: AuthUser, an
       SET other_comments = $2, observer_signed_date = now(), last_saved_date = now()
       WHERE observation_id = $1
     `, [observationId, otherComments]);
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
   return getObservation(observationId, user);
 }
 
