@@ -35,10 +35,12 @@ cyclesRouter.get('/current', async (_req, res) => {
 cyclesRouter.post('/', requireAC, async (req, res) => {
   const body = bodyObject(req.body);
   const termId = positiveId(body.termId, 'INVALID_TERM_ID', 'termId');
+  const deadlines: Record<string, string> = {};
   for (const field of deadlineFields) {
     if (!isIsoDate(body[field])) throw new ApiError(400, 'INVALID_CYCLE', `${field} must be a YYYY-MM-DD date.`);
+    deadlines[field] = body[field];
   }
-  res.status(201).json(await createCycle(req.user!.netid, termId, body as unknown as Deadlines));
+  res.status(201).json(await createCycle(req.user!.netid, termId, deadlines as unknown as Deadlines));
 });
 
 cyclesRouter.patch('/:cycleId', requireAC, async (req, res) => {
