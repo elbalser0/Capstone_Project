@@ -12,7 +12,7 @@ const DEMO_ACCOUNTS = [
 ];
 
 export function LoginPage() {
-  const { session, signIn } = useAuth();
+  const { session, ready, signIn } = useAuth();
   const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,6 +22,7 @@ export function LoginPage() {
 
   // Signing in sets the session, and this redirect then returns to the page that asked for it.
   const from = (location.state as { from?: string } | null)?.from;
+  if (!ready) return <p role="status" className="p-8 text-sm text-gray-500">Checking your sign-in…</p>;
   if (session) return <Navigate to={from && from !== '/login' ? from : '/faculty/evaluation'} replace />;
 
   const onSubmit = async (e: FormEvent) => {
