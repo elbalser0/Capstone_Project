@@ -68,15 +68,20 @@ when present. Proposed dates must be class meetings of that section; inconsisten
 stored dates fail instead of being shown with an invented time. It returns JSON
 `null` when no cycle or sign-up exists.
 
-`POST /api/signups` remains a protected scaffold and returns
-`501 NOT_IMPLEMENTED` for valid requests. Sign-ups require a `sectionId` and
-at least one real `YYYY-MM-DD` proposed date; invalid input returns 400 after
-authentication. This scaffold writes no sign-up data.
+`POST /api/signups` creates a sign-up for a due professor in the latest started
+cycle. It requires a section the professor teaches in that cycle's term and
+unique class meeting dates after the sign-up deadline and by the observation
+deadline. It writes the sign-up and its proposed dates together, returning 201
+with the new sign-up. It returns 409 when sign-up is closed, the professor is
+not on the cycle's due roster, or they already signed up. Cycle creation must
+populate `eval_due` before this write endpoint can accept sign-ups.
+For an active cycle, `GET /api/me/evaluation-status` uses that saved roster for
+`canSignUp`; its `status` and `dueTerm` still reflect current professor records.
 
 Technical debt: add a department short code and section enrollment if the UI
 needs them. Expand the frontend meeting-day type if weekend sections are used.
-Implement sign-up writes in a separate PR. Future term rows are still needed
-before scheduling evaluation cycles in those semesters.
+Future term rows are still needed before scheduling evaluation cycles in those
+semesters.
 
 ## PostgreSQL connectivity
 

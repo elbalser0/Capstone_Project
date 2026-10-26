@@ -32,7 +32,7 @@ export function dueProfessors(professors: ProfessorDueRow[], terms: TermInput[],
     cycle_id: newCycle.cycleId, term_id: newCycle.termId, started_by: newCycle.startedBy,
     start_date: newCycle.startDate, signup_deadline: newCycle.signupDeadline,
     observation_deadline: newCycle.observationDeadline, feedback_deadline: newCycle.feedbackDeadline,
-    first_name: '', last_name: '', rank: 'full', has_match: false, signup_id: null,
+    first_name: '', last_name: '', rank: 'full', has_match: false, signup_id: null, on_due_roster: false,
   };
   const due: DueRecord[] = [];
   for (const professor of professors) {

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
+import express from 'express';
 import { app } from '../src/app.js';
+import { errorHandler } from '../src/middleware/error.middleware.js';
+import { signupsRouter } from '../src/routes/faculty-scaffold.routes.js';
 import { mapCourseRows } from '../src/services/course.service.js';
 import { mapEvaluationStatus } from '../src/services/evaluation-status.service.js';
 import { mapSignup } from '../src/services/signup.service.js';
@@ -25,6 +28,34 @@ test('faculty endpoints require a login', async () => {
     if (server.listening) {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+  }
+});
+
+test('signup route rejects invalid section IDs and dates', async () => {
+  const routeApp = express();
+  routeApp.use(express.json());
+  routeApp.use('/api/signups', signupsRouter);
+  routeApp.use(errorHandler);
+  const server = routeApp.listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve, reject) => server.once('listening', resolve).once('error', reject));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/signups`;
+    for (const body of [
+      {}, { sectionId: 'abc', proposedDates: ['2026-11-02'] },
+      { sectionId: '0', proposedDates: ['2026-11-02'] },
+      { sectionId: '-1', proposedDates: ['2026-11-02'] },
+      { sectionId: '2147483648', proposedDates: ['2026-11-02'] },
+      { sectionId: '1' }, { sectionId: '1', proposedDates: '2026-11-02' },
+      { sectionId: '1', proposedDates: ['2026-02-30'] },
+    ]) {
+      const response = await fetch(url, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 400, JSON.stringify(body));
+      assert.equal((await response.json()).error.code, 'INVALID_SIGNUP');
+    }
+  } finally {
+    if (server.listening) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
 
@@ -108,7 +139,7 @@ test('a new professor is not due until two years after the start term', () => {
   );
 });
 
-test('evaluation status opens sign-up only for due professors without a signup', () => {
+test('evaluation status uses the saved due roster for sign-up eligibility', () => {
   const terms = [
     { term_id: 1, season: 'fall' as const, year: 2025, start_date: '2025-08-24', end_date: '2025-12-11' },
     { term_id: 2, season: 'spring' as const, year: 2026, start_date: '2026-01-12', end_date: '2026-05-08' },
@@ -123,7 +154,7 @@ test('evaluation status opens sign-up only for due professors without a signup',
     cycle_id: 7, term_id: 3, started_by: 'ac1', start_date: '2026-10-01',
     signup_deadline: '2026-10-30', observation_deadline: '2026-11-30', feedback_deadline: '2026-12-15',
     first_name: 'Ada', last_name: 'Lovelace', rank: 'full' as const,
-    has_match: false, signup_id: null,
+    has_match: false, signup_id: null, on_due_roster: true,
   };
   const open = mapEvaluationStatus(professor, terms, cycle);
   assert.equal(open.canSignUp, true);
@@ -133,9 +164,12 @@ test('evaluation status opens sign-up only for due professors without a signup',
   const signedUp = mapEvaluationStatus(professor, terms, { ...cycle, signup_id: 42 });
   assert.equal(signedUp.canSignUp, false);
   assert.equal(signedUp.signupId, '42');
-  const notDue = mapEvaluationStatus({ ...professor, last_completed_term_id: 2 }, terms, cycle);
-  assert.equal(notDue.status, 'NOT_DUE');
-  assert.equal(notDue.canSignUp, false);
+  const noRoster = mapEvaluationStatus(professor, terms, { ...cycle, on_due_roster: false });
+  assert.equal(noRoster.status, 'DUE');
+  assert.equal(noRoster.canSignUp, false);
+  const correctedHistory = mapEvaluationStatus({ ...professor, last_completed_term_id: 2 }, terms, cycle);
+  assert.equal(correctedHistory.status, 'NOT_DUE');
+  assert.equal(correctedHistory.canSignUp, true);
   const closed = mapEvaluationStatus({ ...professor, today: '2026-11-01' }, terms, cycle);
   assert.equal(closed.canSignUp, false);
   assert.equal(closed.cycle?.phase, 'matching');

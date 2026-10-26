@@ -1,3 +1,4 @@
+import type { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 
 export interface CourseRow {
@@ -85,8 +86,8 @@ export function mapCourseRows(rows: CourseRow[]): CourseSection[] {
   return [...sections.values()];
 }
 
-export async function listCourses(netid: string, termId: number): Promise<CourseSection[]> {
-  const { rows } = await getPool().query<CourseRow>(`
+export async function listCourses(netid: string, termId: number, db: Pool | PoolClient = getPool()): Promise<CourseSection[]> {
+  const { rows } = await db.query<CourseRow>(`
     SELECT s.section_id, s.section_num, s.class_mode,
            c.course_num, c.title, c.course_level, d.dept_name,
            t.term_id, t.season, t.year,
