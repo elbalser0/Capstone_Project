@@ -49,7 +49,7 @@ npm test
 
 Set `VITE_USE_MOCKS=false` in `.env` and restart Vite to send requests through the existing `/api` development proxy to `http://localhost:3000`. The Express package is at the repository root under `backend/`, not inside `App/`.
 
-The evaluation-status and sign-up write routes still return 501 on `main`, and there's no real Firebase sign-in yet, so the frontend only runs against the mock API for now.
+The evaluation-status and sign-up write routes still return 501 on `main`, and several read routes are missing, so those pages show errors against the real backend.
 
 The current screens request:
 
@@ -67,7 +67,7 @@ The current screens request:
 
 Response types are in `src/api/types.ts`. Roles are `faculty` and `AC`; committee membership adds access without removing faculty access. Backend routes must enforce their own permissions. Client-side route guards are not server authorization.
 
-The frontend authentication adapter currently supports demo mode only. Firebase sign-in/token handling is still pending. Changing `VITE_AUTH_MODE` alone does not implement Firebase.
+`VITE_AUTH_MODE` is `demo` (any password, mock API) or `firebase` (Firebase email/password; the backend verifies the ID token and decides the role through `GET /api/me`). Firebase mode needs `VITE_USE_MOCKS=false`, the `VITE_FIREBASE_*` variables from `.env.example`, and the backend running with its own service-account key and database. Any other value is an error.
 
 Vite's proxy is development configuration; production API routing requires separate configuration. If switching away from a previous mock session, clear old site/service-worker data if mock interception persists.
 

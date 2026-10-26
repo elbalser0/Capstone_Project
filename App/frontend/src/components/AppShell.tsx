@@ -55,12 +55,13 @@ function TopBar({ title, mode }: { title: string; mode: Mode }) {
 
 /** Signed-in layout. Pages under /committee need role "AC"; everyone else is sent to their Faculty pages. */
 export function AppShell() {
-  const { session } = useAuth();
+  const { session, ready } = useAuth();
   const { pathname } = useLocation();
   const matches = useMatches();
   const me = useMe({ enabled: Boolean(session) });
   const [override, setOverride] = useState<string | null>(null);
 
+  if (!ready) return <p role="status" className="p-8 text-sm text-gray-500">Checking your sign-in…</p>;
   if (!session) return <Navigate to="/login" replace state={{ from: pathname }} />;
   const mode: Mode = pathname.startsWith('/committee') ? 'committee' : 'faculty';
   if (mode === 'committee' && me.data && me.data.role !== 'AC') return <Navigate to={LANDING.faculty} replace />;
