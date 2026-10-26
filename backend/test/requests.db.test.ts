@@ -1,28 +1,12 @@
-// Database tests for confirm/decline. They need a separate, empty PostgreSQL database:
-//   TEST_DATABASE_URL=postgresql://.../assessment_test npm test
-// The database name must end in "_test" because these tests drop and rebuild the schema.
-// Without TEST_DATABASE_URL they are skipped.
+// Database tests for confirm/decline. Setup is in db-test-helper.ts.
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { after, before, beforeEach, describe, test } from 'node:test';
+import { beforeEach, describe, test } from 'node:test';
+import { skip, sql, useTestDatabase } from './db-test-helper.js';
 
-const url = process.env.TEST_DATABASE_URL?.trim();
-const skip = !url
-  ? 'set TEST_DATABASE_URL to run database tests'
-  : !new URL(url).pathname.replace('/', '').endsWith('_test')
-    ? 'TEST_DATABASE_URL must point to a database whose name ends in _test'
-    : false;
-if (!skip) process.env.DATABASE_URL = url;
-
-const { getPool, closePool } = await import('../src/db/pool.js');
 const { confirmRequest, declineRequest } = await import('../src/services/request.service.js');
 
 const OBSERVEE = ['ee1', 'ee2', 'ee3', 'ee4', 'ee5', 'ee6'];
 const dayOffset = (days: number) => `(CURRENT_DATE + ${days})::date`;
-
-async function sql(text: string, params: unknown[] = []) {
-  return getPool().query(text, params);
-}
 
 async function status(signupId: number, observer: string) {
   const { rows } = await sql('SELECT status FROM observation_request WHERE signup_id = $1 AND observer_netid = $2', [signupId, observer]);
@@ -47,16 +31,7 @@ async function addAccepted(signupId: number, observer: string) {
 const futureDate = async (days: number) => (await sql(`SELECT ${dayOffset(days)}::text AS d`)).rows[0].d as string;
 
 describe('confirm and decline against the database', { skip }, () => {
-  // Database test files run in parallel and all rebuild the schema, so each one holds
-  // this lock for its whole run and the others wait their turn.
-  let lock: import('pg').PoolClient;
-
-  before(async () => {
-    lock = await getPool().connect();
-    await lock.query('SELECT pg_advisory_lock(4485)');
-    await sql('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-    await sql(await readFile(new URL('../../database/schema.sql', import.meta.url), 'utf8'));
-  });
+  useTestDatabase();
 
   beforeEach(async () => {
     await sql(`TRUNCATE department, term, professor RESTART IDENTITY CASCADE`);
@@ -84,12 +59,6 @@ describe('confirm and decline against the database', { skip }, () => {
       await sql(`INSERT INTO proposed_date (signup_id, date)
                  VALUES ($1, ${dayOffset(7)}), ($1, ${dayOffset(9)}), ($1, ${dayOffset(-3)})`, [index + 1]);
     }
-  });
-
-  after(async () => {
-    await lock.query('SELECT pg_advisory_unlock(4485)');
-    lock.release();
-    await closePool();
   });
 
   test('confirm creates the observation and sets the request to accepted', async () => {

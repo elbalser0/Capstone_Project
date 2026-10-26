@@ -1,36 +1,26 @@
-// Database tests for the observation form and signing. Same setup as requests.db.test.ts:
-//   TEST_DATABASE_URL=postgresql://.../assessment_test npm test
-// The database name must end in "_test" because these tests drop and rebuild the schema.
-// Without TEST_DATABASE_URL they are skipped.
+// Database tests for the observation form and signing. Setup is in db-test-helper.ts.
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { after, before, beforeEach, describe, test } from 'node:test';
+import { beforeEach, describe, test } from 'node:test';
+import { getPool, skip, sql, useTestDatabase } from './db-test-helper.js';
 import type { AuthUser } from '../src/services/user.service.js';
 
-const url = process.env.TEST_DATABASE_URL?.trim();
-const skip = !url
-  ? 'set TEST_DATABASE_URL to run database tests'
-  : !new URL(url).pathname.replace('/', '').endsWith('_test')
-    ? 'TEST_DATABASE_URL must point to a database whose name ends in _test'
-    : false;
-if (!skip) process.env.DATABASE_URL = url;
-
-const { getPool, closePool } = await import('../src/db/pool.js');
 const { getObservation, listAssignments, signObservation, submitSignedForm } = await import('../src/services/observation.service.js');
 const { inTransaction } = await import('../src/db/transaction.js');
 
-function user(netid: string): AuthUser {
+function user(netid: string, role: AuthUser['role'] = 'faculty'): AuthUser {
   return {
     netid, firstName: netid, lastName: 'Test', displayName: `Dr. ${netid} Test`, email: `${netid}@example.edu`,
-    rank: 'full', department: { deptId: '1', deptName: 'Computer Science' }, role: 'faculty',
+    rank: 'full', department: { deptId: '1', deptName: 'Computer Science' }, role,
   };
 }
 const observer = user('obs');
 const observee = user('ee');
 const someoneElse = user('other');
 
-async function sql(text: string, params: unknown[] = []) {
-  return getPool().query(text, params);
+// The observee signs the version they just read, like the client does.
+async function sign(signer: AuthUser) {
+  const { lastSavedDate } = await getObservation(1, signer);
+  return signObservation(1, signer, lastSavedDate);
 }
 
 async function observationRow() {
@@ -51,16 +41,7 @@ const fullForm = [
 ];
 
 describe('observation form and signing against the database', { skip }, () => {
-  // Database test files run in parallel and all rebuild the schema, so each one holds
-  // this lock for its whole run and the others wait their turn.
-  let lock: import('pg').PoolClient;
-
-  before(async () => {
-    lock = await getPool().connect();
-    await lock.query('SELECT pg_advisory_lock(4485)');
-    await sql('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-    await sql(await readFile(new URL('../../database/schema.sql', import.meta.url), 'utf8'));
-  });
+  useTestDatabase();
 
   beforeEach(async () => {
     await sql(`TRUNCATE department, term, professor RESTART IDENTITY CASCADE`);
@@ -81,20 +62,15 @@ describe('observation form and signing against the database', { skip }, () => {
     await sql(`INSERT INTO course (dept_id, course_num, title, course_level) VALUES (1, '1337', 'Computer Science I', 1000)`);
     await sql(`INSERT INTO section (course_id, term_id, section_num, instructor_id, class_mode) VALUES (1, 1, '001', 'ee', 'in-person')`);
     await sql(`INSERT INTO meeting_time (section_id, day_of_week, start_time, end_time)
-               VALUES (1, lower(trim(to_char(CURRENT_DATE + 7, 'FMDay'))), '10:00', '10:50')`);
+               VALUES (1, lower(trim(to_char(CURRENT_DATE, 'FMDay'))), '10:00', '10:50')`);
     await sql(`INSERT INTO sign_up (cycle_id, observee_netid, section_id) VALUES (1, 'ee', 1)`);
-    await sql(`INSERT INTO proposed_date (signup_id, date) VALUES (1, CURRENT_DATE + 7)`);
+    // The observation is today, so the form can be filled in. A week later (same weekday) is a second proposed date.
+    await sql(`INSERT INTO proposed_date (signup_id, date) VALUES (1, CURRENT_DATE), (1, CURRENT_DATE + 7)`);
     await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obs')`);
     await sql(`INSERT INTO observation_request (signup_id, observer_netid, status, responded_date)
                VALUES (1, 'obs', 'accepted', now())`);
     await sql(`INSERT INTO observation (signup_id, observer_netid, version_id, scheduled_date)
-               VALUES (1, 'obs', 1, CURRENT_DATE + 7)`);
-  });
-
-  after(async () => {
-    await lock.query('SELECT pg_advisory_unlock(4485)');
-    lock.release();
-    await closePool();
+               VALUES (1, 'obs', 1, CURRENT_DATE)`);
   });
 
   test('the observer submits the form: answers are saved and the observer has signed', async () => {
@@ -127,20 +103,20 @@ describe('observation form and signing against the database', { skip }, () => {
   });
 
   test('the observee cannot sign before the observer submits the form', async () => {
-    await assert.rejects(signObservation(1, observee), { code: 'FORM_NOT_SUBMITTED' });
+    await assert.rejects(sign(observee), { code: 'FORM_NOT_SUBMITTED' });
     assert.equal((await observationRow()).observee_signed_date, null);
   });
 
   test('after the observee signs, the record is completed and locked', async () => {
     await submitSignedForm(1, observer, fullForm, 'Nice class');
-    const signed = await signObservation(1, observee);
+    const signed = await sign(observee);
     assert.equal(signed.status, 'completed');
     assert.ok(signed.observerSignedDate);
     assert.ok(signed.observeeSignedDate);
 
     await assert.rejects(submitSignedForm(1, observer, [{ questionId: '1', rating: 1, comment: '' }, { questionId: '2', rating: 1, comment: '' }], 'Changed'),
       { code: 'LOCKED' });
-    await assert.rejects(signObservation(1, observee), { code: 'LOCKED' });
+    await assert.rejects(sign(observee), { code: 'LOCKED' });
     assert.deepEqual((await savedAnswers()).map((a) => a.rating), [4, 5]);
     assert.equal((await observationRow()).other_comments, 'Nice class');
   });
@@ -148,10 +124,96 @@ describe('observation form and signing against the database', { skip }, () => {
   test('only the observer fills in the form and only the observee signs; others get 404', async () => {
     await assert.rejects(submitSignedForm(1, observee, fullForm, ''), { code: 'FORBIDDEN' });
     await submitSignedForm(1, observer, fullForm, '');
-    await assert.rejects(signObservation(1, observer), { code: 'FORBIDDEN' });
+    await assert.rejects(sign(observer), { code: 'FORBIDDEN' });
     await assert.rejects(getObservation(1, someoneElse), { code: 'NOT_FOUND' });
     await assert.rejects(submitSignedForm(1, someoneElse, fullForm, ''), { code: 'NOT_FOUND' });
-    await assert.rejects(signObservation(1, someoneElse), { code: 'NOT_FOUND' });
+    await assert.rejects(signObservation(1, someoneElse, new Date().toISOString()), { code: 'NOT_FOUND' });
+  });
+
+  test('the form shows each question\'s rating scale from this observation\'s template version', async () => {
+    await sql(`UPDATE template_question SET min_label = 'Poor', max_label = 'Excellent' WHERE question_id = 1`);
+    const { answers } = await getObservation(1, observer);
+    assert.deepEqual(answers.map((a) => [a.ratingMin, a.ratingMax, a.minLabel, a.maxLabel, a.isRequired]),
+      [[1, 5, 'Poor', 'Excellent', true], [1, 5, null, null, true]]);
+  });
+
+  test('the form cannot be submitted before the observation date', async () => {
+    await sql(`UPDATE observation SET scheduled_date = CURRENT_DATE + 7 WHERE observation_id = 1`);
+    await assert.rejects(submitSignedForm(1, observer, fullForm, ''), { code: 'NOT_YET_OBSERVED' });
+    assert.deepEqual(await savedAnswers(), []);
+    assert.equal((await observationRow()).observer_signed_date, null);
+  });
+
+  test('a missed observation cannot be filled in', async () => {
+    await sql(`UPDATE observation SET status = 'not_completed', reason_not_completed = 'Class cancelled' WHERE observation_id = 1`);
+    await assert.rejects(submitSignedForm(1, observer, fullForm, ''), { code: 'NOT_SCHEDULED' });
+    assert.deepEqual(await savedAnswers(), []);
+  });
+
+  test('an answer for a question from another template version is rejected', async () => {
+    await sql(`INSERT INTO template_version (version_no, status, created_by) VALUES (2, 'draft', 'ac1')`);
+    await sql(`INSERT INTO template_question (version_id, order_no, title, wording, rating_min, rating_max, is_required)
+               VALUES (2, 1, 'Other', 'From version 2', 1, 5, true)`);
+    await assert.rejects(submitSignedForm(1, observer, [...fullForm, { questionId: '3', rating: 3, comment: '' }], ''),
+      { code: 'INVALID_ANSWERS' });
+    assert.deepEqual(await savedAnswers(), []);
+  });
+
+  test('the observee cannot sign a version they never saw', async () => {
+    await submitSignedForm(1, observer, fullForm, 'First');
+    const seen = (await getObservation(1, observee)).lastSavedDate;
+    await submitSignedForm(1, observer, [{ questionId: '1', rating: 2, comment: '' }, { questionId: '2', rating: 2, comment: '' }], 'Changed');
+    await assert.rejects(signObservation(1, observee, seen), { code: 'STALE_FORM' });
+    assert.equal((await observationRow()).observee_signed_date, null);
+    // After reloading, the observee signs the new version.
+    const signed = await sign(observee);
+    assert.equal(signed.status, 'completed');
+    assert.equal(signed.otherComments, 'Changed');
+  });
+
+  test('double-clicking Sign: one request signs, the other gets LOCKED', async () => {
+    await submitSignedForm(1, observer, fullForm, '');
+    const { lastSavedDate } = await getObservation(1, observee);
+    // Hold the row so both requests read it before either UPDATE runs, like a real double-click.
+    const holder = await getPool().connect();
+    let both: Promise<PromiseSettledResult<unknown>[]>;
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM observation WHERE observation_id = 1 FOR UPDATE');
+      both = Promise.allSettled([signObservation(1, observee, lastSavedDate), signObservation(1, observee, lastSavedDate)]);
+      // Wait until both requests are blocked on the UPDATE, but fail instead of hanging if they never get there.
+      const deadline = Date.now() + 5000;
+      while ((await sql(`SELECT count(*)::int AS n FROM pg_stat_activity
+                         WHERE datname = current_database() AND wait_event_type = 'Lock'
+                           AND query LIKE '%UPDATE observation%'`)).rows[0].n < 2) {
+        if (Date.now() > deadline) throw new Error('both sign requests never reached the UPDATE');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    } finally {
+      await holder.query('COMMIT');
+      holder.release();
+    }
+    const results = await both;
+    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+    const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    assert.equal(failed.reason.code, 'LOCKED');
+  });
+
+  test('an AC member who is not part of the observation can read it but not fill it in or sign it', async () => {
+    const ac = user('ac1', 'AC');
+    const detail = await getObservation(1, ac);
+    assert.equal(detail.observee.netid, 'ee');
+    await assert.rejects(submitSignedForm(1, ac, fullForm, ''), { code: 'FORBIDDEN' });
+    await submitSignedForm(1, observer, fullForm, '');
+    await assert.rejects(sign(ac), { code: 'FORBIDDEN' });
+    assert.equal((await observationRow()).observee_signed_date, null);
+  });
+
+  test('AC members who are the observer or observee still fill in and sign as usual', async () => {
+    await sql(`INSERT INTO ac_member (netid) VALUES ('obs'), ('ee')`);
+    await submitSignedForm(1, user('obs', 'AC'), fullForm, '');
+    const signed = await sign(user('ee', 'AC'));
+    assert.equal(signed.status, 'completed');
   });
 
   test('the observer sees the observation in their assignments', async () => {

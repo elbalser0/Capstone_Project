@@ -192,9 +192,13 @@ export function observationDetail(o: ObservationRow): ObservationDetail {
     templateVersion: { versionId: v.version_id, versionNo: v.version_no },
     answers: questionsOf(o.version_id).map((q) => {
       const a = db.observation_answer.find((x) => x.observation_id === o.observation_id && x.question_id === q.question_id);
-      return { questionId: q.question_id, title: q.title, wording: q.wording, rating: a?.rating ?? null, comment: a?.comment ?? '' };
+      return {
+        questionId: q.question_id, title: q.title, wording: q.wording, ratingMin: q.rating_min, ratingMax: q.rating_max,
+        minLabel: q.min_label, maxLabel: q.max_label, isRequired: q.is_required, rating: a?.rating ?? null, comment: a?.comment ?? '',
+      };
     }),
     otherComments: o.other_comments,
+    lastSavedDate: o.last_saved_date ?? new Date().toISOString(),
     reasonNotCompleted: o.reason_not_completed,
     issueFileName: o.issue_file_key ? o.issue_file_key.split('/').pop()! : null,
   };

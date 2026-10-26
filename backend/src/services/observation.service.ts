@@ -20,6 +20,8 @@ interface QuestionRow {
   wording: string;
   rating_min: number;
   rating_max: number;
+  min_label: string | null;
+  max_label: string | null;
   is_required: boolean;
 }
 
@@ -34,6 +36,7 @@ interface ObservationRow {
   version_id: number;
   version_no: number;
   other_comments: string | null;
+  last_saved_date: string;
   reason_not_completed: string | null;
   issue_file_key: string | null;
   term_id: number;
@@ -81,6 +84,7 @@ async function fetchObservations(where: string, params: unknown[]) {
            o.observer_signed_date::date::text AS observer_signed_date,
            s.section_id, o.version_id, v.version_no,
            o.other_comments, o.reason_not_completed, o.issue_file_key,
+           to_json(o.last_saved_date) #>> '{}' AS last_saved_date,
            t.term_id, t.season, t.year, t.start_date::text, t.end_date::text,
            obs.netid AS observer_netid, obs.first_name AS observer_first_name,
            obs.last_name AS observer_last_name, obs.rank AS observer_rank,
@@ -130,10 +134,11 @@ export async function listAssignments(netid: string) {
   return (await fetchObservations('o.observer_netid = $1', [netid])).map(({ row, section }) => summary(row, section));
 }
 
-// Only the observer and the observee can see an observation; anyone else gets 404.
+// The observer, the observee, and AC members can see an observation; anyone else gets 404.
+// Only the observer and the observee can change it (checked in submitSignedForm and signObservation).
 async function findObservation(observationId: number, user: AuthUser) {
   const [found] = await fetchObservations('o.observation_id = $1', [observationId]);
-  if (!found || (found.row.observer_netid !== user.netid && found.row.observee_netid !== user.netid)) {
+  if (!found || (user.role !== 'AC' && found.row.observer_netid !== user.netid && found.row.observee_netid !== user.netid)) {
     throw new ApiError(404, 'NOT_FOUND', 'Observation not found.');
   }
   return found;
@@ -143,7 +148,8 @@ async function findObservation(observationId: number, user: AuthUser) {
 export async function getObservation(observationId: number, user: AuthUser) {
   const { row, section } = await findObservation(observationId, user);
   const answers = await getPool().query<QuestionRow & { rating: number | null; comment: string | null }>(`
-    SELECT q.question_id, q.title, q.wording, q.rating_min, q.rating_max, q.is_required, a.rating, a.comment
+    SELECT q.question_id, q.title, q.wording, q.rating_min, q.rating_max, q.min_label, q.max_label, q.is_required,
+           a.rating, a.comment
     FROM template_question AS q
     LEFT JOIN observation_answer AS a ON a.question_id = q.question_id AND a.observation_id = $1
     WHERE q.version_id = $2
@@ -156,10 +162,17 @@ export async function getObservation(observationId: number, user: AuthUser) {
       questionId: String(answer.question_id),
       title: answer.title,
       wording: answer.wording,
+      ratingMin: answer.rating_min,
+      ratingMax: answer.rating_max,
+      minLabel: answer.min_label,
+      maxLabel: answer.max_label,
+      isRequired: answer.is_required,
       rating: answer.rating,
       comment: answer.comment ?? '',
     })),
     otherComments: row.other_comments ?? '',
+    // Sent back by the observee when signing, so they sign the version they read.
+    lastSavedDate: row.last_saved_date,
     reasonNotCompleted: row.reason_not_completed,
     issueFileName: row.issue_file_key ? row.issue_file_key.split('/').pop()! : null,
   };
@@ -193,13 +206,18 @@ export async function submitSignedForm(observationId: number, user: AuthUser, an
     throw new ApiError(403, 'FORBIDDEN', 'Only the observer fills in the observation form.');
   }
   await inTransaction(async (client) => {
-    const current = await client.query<{ status: ObservationStatus; observee_signed_date: Date | null }>(
-      'SELECT status, observee_signed_date FROM observation WHERE observation_id = $1 FOR UPDATE', [observationId]);
-    if (current.rows[0].observee_signed_date) throw new ApiError(409, 'LOCKED', 'This record is signed by both and locked.');
-    if (current.rows[0].status !== 'scheduled') throw new ApiError(409, 'NOT_SCHEDULED', 'Only a scheduled observation can be filled in.');
+    // too_early uses the database date, like the other date rules.
+    const { rows: [current] } = await client.query<{ status: ObservationStatus; observee_signed_date: Date | null; too_early: boolean }>(`
+      SELECT status, observee_signed_date, scheduled_date > CURRENT_DATE AS too_early
+      FROM observation WHERE observation_id = $1 FOR UPDATE
+    `, [observationId]);
+    if (!current) throw new ApiError(404, 'NOT_FOUND', 'Observation not found.');
+    if (current.observee_signed_date) throw new ApiError(409, 'LOCKED', 'This record is signed by both and locked.');
+    if (current.status !== 'scheduled') throw new ApiError(409, 'NOT_SCHEDULED', 'Only a scheduled observation can be filled in.');
+    if (current.too_early) throw new ApiError(409, 'NOT_YET_OBSERVED', 'The form can be filled in on or after the observation date.');
 
     const questions = await client.query<QuestionRow>(`
-      SELECT question_id, title, wording, rating_min, rating_max, is_required
+      SELECT question_id, title, wording, rating_min, rating_max, min_label, max_label, is_required
       FROM template_question WHERE version_id = $1 ORDER BY order_no
     `, [row.version_id]);
     checkAnswers(questions.rows, answers);
@@ -221,22 +239,32 @@ export async function submitSignedForm(observationId: number, user: AuthUser, an
 }
 
 // POST /api/observations/{observationId}/sign: the observee signs after the observer.
-// Both signatures complete and lock the record.
-export async function signObservation(observationId: number, user: AuthUser) {
+// Both signatures complete and lock the record. lastSavedDate is the version the observee read;
+// if the observer resubmitted since then, the signature is refused so the form can be reloaded.
+export async function signObservation(observationId: number, user: AuthUser, lastSavedDate: string) {
   const { row } = await findObservation(observationId, user);
   if (row.observee_netid !== user.netid) {
-    throw new ApiError(403, 'FORBIDDEN', 'The observer signs by submitting the form.');
+    throw new ApiError(403, 'FORBIDDEN', row.observer_netid === user.netid
+      ? 'The observer signs by submitting the form.'
+      : 'Only the observee can sign here.');
   }
   const updated = await getPool().query(`
     UPDATE observation
     SET observee_signed_date = now(), status = 'completed', last_saved_date = now()
     WHERE observation_id = $1 AND status = 'scheduled'
       AND observer_signed_date IS NOT NULL AND observee_signed_date IS NULL
-  `, [observationId]);
+      AND last_saved_date = $2::timestamptz
+  `, [observationId, lastSavedDate]);
   if (!updated.rowCount) {
-    if (row.observee_signed_date) throw new ApiError(409, 'LOCKED', 'This record is signed by both and locked.');
-    if (row.status !== 'scheduled') throw new ApiError(409, 'NOT_SCHEDULED', 'Only a scheduled observation can be signed.');
-    throw new ApiError(409, 'FORM_NOT_SUBMITTED', 'The observer has not submitted the form yet.');
+    // row was read before the UPDATE and may be out of date (e.g. a double-click), so read it again.
+    const { rows: [current] } = await getPool().query<{
+      status: ObservationStatus; observee_signed_date: Date | null; observer_signed_date: Date | null;
+    }>('SELECT status, observee_signed_date, observer_signed_date FROM observation WHERE observation_id = $1', [observationId]);
+    if (!current) throw new ApiError(404, 'NOT_FOUND', 'Observation not found.');
+    if (current.observee_signed_date) throw new ApiError(409, 'LOCKED', 'This record is signed by both and locked.');
+    if (current.status !== 'scheduled') throw new ApiError(409, 'NOT_SCHEDULED', 'Only a scheduled observation can be signed.');
+    if (!current.observer_signed_date) throw new ApiError(409, 'FORM_NOT_SUBMITTED', 'The observer has not submitted the form yet.');
+    throw new ApiError(409, 'STALE_FORM', 'The observer changed the form after you opened it. Reload it and review it before signing.');
   }
   return getObservation(observationId, user);
 }

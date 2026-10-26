@@ -1,25 +1,9 @@
-// Database tests for GET /api/me/notifications. Same setup as requests.db.test.ts:
-//   TEST_DATABASE_URL=postgresql://.../assessment_test npm test
-// The database name must end in "_test" because these tests drop and rebuild the schema.
-// Without TEST_DATABASE_URL they are skipped.
+// Database tests for GET /api/me/notifications. Setup is in db-test-helper.ts.
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { after, before, beforeEach, describe, test } from 'node:test';
+import { beforeEach, describe, test } from 'node:test';
+import { skip, sql, useTestDatabase } from './db-test-helper.js';
 
-const url = process.env.TEST_DATABASE_URL?.trim();
-const skip = !url
-  ? 'set TEST_DATABASE_URL to run database tests'
-  : !new URL(url).pathname.replace('/', '').endsWith('_test')
-    ? 'TEST_DATABASE_URL must point to a database whose name ends in _test'
-    : false;
-if (!skip) process.env.DATABASE_URL = url;
-
-const { getPool, closePool } = await import('../src/db/pool.js');
 const { listMyNotifications, NOTIFICATION_LIMIT } = await import('../src/services/notification.service.js');
-
-async function sql(text: string, params: unknown[] = []) {
-  return getPool().query(text, params);
-}
 
 async function notify(recipient: string, subject: string, minutesAgo: number) {
   await sql(`INSERT INTO notification (cycle_id, recipient_netid, sent_by, notif_type, subject, sent_date)
@@ -27,16 +11,7 @@ async function notify(recipient: string, subject: string, minutesAgo: number) {
 }
 
 describe('notifications against the database', { skip }, () => {
-  // Database test files run in parallel and all rebuild the schema, so each one holds
-  // this lock for its whole run and the others wait their turn.
-  let lock: import('pg').PoolClient;
-
-  before(async () => {
-    lock = await getPool().connect();
-    await lock.query('SELECT pg_advisory_lock(4485)');
-    await sql('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-    await sql(await readFile(new URL('../../database/schema.sql', import.meta.url), 'utf8'));
-  });
+  useTestDatabase();
 
   beforeEach(async () => {
     await sql(`TRUNCATE department, term, professor RESTART IDENTITY CASCADE`);
@@ -50,12 +25,6 @@ describe('notifications against the database', { skip }, () => {
     await sql(`INSERT INTO ac_member (netid) VALUES ('ac1')`);
     await sql(`INSERT INTO eval_cycle (term_id, started_by, start_date, signup_deadline, observation_deadline, feedback_deadline)
                VALUES (1, 'ac1', CURRENT_DATE - 30, CURRENT_DATE - 10, CURRENT_DATE + 30, CURRENT_DATE + 45)`);
-  });
-
-  after(async () => {
-    await lock.query('SELECT pg_advisory_unlock(4485)');
-    lock.release();
-    await closePool();
   });
 
   test('a professor only gets their own notifications, newest first, with the sender', async () => {

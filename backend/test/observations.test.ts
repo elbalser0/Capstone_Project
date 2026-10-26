@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import { app } from '../src/app.js';
-import { readSignedForm } from '../src/routes/observations.routes.js';
+import { readSignBody, readSignedForm } from '../src/routes/observations.routes.js';
 import { checkAnswers } from '../src/services/observation.service.js';
 
 test('observation endpoints require a login', async () => {
@@ -48,4 +48,13 @@ test('the signed-form body is checked and trimmed', () => {
   });
   assert.throws(() => readSignedForm({ answers: 'nope' }), { code: 'INVALID_FORM' });
   assert.throws(() => readSignedForm({ answers: [{ questionId: 1, rating: 4 }] }), { code: 'INVALID_FORM' });
+});
+
+test('the sign body must carry the lastSavedDate the observee read', () => {
+  assert.equal(readSignBody({ lastSavedDate: '2026-10-26T15:04:05.123456+00:00' }), '2026-10-26T15:04:05.123456+00:00');
+  assert.equal(readSignBody({ lastSavedDate: '2026-10-26T15:04:05Z' }), '2026-10-26T15:04:05Z');
+  assert.throws(() => readSignBody(undefined), { code: 'INVALID_SIGN' });
+  assert.throws(() => readSignBody({}), { code: 'INVALID_SIGN' });
+  assert.throws(() => readSignBody({ lastSavedDate: 'yesterday' }), { code: 'INVALID_SIGN' });
+  assert.throws(() => readSignBody({ lastSavedDate: '2026-13-45T99:00:00Z' }), { code: 'INVALID_SIGN' });
 });
