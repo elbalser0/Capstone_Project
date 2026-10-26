@@ -181,8 +181,12 @@ describe('observation form and signing against the database', { skip }, () => {
       await holder.query('BEGIN');
       await holder.query('SELECT 1 FROM observation WHERE observation_id = 1 FOR UPDATE');
       both = Promise.allSettled([signObservation(1, observee, lastSavedDate), signObservation(1, observee, lastSavedDate)]);
+      // Wait until both requests are blocked on the UPDATE, but fail instead of hanging if they never get there.
+      const deadline = Date.now() + 5000;
       while ((await sql(`SELECT count(*)::int AS n FROM pg_stat_activity
-                         WHERE wait_event_type = 'Lock' AND query LIKE '%UPDATE observation%'`)).rows[0].n < 2) {
+                         WHERE datname = current_database() AND wait_event_type = 'Lock'
+                           AND query LIKE '%UPDATE observation%'`)).rows[0].n < 2) {
+        if (Date.now() > deadline) throw new Error('both sign requests never reached the UPDATE');
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     } finally {

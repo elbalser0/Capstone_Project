@@ -217,7 +217,7 @@ export async function submitSignedForm(observationId: number, user: AuthUser, an
     if (current.too_early) throw new ApiError(409, 'NOT_YET_OBSERVED', 'The form can be filled in on or after the observation date.');
 
     const questions = await client.query<QuestionRow>(`
-      SELECT question_id, title, wording, rating_min, rating_max, is_required
+      SELECT question_id, title, wording, rating_min, rating_max, min_label, max_label, is_required
       FROM template_question WHERE version_id = $1 ORDER BY order_no
     `, [row.version_id]);
     checkAnswers(questions.rows, answers);
@@ -244,7 +244,9 @@ export async function submitSignedForm(observationId: number, user: AuthUser, an
 export async function signObservation(observationId: number, user: AuthUser, lastSavedDate: string) {
   const { row } = await findObservation(observationId, user);
   if (row.observee_netid !== user.netid) {
-    throw new ApiError(403, 'FORBIDDEN', 'The observer signs by submitting the form.');
+    throw new ApiError(403, 'FORBIDDEN', row.observer_netid === user.netid
+      ? 'The observer signs by submitting the form.'
+      : 'Only the observee can sign here.');
   }
   const updated = await getPool().query(`
     UPDATE observation
