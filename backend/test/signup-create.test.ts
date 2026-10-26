@@ -46,7 +46,12 @@ test('signup and proposed dates are written in one transaction', async () => {
   process.env.DATABASE_URL ??= 'postgresql://localhost/test';
   const pool = getPool() as unknown as {
     query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }>;
-    connect: () => Promise<{ query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }>; release: (error?: Error) => void }>;
+    connect: () => Promise<{
+      query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }>;
+      release: (error?: Error) => void;
+      on: (event: string, listener: unknown) => void;
+      off: (event: string, listener: unknown) => void;
+    }>;
   };
   const originalQuery = pool.query;
   const originalConnect = pool.connect;
@@ -82,6 +87,9 @@ test('signup and proposed dates are written in one transaction', async () => {
       throw new Error(`Unexpected query: ${sql}`);
     },
     release: (error) => { release = { called: true, error }; },
+    // createSignup uses inTransaction, which listens for connection errors.
+    on: () => {},
+    off: () => {},
   });
   try {
     const signup = await createSignup(user, 42, ['2026-11-02', '2026-11-04']);

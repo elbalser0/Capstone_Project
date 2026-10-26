@@ -41,6 +41,16 @@ export function readSignedForm(body: unknown): { answers: FormAnswer[]; otherCom
   };
 }
 
+// Checks the body of POST .../sign: the lastSavedDate from GET /api/observations/{observationId}.
+export function readSignBody(body: unknown): string {
+  const input = typeof body === 'object' && body !== null && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const lastSavedDate = input.lastSavedDate;
+  if (typeof lastSavedDate !== 'string' || !/^\d{4}-\d{2}-\d{2}T[\d:.]+(Z|[+-]\d{2}:\d{2})$/.test(lastSavedDate) || Number.isNaN(Date.parse(lastSavedDate))) {
+    throw new ApiError(400, 'INVALID_SIGN', 'Send the lastSavedDate of the form you are signing.');
+  }
+  return lastSavedDate;
+}
+
 myAssignmentsRouter.get('/', async (req, res) => {
   res.status(200).json(await listAssignments(req.user!.netid));
 });
@@ -56,5 +66,6 @@ observationsRouter.post('/:observationId/signed-form', async (req, res) => {
 });
 
 observationsRouter.post('/:observationId/sign', async (req, res) => {
-  res.status(200).json(await signObservation(observationId(req), req.user!));
+  const id = observationId(req);
+  res.status(200).json(await signObservation(id, req.user!, readSignBody(req.body)));
 });

@@ -101,7 +101,8 @@ export function useObservation(observationId: string | undefined) {
 export function useSignObservation() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (observationId: string) => api<ObservationDetail>(`/observations/${observationId}/sign`, { method: 'POST' }),
+    mutationFn: ({ observationId, lastSavedDate }: { observationId: string; lastSavedDate: string }) =>
+      api<ObservationDetail>(`/observations/${observationId}/sign`, { method: 'POST', body: { lastSavedDate } }),
     onSuccess: (detail) => {
       qc.setQueryData(facultyKeys.observation(detail.observationId), detail);
       invalidate(qc, facultyKeys.myObservations, facultyKeys.assignments);

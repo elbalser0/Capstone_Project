@@ -231,6 +231,12 @@ export interface ObservationAnswer {
   questionId: string;
   title: string;
   wording: string;
+  /** The rating scale of this observation's template version (not necessarily the live one). */
+  ratingMin: number;
+  ratingMax: number;
+  minLabel: string | null;
+  maxLabel: string | null;
+  isRequired: boolean;
   rating: number | null;
   comment: string;
 }
@@ -240,6 +246,8 @@ export interface ObservationDetail extends ObservationSummary {
   templateVersion: { versionId: string; versionNo: number };
   answers: ObservationAnswer[];
   otherComments: string;
+  /** Send this back in POST .../sign so the observee signs the version they read (409 STALE_FORM otherwise). */
+  lastSavedDate: IsoDateTime;
   reasonNotCompleted: string | null;
   /** File attached through "Upload a file about the observation" (E6), from observation.issue_file_key. */
   issueFileName?: string | null;
