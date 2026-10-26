@@ -3,12 +3,14 @@ import { cyclesRouter } from './routes/cycles.routes.js';
 import { healthRouter } from './routes/health.routes.js';
 import { facultyMeRouter, signupsRouter } from './routes/faculty-scaffold.routes.js';
 import { errorHandler } from './middleware/error.middleware.js';
+import { myNotificationsRouter } from './routes/notifications.routes.js';
 import { requireLogin } from './middleware/auth.middleware.js';
 import { myAssignmentsRouter, observationsRouter } from './routes/observations.routes.js';
 import { meRouter } from './routes/me.routes.js';
 import { myRequestsRouter, signupRequestsRouter } from './routes/requests.routes.js';
 
 export const app = express();
+app.use('/api/me/notifications', requireLogin, myNotificationsRouter);
 app.disable('x-powered-by');
 app.use('/api/me/assignments', requireLogin, myAssignmentsRouter);
 app.use(express.json());
