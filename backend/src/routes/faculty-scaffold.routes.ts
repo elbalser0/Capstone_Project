@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ApiError } from '../middleware/error.middleware.js';
+import { listSignupCandidates } from '../services/candidate.service.js';
 import { listCourses } from '../services/course.service.js';
 import { getEvaluationStatus } from '../services/evaluation-status.service.js';
 import { createSignup, getMySignup } from '../services/signup.service.js';
@@ -47,4 +48,12 @@ signupsRouter.post('/', async (req, res) => {
     throw new ApiError(400, 'INVALID_SIGNUP', 'Provide a sectionId and proposedDates as YYYY-MM-DD dates.');
   }
   res.status(201).json(await createSignup(req.user!, parsedSectionId, proposedDates));
+});
+
+signupsRouter.get('/:signupId/candidates', async (req, res) => {
+  const signupId = parsePositiveId(req.params.signupId);
+  if (signupId === null) {
+    throw new ApiError(400, 'INVALID_SIGNUP_ID', 'signupId must be a positive integer.');
+  }
+  res.status(200).json(await listSignupCandidates(signupId, req.user!.netid));
 });
