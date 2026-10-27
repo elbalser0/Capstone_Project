@@ -3,7 +3,7 @@ import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
-import { evaluationStatus, observation, signup } from '../../test/fixtures';
+import { evaluationStatus, observation, observer, signup } from '../../test/fixtures';
 import type { EvaluationStatus, ObservationSummary, Signup } from '../../api/types';
 import { MyEvaluationPage } from './MyEvaluationPage';
 
@@ -154,7 +154,14 @@ describe('My evaluation page', () => {
     await screen.findByText(label);
     const row = screen.getByRole('row', { name: /Dr\. Elena Ruiz/ });
     expect(within(row).getByText(label)).toBeInTheDocument();
-    expect(within(row).getByRole('button', { name: 'View' })).toBeDisabled();
+    expect(within(row).getByRole('link', { name: 'View' })).toHaveAttribute('href', '/faculty/observations/30');
+  });
+
+  it('links the current semester row to its observation record', async () => {
+    serve({ observations: [], currentSignup: { ...signup, observation: { observationId: '31', observer, status: 'scheduled', scheduledDate: '2026-09-21' } } });
+    openPage();
+    expect(await screen.findByRole('link', { name: 'View' })).toHaveAttribute('href', '/faculty/observations/31');
+    expect(screen.getByRole('row', { name: /Fall 2026/ })).toHaveTextContent('Dr. Elena Ruiz');
   });
 
   it('shows observation history loading explicitly without claiming history is empty', async () => {

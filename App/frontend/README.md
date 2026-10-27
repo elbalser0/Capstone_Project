@@ -19,9 +19,13 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 - `/login`: email/password form, password visibility toggle, and sign-in errors.
 - `/faculty/evaluation`: faculty identity, evaluation status, deadlines, and observation history.
 - `/faculty/sign-up`: pick a course and the class meetings you'd like to be observed in.
+- `/faculty/observe`: observation requests sent to me; pick one of the proposed times and accept, or decline.
+- `/faculty/observe/confirmations`: observations I accepted this semester.
+- `/faculty/observe/:observationId/form` and `/sign`: the observer fills in the form, then signs it by typing their name (the form stays a draft on this device until signed).
+- `/faculty/observations/:observationId` (from My evaluation) and `/faculty/observe/:observationId`: the read-only record, where the observee signs after the observer.
 - `/committee/dashboard`: committee home with sample KPI results and a current-cycle summary.
 
-Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Faculty who are due can open sign-up from My evaluation. The observation record buttons are still disabled. Other later-sprint pages are not included.
+Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Faculty who are due can open sign-up from My evaluation. My evaluation's View links open the observation record. Other later-sprint pages are not included.
 
 The dashboard keeps the existing prototype's KPI cards and CSV export; these are a preview of later dashboard work, not a claim that the backend implements those features.
 
@@ -60,6 +64,12 @@ The current screens request:
 - `GET /api/me/signup`
 - `GET /api/me/courses?termId=...`
 - `POST /api/signups` with `{ sectionId, proposedDates }`
+- `GET /api/me/requests/incoming`
+- `PATCH /api/signups/{signupId}/requests/{observerNetId}/confirm` with `{ date }`, and `.../decline`
+- `GET /api/me/assignments`
+- `GET /api/observations/{observationId}`
+- `POST /api/observations/{observationId}/signed-form` with `{ answers, otherComments }`
+- `POST /api/observations/{observationId}/sign` with `{ lastSavedDate }`
 - `GET /api/cycles/latest/kpis`
 - `GET /api/dashboard/due-by-rank`
 - `GET /api/dashboard/outstanding-observations`
@@ -73,7 +83,7 @@ Vite's proxy is development configuration; production API routing requires separ
 
 ## Observation status
 
-The evaluation view distinguishes loading, failed requests, empty history, and current-cycle sign-up details. Signature labels use both the observation lifecycle and the available signature dates. When only a sign-up summary is available, the page does not guess whether the record is signed. Observation history is horizontally scrollable on narrower screens; record actions remain disabled until the record route is implemented.
+The evaluation view distinguishes loading, failed requests, empty history, and current-cycle sign-up details. Signature labels use both the observation lifecycle and the available signature dates. When only a sign-up summary is available, the page does not guess whether the record is signed. Observation history is horizontally scrollable on narrower screens; the View link opens the observation record.
 
 Run `npm test` for page-level regression tests using controlled HTTP responses. These tests do not establish real-backend authentication or database persistence. The evaluation-status, current sign-up, and observee observation-history endpoints must be available before connected status-view acceptance can be verified.
 
