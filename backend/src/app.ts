@@ -5,7 +5,7 @@ import { facultyMeRouter, signupsRouter } from './routes/faculty-scaffold.routes
 import { errorHandler } from './middleware/error.middleware.js';
 import { myNotificationsRouter } from './routes/notifications.routes.js';
 import { requireLogin } from './middleware/auth.middleware.js';
-import { myAssignmentsRouter, observationsRouter } from './routes/observations.routes.js';
+import { myAssignmentsRouter, myObservationsRouter, observationsRouter } from './routes/observations.routes.js';
 import { meRouter } from './routes/me.routes.js';
 import { myRequestsRouter, signupRequestsRouter } from './routes/requests.routes.js';
 
@@ -17,6 +17,7 @@ app.use('/api/health', healthRouter);
 app.use('/api/me/requests', requireLogin, myRequestsRouter);
 app.use('/api/me/notifications', requireLogin, myNotificationsRouter);
 app.use('/api/me/assignments', requireLogin, myAssignmentsRouter);
+app.use('/api/me/observations', requireLogin, myObservationsRouter);
 app.use('/api/signups/:signupId/requests', requireLogin, signupRequestsRouter);
 app.use('/api/me', requireLogin, meRouter, facultyMeRouter);
 app.use('/api/signups', requireLogin, signupsRouter);

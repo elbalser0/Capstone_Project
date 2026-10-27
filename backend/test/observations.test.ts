@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import { app } from '../src/app.js';
-import { readSignBody, readSignedForm } from '../src/routes/observations.routes.js';
+import { readReportMissed, readSignBody, readSignedForm } from '../src/routes/observations.routes.js';
 import { checkAnswers } from '../src/services/observation.service.js';
 
 test('observation endpoints require a login', async () => {
@@ -13,6 +13,7 @@ test('observation endpoints require a login', async () => {
     for (const [method, path] of [
       ['GET', '/api/me/assignments'], ['GET', '/api/observations/1'],
       ['POST', '/api/observations/1/signed-form'], ['POST', '/api/observations/1/sign'],
+      ['GET', '/api/me/observations?as=observee'], ['POST', '/api/observations/1/report-missed'],
     ]) {
       const response = await fetch(`${base}${path}`, {
         method, headers: { 'content-type': 'application/json' },
@@ -57,4 +58,12 @@ test('the sign body must carry the lastSavedDate the observee read', () => {
   assert.throws(() => readSignBody({}), { code: 'INVALID_SIGN' });
   assert.throws(() => readSignBody({ lastSavedDate: 'yesterday' }), { code: 'INVALID_SIGN' });
   assert.throws(() => readSignBody({ lastSavedDate: '2026-13-45T99:00:00Z' }), { code: 'INVALID_SIGN' });
+});
+
+test('report-missed needs a reason, trimmed', () => {
+  assert.equal(readReportMissed({ reason: '  Class was cancelled  ' }), 'Class was cancelled');
+  assert.throws(() => readReportMissed({ reason: '   ' }), { code: 'REASON_REQUIRED' });
+  assert.throws(() => readReportMissed({}), { code: 'REASON_REQUIRED' });
+  assert.throws(() => readReportMissed(undefined), { code: 'REASON_REQUIRED' });
+  assert.throws(() => readReportMissed({ reason: 5 }), { code: 'REASON_REQUIRED' });
 });
