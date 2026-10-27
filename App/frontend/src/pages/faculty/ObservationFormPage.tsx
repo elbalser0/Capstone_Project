@@ -1,107 +1,58 @@
 import { useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router';
-import { useObservation, useSubmitSignedForm } from '../../api/hooks/faculty';
-import { useMe } from '../../api/hooks/shared';
-import type { ObservationDetail } from '../../api/types';
+import { Link, Navigate, useNavigate } from 'react-router';
+import { useSubmitSignedForm } from '../../api/hooks/faculty';
 import { CheckIcon, ClockIcon, PenIcon } from '../../components/icons';
 import { Banner, Button, Card, Checkbox, Detail, ErrorNote, LockNote, LockedTag, PageError, RatingScale, Tag, TextArea, inputClass, labelClass, linkClass } from '../../components/ui';
 import { nowMs } from '../../lib/clock';
 import { classStart, formatClock, formatDayYear, formatShort, formatSlot, formatTime, isLocked } from '../../lib/format';
+import { readDraft, sameAsServer, serverDraft, storedDraft, writeDraft, type Draft } from './observationDraft';
+import { useObservationRecord } from './useObservationRecord';
 
-// R3 fill in the form and R4 sign and submit. The observer's ratings stay a draft on this
-// device until they sign; signing sends the form (POST signed-form), which is the
-// observer's signature. The observer can change and re-sign it until the observee signs,
-// which locks the record.
-
-interface Draft {
-  answers: Record<string, { rating: number | null; comment: string }>;
-  otherComments: string;
-  savedAt: number | null;
-}
-
-const draftKey = (id: string) => `assessment-helper.observation-draft.${id}`;
-
-function storedDraft(id: string): Draft | null {
-  try {
-    const raw = localStorage.getItem(draftKey(id));
-    return raw ? (JSON.parse(raw) as Draft) : null;
-  } catch {
-    // Storage can be blocked; fall back to what the server has.
-    return null;
-  }
-}
-
-/** What the server has: the last signed form, or an empty one. */
-function serverDraft(o: ObservationDetail): Draft {
-  return {
-    answers: Object.fromEntries(o.answers.map((a) => [a.questionId, { rating: a.rating, comment: a.comment }])),
-    otherComments: o.otherComments,
-    savedAt: null,
-  };
-}
-
-const readDraft = (o: ObservationDetail) => storedDraft(o.observationId) ?? serverDraft(o);
-
-/** True when the draft holds nothing the server does not already have. */
-function sameAsServer(d: Draft, o: ObservationDetail) {
-  const server = serverDraft(o);
-  return d.otherComments === server.otherComments && o.answers.every((a) => {
-    const v = d.answers[a.questionId] ?? { rating: null, comment: '' };
-    return v.rating === a.rating && v.comment === a.comment;
-  });
-}
-
-function writeDraft(id: string, draft: Draft | null) {
-  try {
-    if (draft) localStorage.setItem(draftKey(id), JSON.stringify(draft));
-    else localStorage.removeItem(draftKey(id));
-  } catch {
-    // Not saved on this device; the form still submits.
-  }
-}
-
-export function useObserverRecord() {
-  const { observationId } = useParams();
-  const me = useMe();
-  const observation = useObservation(observationId);
-  const o = observation.data;
-  const isObserver = Boolean(o && me.data && o.observer.netid === me.data.netid);
-  return { observation, o, isObserver, me };
-}
+// R3 fill in the form and R4 sign and submit. The observer's ratings stay a draft until they
+// sign; signing sends the form (POST signed-form), which is the observer's signature. The
+// observer can change and re-sign it until the observee signs, which locks the record.
 
 // ---------- R3 ----------
 
 export function ObservationFormPage() {
   const navigate = useNavigate();
-  const { observation, o, isObserver, me } = useObserverRecord();
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const { observation, record, isObserver, me } = useObservationRecord();
+  const [edits, setEdits] = useState<Draft | null>(null);
+  // False when the browser refused to store the draft; it is then kept only until a reload.
+  const [storedOnDevice, setStoredOnDevice] = useState(true);
 
   const error = observation.error ?? me.error;
   if (error) return <PageError error={error} />;
   // Wait for both: until me loads, isObserver is false and would redirect away.
-  if (!o || !me.data) return <p role="status" className="pt-8 text-sm text-gray-500">Loading observation…</p>;
-  if (!isObserver || isLocked(o) || o.status === 'not_completed') return <Navigate to={`/faculty/observe/${o.observationId}`} replace />;
+  if (!record || !me.data) return <p role="status" className="pt-8 text-sm text-gray-500">Loading observation…</p>;
+  if (!isObserver || isLocked(record) || record.status === 'not_completed') return <Navigate to={`/faculty/observe/${record.observationId}`} replace />;
 
-  const d = draft ?? readDraft(o);
-  const setAnswer = (id: string, patch: Partial<Draft['answers'][string]>) =>
-    setDraft({ ...d, answers: { ...d.answers, [id]: { ...(d.answers[id] ?? { rating: null, comment: '' }), ...patch } } });
+  const draft = edits ?? readDraft(record);
+  const setAnswer = (questionId: string, patch: Partial<Draft['answers'][string]>) =>
+    setEdits({ ...draft, answers: { ...draft.answers, [questionId]: { ...(draft.answers[questionId] ?? { rating: null, comment: '' }), ...patch } } });
   // Only a change is kept as a draft, so an unchanged signed form is not signed again.
   const save = () => {
-    const saved = sameAsServer(d, o) ? { ...d, savedAt: null } : { ...d, savedAt: nowMs() };
-    writeDraft(o.observationId, saved.savedAt ? saved : null);
-    setDraft(saved);
+    if (sameAsServer(draft, record)) {
+      writeDraft(record.observationId, null);
+      setEdits({ ...draft, savedAt: null });
+      setStoredOnDevice(true);
+      return;
+    }
+    const kept = { ...draft, savedAt: nowMs() };
+    setStoredOnDevice(writeDraft(record.observationId, kept));
+    setEdits(kept);
   };
-  const first = o.answers[0];
-  const time = classStart(o.section, o.scheduledDate);
+  const first = record.answers[0];
+  const time = classStart(record.section, record.scheduledDate);
 
   return (
     <div className="flex flex-col pt-8">
       <h2 className="text-lg leading-[22px] font-bold text-gray-900">
-        Observation: {o.observee.displayName}, {o.section.label}, {time ? formatSlot(o.scheduledDate, time) : formatDayYear(o.scheduledDate)}
+        Observation: {record.observee.displayName}, {record.section.label}, {time ? formatSlot(record.scheduledDate, time) : formatDayYear(record.scheduledDate)}
       </h2>
       <div className="mt-3">
         <Banner tone="info">
-          This is your copy of Observation Template v{o.templateVersion.versionNo}. Questions and rating ranges are set by the Assessment Committee.
+          This is your copy of Observation Template v{record.templateVersion.versionNo}. Questions and rating ranges are set by the Assessment Committee.
         </Banner>
       </div>
 
@@ -112,8 +63,8 @@ export function ObservationFormPage() {
           <span role="columnheader">Comment</span>
         </div>
         <div role="rowgroup" className="divide-y divide-gray-200 border-t border-gray-200">
-          {o.answers.map((a) => {
-            const value = d.answers[a.questionId] ?? { rating: null, comment: '' };
+          {record.answers.map((a) => {
+            const value = draft.answers[a.questionId] ?? { rating: null, comment: '' };
             return (
               <div role="row" key={a.questionId} className="grid grid-cols-[312px_264px_1fr] items-start px-6 py-4">
                 <div role="cell" className="pt-1 pr-4">
@@ -147,23 +98,24 @@ export function ObservationFormPage() {
           <span className="text-sm font-bold text-gray-900">Any other comments</span>
           <span className="text-xs text-gray-500">Always the last item on every form</span>
         </label>
-        <TextArea id="other-comments" className="mt-[7px] h-12" value={d.otherComments} onChange={(e) => setDraft({ ...d, otherComments: e.target.value })} />
+        <TextArea id="other-comments" className="mt-[7px] h-12" value={draft.otherComments} onChange={(e) => setEdits({ ...draft, otherComments: e.target.value })} />
       </div>
 
       <div className="mt-3 flex items-center justify-between">
-        <p className="flex items-center gap-2 text-xs text-gray-500">
-          {d.savedAt && (
+        <p className="flex items-center gap-2 text-xs text-gray-500" role="status">
+          {draft.savedAt && storedOnDevice && (
             <>
-              <CheckIcon width={10} height={8} /> Draft saved on this device at {formatClock(d.savedAt)}
+              <CheckIcon width={10} height={8} /> Draft saved on this device at {formatClock(draft.savedAt)}
             </>
           )}
+          {draft.savedAt && !storedOnDevice && 'This browser did not let the draft be saved. It is kept until you reload the page.'}
         </p>
         <div className="flex gap-3">
           <Button variant="secondary" className="w-[72px]" onClick={save}>Save</Button>
           <Button
             onClick={() => {
               save();
-              navigate(`/faculty/observe/${o.observationId}/sign`);
+              navigate(`/faculty/observe/${record.observationId}/sign`);
             }}
           >
             Go to signatures
@@ -179,7 +131,7 @@ export function ObservationFormPage() {
 const normalize = (name: string) => name.toLowerCase().replace(/^dr\.?\s+/, '').replace(/\s+/g, ' ').trim();
 
 export function SignPage() {
-  const { observation, o, isObserver, me } = useObserverRecord();
+  const { observation, record, isObserver, me } = useObservationRecord();
   const submit = useSubmitSignedForm();
   const [confirmed, setConfirmed] = useState(false);
   const [typed, setTyped] = useState('');
@@ -187,16 +139,17 @@ export function SignPage() {
 
   const error = observation.error ?? me.error;
   if (error) return <PageError error={error} />;
-  if (!o || !me.data) return <p role="status" className="pt-8 text-sm text-gray-500">Loading observation…</p>;
-  if (!isObserver || o.status === 'not_completed') return <Navigate to={`/faculty/observe/${o.observationId}`} replace />;
+  if (!record || !me.data) return <p role="status" className="pt-8 text-sm text-gray-500">Loading observation…</p>;
+  if (!isObserver || record.status === 'not_completed') return <Navigate to={`/faculty/observe/${record.observationId}`} replace />;
 
-  const time = classStart(o.section, o.scheduledDate);
-  const locked = isLocked(o);
-  // Signed already and nothing changed since: nothing to send. An edited draft can be signed again until the observee signs.
-  const upToDate = Boolean(o.observerSignedDate) && !storedDraft(o.observationId);
-  const canSign = !locked && !o.observeeSignedDate && !upToDate;
+  const time = classStart(record.section, record.scheduledDate);
+  const locked = isLocked(record);
+  // Signed already and the draft holds nothing new: nothing to send. A changed draft can be signed again until the observee signs.
+  const unsent = storedDraft(record.observationId);
+  const upToDate = Boolean(record.observerSignedDate) && (unsent === null || sameAsServer(unsent, record));
+  const canSign = !locked && !record.observeeSignedDate && !upToDate;
   // Once signed (or locked), show what was signed, never a leftover draft.
-  const d = canSign ? readDraft(o) : serverDraft(o);
+  const draft = canSign ? readDraft(record) : serverDraft(record);
   const fullName = `${me.data.firstName} ${me.data.lastName}`;
 
   const signNow = () => {
@@ -205,15 +158,15 @@ export function SignPage() {
       return;
     }
     setProblem(null);
-    const answers = o.answers.flatMap((a) => {
-      const v = d.answers[a.questionId];
-      return v && v.rating !== null ? [{ questionId: a.questionId, rating: v.rating, comment: v.comment }] : [];
+    const answers = record.answers.flatMap((a) => {
+      const value = draft.answers[a.questionId];
+      return value && value.rating !== null ? [{ questionId: a.questionId, rating: value.rating, comment: value.comment }] : [];
     });
     submit.mutate(
-      { observationId: o.observationId, answers, otherComments: d.otherComments },
+      { observationId: record.observationId, answers, otherComments: draft.otherComments },
       {
         onSuccess: () => {
-          writeDraft(o.observationId, null);
+          writeDraft(record.observationId, null);
           setConfirmed(false);
           setTyped('');
         },
@@ -227,7 +180,7 @@ export function SignPage() {
         <h2 className="text-base font-bold text-gray-900">Observer signature</h2>
         <label className="mt-4 flex cursor-pointer items-center gap-3 text-sm text-gray-900">
           <Checkbox checked={confirmed || !canSign} disabled={!canSign} onChange={(e) => setConfirmed(e.target.checked)} />
-          I confirm this observation took place on {formatDayYear(o.scheduledDate)}{time && ` at ${formatTime(time)}`}
+          I confirm this observation took place on {formatDayYear(record.scheduledDate)}{time && ` at ${formatTime(time)}`}
         </label>
         <label htmlFor="typed-name" className={`mt-6 ${labelClass}`}>Type your full name to sign</label>
         <input
@@ -250,8 +203,8 @@ export function SignPage() {
           <h3 className="text-sm font-bold text-gray-900">Signature status</h3>
           <dl className="mt-[11px] flex flex-col gap-3.5">
             {([
-              ['Observer signature', o.observerSignedDate, false],
-              ['Observee signature', o.observeeSignedDate, true],
+              ['Observer signature', record.observerSignedDate, false],
+              ['Observee signature', record.observeeSignedDate, true],
             ] as const).map(([label, date, other]) => (
               <div key={label} className="grid grid-cols-[180px_auto] items-center">
                 <dt className="text-sm text-gray-700">{label}</dt>
@@ -270,7 +223,7 @@ export function SignPage() {
           {locked && (
             <div className="mt-6 flex items-center gap-4">
               <LockedTag />
-              <Link to={`/faculty/observe/${o.observationId}`} className={linkClass}>View the record</Link>
+              <Link to={`/faculty/observe/${record.observationId}`} className={linkClass}>View the record</Link>
             </div>
           )}
         </div>
@@ -280,16 +233,16 @@ export function SignPage() {
       <Card className="px-6 pt-5 pb-6">
         <h2 className="text-base font-bold text-gray-900">Summary</h2>
         <dl className="mt-[17px] flex flex-col gap-[13px]">
-          <Detail label="Observee">{o.observee.displayName}</Detail>
-          <Detail label="Course">{o.section.label}</Detail>
-          <Detail label="Date">{formatDayYear(o.scheduledDate)}{time && `, ${formatTime(time)}`}</Detail>
-          <Detail label="Template">Observation Template v{o.templateVersion.versionNo}</Detail>
+          <Detail label="Observee">{record.observee.displayName}</Detail>
+          <Detail label="Course">{record.section.label}</Detail>
+          <Detail label="Date">{formatDayYear(record.scheduledDate)}{time && `, ${formatTime(time)}`}</Detail>
+          <Detail label="Template">Observation Template v{record.templateVersion.versionNo}</Detail>
         </dl>
         <div className="mt-4 border-t border-gray-200 pt-4">
           <p className="text-xs text-gray-500">Ratings</p>
           <ul className="mt-[7px] flex flex-col gap-[11px]">
-            {o.answers.map((a) => {
-              const rating = d.answers[a.questionId]?.rating ?? null;
+            {record.answers.map((a) => {
+              const rating = draft.answers[a.questionId]?.rating ?? null;
               return (
                 <li key={a.questionId} className="flex justify-between text-sm text-gray-900">
                   <span>{a.title}</span>
@@ -299,7 +252,7 @@ export function SignPage() {
             })}
           </ul>
           {!locked && (
-            <Link to={`/faculty/observe/${o.observationId}/form`} className={`${linkClass} mt-[27px]`}>
+            <Link to={`/faculty/observe/${record.observationId}/form`} className={`${linkClass} mt-[27px]`}>
               <PenIcon width={12} height={12} className="text-gray-600" /> Edit the form
             </Link>
           )}

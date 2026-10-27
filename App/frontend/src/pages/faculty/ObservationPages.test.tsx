@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
 import { course, cycle, faculty, observation, observer } from '../../test/fixtures';
@@ -9,6 +9,7 @@ import type { Me, ObservationDetail, ObservationRequest, PersonRef } from '../..
 import { ObservationFormPage, SignPage } from './ObservationFormPage';
 import { ObservationRecordPage } from './ObservationRecordPage';
 import { ObserveRequestsPage } from './ObservePage';
+import { writeDraft } from './observationDraft';
 
 const me = (p: PersonRef): Me => ({
   ...p, email: `${p.firstName.toLowerCase()}@demo.edu`, department: { deptId: '1', deptName: 'Computer Science' }, role: 'faculty',
@@ -34,7 +35,11 @@ const detail: ObservationDetail = {
 };
 
 const draftKey = `assessment-helper.observation-draft.${detail.observationId}`;
-afterEach(() => localStorage.clear());
+afterEach(() => {
+  writeDraft(detail.observationId, null);
+  localStorage.clear();
+  vi.restoreAllMocks();
+});
 
 function serveMe(person: PersonRef) {
   server.use(http.get('*/api/me', () => HttpResponse.json(me(person))));
@@ -89,6 +94,28 @@ describe('Observe page (GET /api/me/requests/incoming)', () => {
     await userEvent.click(await screen.findByLabelText(/Mon Sep 23/));
     await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('You teach 3354.501 from 19:00 to 21:45 at that time.');
+  });
+});
+
+describe('Observe page: a refused answer (review finding 3)', () => {
+  it('keeps the reason on screen after the re-read removes the request', async () => {
+    let reads = 0;
+    serveMe(observer);
+    server.use(
+      http.get('*/api/me/requests/incoming', () => {
+        reads += 1;
+        return HttpResponse.json(reads === 1 ? [request] : [{ ...request, status: 'cancelled' }]);
+      }),
+      http.get('*/api/me/assignments', () => HttpResponse.json([])),
+      http.get('*/api/cycles/current', () => HttpResponse.json(cycle)),
+      http.patch('*/api/signups/:signupId/requests/:observerNetId/confirm', () =>
+        HttpResponse.json({ error: { code: 'ALREADY_PAIRED', message: 'Someone else accepted first.' } }, { status: 409 })),
+    );
+    renderRoutes([{ path: '/faculty/observe', element: <ObserveRequestsPage /> }], '/faculty/observe');
+    await userEvent.click(await screen.findByLabelText(/Mon Sep 23/));
+    await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    expect(await screen.findByText('No new requests.')).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('Dr. Maya Lin: Someone else accepted first.');
   });
 });
 
@@ -163,6 +190,28 @@ describe('Observation form and signing (POST /api/observations/{id}/signed-form)
     });
     expect(await screen.findByText('5 of 5')).toBeVisible();
     expect(screen.queryByText('2 of 5')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Sign as observer/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps the edits for the signature page when the browser blocks storage (review finding 1)', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    open('/faculty/observe/30/form');
+    const scale = await screen.findByRole('radiogroup', { name: 'Content knowledge' });
+    await userEvent.click(within(scale).getByRole('radio', { name: '4' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.getByText('This browser did not let the draft be saved. It is kept until you reload the page.')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Go to signatures' }));
+    expect(await screen.findByText('4 of 5')).toBeVisible();
+    expect(screen.getByRole('button', { name: /Sign as observer/ })).toBeVisible();
+  });
+
+  it('does not offer a second signature for a stored draft that matches the signed form (review finding 2)', async () => {
+    const signed: ObservationDetail = { ...detail, answers: [{ ...detail.answers[0], rating: 5, comment: 'Good' }], observerSignedDate: '2026-09-22' };
+    localStorage.setItem(draftKey, JSON.stringify({ answers: { 7: { rating: 5, comment: 'Good' } }, otherComments: '', savedAt: 1 }));
+    open('/faculty/observe/30/sign', signed);
+    expect(await screen.findByText('Signed Sep 22')).toBeVisible();
     expect(screen.queryByRole('button', { name: /Sign as observer/ })).not.toBeInTheDocument();
   });
 

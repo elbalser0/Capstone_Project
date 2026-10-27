@@ -23,7 +23,7 @@ import {
   linkClass,
   type TagTone,
 } from '../../components/ui';
-import { hoursUntil } from '../../lib/dates';
+import { formatExpiry } from '../../lib/dates';
 import {
   classStart,
   countSummary,
@@ -187,12 +187,6 @@ const statusTag = (r: ObservationRequest) => <Tag tone={STATUS_TAG[r.status][0]}
 
 const ORDER: RequestStatus[] = ['accepted', 'pending', 'expired', 'cancelled', 'declined'];
 
-/** "Expires in 31 hours" for a pending request, by the app clock. */
-function expiresIn(r: ObservationRequest) {
-  const hours = hoursUntil(r.expiresAt);
-  return hours ? `Expires in ${hours} ${hours === 1 ? 'hour' : 'hours'}` : 'Expiring now';
-}
-
 /** "My requests" with the counts, then one row per request, accepted first: the observer, then the cells `children` renders. */
 function RequestTable({ requests, columns, min, head, children }: { requests: ObservationRequest[]; columns: string; min: string; head: string[]; children: (r: ObservationRequest) => ReactNode }) {
   const n = (s: RequestStatus) => requests.filter((r) => r.status === s).length;
@@ -237,7 +231,7 @@ function RequestsSent({ signup, requests }: { signup: Signup; requests: Observat
             <Cell className="text-gray-500">{r.status === 'pending' ? 'Not answered yet' : ''}</Cell>
             <Cell>{statusTag(r)}</Cell>
             <Cell className="text-gray-500">
-              {r.status === 'pending' ? expiresIn(r) : r.respondedDate ? formatDateTime(r.respondedDate) : formatDateTime(r.expiresAt)}
+              {r.status === 'pending' ? formatExpiry(r.expiresAt) : r.respondedDate ? formatDateTime(r.respondedDate) : formatDateTime(r.expiresAt)}
             </Cell>
           </>
         )}
