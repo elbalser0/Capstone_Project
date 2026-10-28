@@ -3,7 +3,7 @@ import { getPool } from '../db/pool.js';
 import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { mapCourseRows, type CourseSection } from './course.service.js';
-import { MAX_ACCEPTED } from './request.service.js';
+import { MAX_ACCEPTED, REQUEST_HOURS } from './request.service.js';
 import { displayName, type Rank } from './user.service.js';
 
 // Observer selection lists up to this many observers per sign-up (Business Logic doc).
@@ -20,7 +20,20 @@ export function alertFor(candidates: number): AlertType | null {
   return candidates < INSUFFICIENT_BELOW ? 'insufficient_observers' : null;
 }
 
-// Adds eligible observers to one sign-up until it has MAX_CANDIDATES, and returns how many it has.
+// SQL condition: the match `alias` was sent a request that has ended (declined, cancelled, expired,
+// or still pending after 48 hours). The row stays as request history, but it no longer counts as a
+// usable candidate, so a re-run can add replacements and raise the right alert.
+const endedRequest = (alias: string) => `EXISTS (
+  SELECT 1 FROM observation_request AS r
+  WHERE r.signup_id = ${alias}.signup_id AND r.observer_netid = ${alias}.observer_netid
+    AND (r.status IN ('declined', 'cancelled', 'expired')
+         OR (r.status = 'pending' AND r.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS}))))`;
+
+// Matches that still count toward the candidate limit and the alerts.
+const USABLE_COUNT = `SELECT count(*)::int FROM observer_match AS um WHERE um.signup_id = $1 AND NOT ${endedRequest('um')}`;
+
+// Adds eligible observers to one sign-up until it has MAX_CANDIDATES usable ones (observers whose
+// request ended don't count, and are never added again), and returns how many usable ones it has.
 // Eligible: has a sign-up in the same cycle (the observer pool), is active, is in the observee's
 // department, taught a course of the same level in the four semesters up to and including the
 // cycle's term, is not the observee, and has fewer than MAX_ACCEPTED observations this cycle.
@@ -57,14 +70,15 @@ async function addCandidates(client: PoolClient, signupId: number, cycleId: numb
            WHERE o.observer_netid = p.netid AND os.cycle_id = $2) < $3
     ORDER BY (SELECT count(*) FROM observer_match AS m JOIN sign_up AS ms ON ms.signup_id = m.signup_id
               WHERE m.observer_netid = p.netid AND ms.cycle_id = $2), p.netid
-    LIMIT GREATEST(0, $4 - (SELECT count(*) FROM observer_match WHERE signup_id = $1))
+    LIMIT GREATEST(0, $4 - (${USABLE_COUNT}))
   `, [signupId, cycleId, MAX_ACCEPTED, MAX_CANDIDATES]);
-  const { rows } = await client.query<{ n: number }>('SELECT count(*)::int AS n FROM observer_match WHERE signup_id = $1', [signupId]);
+  const { rows } = await client.query<{ n: number }>(`SELECT (${USABLE_COUNT}) AS n`, [signupId]);
   return rows[0].n;
 }
 
 // POST /api/cycles/{cycleId}/matching: run observer selection for every sign-up that has no
-// observer yet. Re-running replaces the list, except observers who were already sent a request.
+// observer yet. Re-running replaces the list, except observers who were already sent a request:
+// they stay as history, and only the ones whose request is still live count toward the five.
 export async function runMatching(cycleId: number) {
   await inTransaction(async (client) => {
     // One run at a time per cycle.
@@ -160,7 +174,7 @@ export async function listMatching(cycleId: number) {
     db.query<{ signup_id: number; netid: string; first_name: string; last_name: string; rank: Rank }>(`
       SELECT m.signup_id, p.netid, p.first_name, p.last_name, p.rank
       FROM observer_match AS m JOIN professor AS p ON p.netid = m.observer_netid
-      WHERE m.signup_id = ANY($1::int[])
+      WHERE m.signup_id = ANY($1::int[]) AND NOT ${endedRequest('m')}
       ORDER BY m.round_no, m.generated_date, p.netid
     `, [rows.map((row) => row.signup_id)]),
   ]);
