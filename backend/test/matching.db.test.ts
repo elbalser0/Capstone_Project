@@ -1,9 +1,9 @@
-// Database tests for POST /api/cycles/{cycleId}/matching. Setup is in db-test-helper.ts.
+// Database tests for /api/cycles/{cycleId}/matching. Setup is in db-test-helper.ts.
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import { skip, sql, useTestDatabase } from './db-test-helper.js';
 
-const { runMatching } = await import('../src/services/matching.service.js');
+const { listMatching, runMatching } = await import('../src/services/matching.service.js');
 
 // Section per professor in the current term (term 6). Course 1 is 1000 level, course 2 is 4000 level.
 const CURRENT = [
@@ -76,6 +76,13 @@ describe('observer matching against the database', { skip }, () => {
     assert.ok(ee.ranAt);
     assert.equal(ee.section.sectionId, '1');
     assert.equal(ee.candidates[0].displayName, 'Dr. g1 Test');
+  });
+
+  test('GET returns stored matching results without changing them', async () => {
+    assert.deepEqual((await listMatching(1)).find((row) => row.observee.netid === 'ee')?.candidates, []);
+    const generated = await runMatching(1);
+    assert.deepEqual(await listMatching(1), generated);
+    await assert.rejects(listMatching(99), { code: 'NOT_FOUND' });
   });
 
   test('with g1-g6 out of the pool, nobody else qualifies: every other rule excludes someone', async () => {
