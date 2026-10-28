@@ -101,10 +101,9 @@ Faculty choose observers from their recommended list, send requests, and follow 
 | None accepted | requests exist but none is pending or accepted |
 | Matched | the sign-up has an observation |
 
-It sends `POST /api/signups/{signupId}/requests` with the selected `observerNetids`, never an empty list (the API reads an empty or missing list as every candidate). While requests are out, the list is not ready, or none were accepted, it re-reads `GET /api/me/signup`, `GET /api/signups/{signupId}/candidates` and `GET /api/me/requests/outgoing` every 30 seconds and when the window regains focus. It stops once matched or while the professor is choosing.
+It sends `POST /api/signups/{signupId}/requests` with the selected `observerNetids`, never an empty list (the API reads an empty or missing list as every candidate). Expired requests can be resent; pending and answered requests are not sent again. While requests are out, the list is not ready, or none were accepted, it re-reads `GET /api/me/signup`, `GET /api/signups/{signupId}/candidates` and `GET /api/me/requests/outgoing` every 30 seconds and when the window regains focus. It stops once matched or while the professor is choosing.
 
 Not settled with the backend yet:
 
 - The candidates response cannot tell "matching has not run" from "matching found no eligible observers", so after the deadline both show the same neutral message.
-- Resending to an observer whose request expired follows the mock API; the backend has not confirmed it.
 - `POST /api/signups/{signupId}/requests` is implemented in the backend. This page still needs the backend candidate and outgoing-request reads before it can use the live API end to end.
