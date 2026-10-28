@@ -107,4 +107,4 @@ Not settled with the backend yet:
 
 - The candidates response cannot tell "matching has not run" from "matching found no eligible observers", so after the deadline both show the same neutral message.
 - Resending to an observer whose request expired follows the mock API; the backend has not confirmed it.
-- `GET /api/signups/{signupId}/candidates`, `POST /api/signups/{signupId}/requests` and `GET /api/me/requests/outgoing` are not in the backend yet. This page is verified against the mock API and the tests in `RequestsPage.test.tsx` only.
+- `POST /api/signups/{signupId}/requests` is implemented in the backend. This page still needs the backend candidate and outgoing-request reads before it can use the live API end to end.

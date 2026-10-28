@@ -134,6 +134,42 @@ export function listIncomingRequests(netid: string) {
       ORDER BY start_date DESC, cycle_id DESC LIMIT 1)`, [netid]);
 }
 
+// POST /api/signups/{signupId}/requests: send to all or selected matched observers.
+export async function sendRequests(signupId: number, observeeNetid: string, observerNetids?: string[]) {
+  await inTransaction(async (client) => {
+    // Confirm also locks this sign-up, so sending cannot race with a new pairing.
+    const signup = await client.query(
+      'SELECT 1 FROM sign_up WHERE signup_id = $1 AND observee_netid = $2 FOR UPDATE',
+      [signupId, observeeNetid]);
+    if (!signup.rowCount) throw new ApiError(404, 'NOT_FOUND', 'Sign-up not found.');
+
+    const paired = await client.query('SELECT 1 FROM observation WHERE signup_id = $1', [signupId]);
+    if (paired.rowCount) throw new ApiError(409, 'ALREADY_PAIRED', 'You are already paired with an observer.');
+
+    const { rows } = await client.query<{ observer_netid: string }>(
+      'SELECT observer_netid FROM observer_match WHERE signup_id = $1', [signupId]);
+    const candidates = new Set(rows.map((row) => row.observer_netid));
+    if (!candidates.size) throw new ApiError(409, 'NO_CANDIDATES', 'Your observer list is not ready yet.');
+    const targets = observerNetids?.length ? observerNetids : [...candidates];
+    if (targets.some((id) => !candidates.has(id))) {
+      throw new ApiError(400, 'NOT_A_CANDIDATE', 'Requests can only go to observers on your list.');
+    }
+
+    for (const observerNetid of targets) {
+      await client.query(`
+        INSERT INTO observation_request (signup_id, observer_netid, status, sent_date)
+        VALUES ($1, $2, 'pending', now())
+        ON CONFLICT (signup_id, observer_netid) DO UPDATE
+        SET status = 'pending', sent_date = now(), responded_date = NULL
+        WHERE observation_request.status = 'expired'
+           OR (observation_request.status = 'pending'
+               AND observation_request.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS}))
+      `, [signupId, observerNetid]);
+    }
+  });
+  return fetchRequests('r.signup_id = $1', [signupId]);
+}
+
 async function getRequest(signupId: number, observerNetid: string) {
   const [request] = await fetchRequests('r.signup_id = $1 AND r.observer_netid = $2', [signupId, observerNetid]);
   if (!request) throw new ApiError(404, 'NOT_FOUND', 'Request not found.');

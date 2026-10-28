@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import { skip, sql, useTestDatabase } from './db-test-helper.js';
 
-const { confirmRequest, declineRequest } = await import('../src/services/request.service.js');
+const { confirmRequest, declineRequest, sendRequests } = await import('../src/services/request.service.js');
 
 const OBSERVEE = ['ee1', 'ee2', 'ee3', 'ee4', 'ee5', 'ee6'];
 const dayOffset = (days: number) => `(CURRENT_DATE + ${days})::date`;
@@ -69,6 +69,37 @@ describe('confirm and decline against the database', { skip }, () => {
     assert.ok(result.respondedDate);
     const { rows } = await sql('SELECT observer_netid, scheduled_date::text, status FROM observation WHERE signup_id = 1');
     assert.deepEqual(rows, [{ observer_netid: 'obsA', scheduled_date: date, status: 'scheduled' }]);
+  });
+
+  test('observee sends to selected candidates, and expired requests can be resent', async () => {
+    await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA'), (1, 'obsB')`);
+    const first = await sendRequests(1, 'ee1', ['obsA']);
+    assert.equal(first.length, 1);
+    assert.equal(first[0].status, 'pending');
+    assert.equal(first[0].observer.netid, 'obsA');
+    assert.equal(first[0].proposedDates.length, 3);
+    const sentDate = first[0].sentDate;
+    assert.equal((await sendRequests(1, 'ee1', ['obsA']))[0].sentDate, sentDate);
+
+    await sql("UPDATE observation_request SET sent_date = now() - interval '49 hours' WHERE signup_id = 1");
+    const resent = await sendRequests(1, 'ee1', ['obsA']);
+    assert.equal(resent[0].status, 'pending');
+    assert.notEqual(resent[0].sentDate, sentDate);
+    assert.equal((await sendRequests(1, 'ee1')).length, 2);
+  });
+
+  test('sending rejects other sign-ups, unknown candidates, and paired sign-ups', async () => {
+    await assert.rejects(sendRequests(1, 'ee1'), { code: 'NO_CANDIDATES' });
+    await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA')`);
+    await assert.rejects(sendRequests(1, 'ee2', ['obsA']), { code: 'NOT_FOUND' });
+    await assert.rejects(sendRequests(1, 'ee1', ['obsB']), { code: 'NOT_A_CANDIDATE' });
+    assert.equal((await sql('SELECT count(*)::int AS count FROM observation_request')).rows[0].count, 0);
+    await sendRequests(1, 'ee1', ['obsA']);
+    await declineRequest(1, 'obsA');
+    assert.equal((await sendRequests(1, 'ee1', ['obsA']))[0].status, 'declined');
+    await sql("UPDATE observation_request SET status = 'pending', responded_date = NULL WHERE signup_id = 1");
+    await confirmRequest(1, 'obsA', await futureDate(7));
+    await assert.rejects(sendRequests(1, 'ee1', ['obsA']), { code: 'ALREADY_PAIRED' });
   });
 
   test('confirm cancels the other pending requests on the sign-up but leaves expired ones alone', async () => {
