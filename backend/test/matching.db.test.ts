@@ -126,6 +126,56 @@ describe('observer matching against the database', { skip }, () => {
     assert.deepEqual(await alerts('math'), ['no_observer']);
   });
 
+  // Sends ee a request from each observer, with the given status and age in hours.
+  async function endRequests(rows: [string, string, number][]) {
+    for (const [observer, status, hoursAgo] of rows) {
+      await sql(`INSERT INTO observation_request (signup_id, observer_netid, status, sent_date, responded_date)
+                 VALUES ($1, $2, $3, now() - make_interval(hours => $4),
+                         CASE WHEN $3 = 'pending' THEN NULL ELSE now() - make_interval(hours => $4) END)`,
+      [signupOf('ee'), observer, status, hoursAgo]);
+    }
+  }
+
+  test('running again replaces observers whose request was declined, cancelled or expired', async () => {
+    await runMatching(1);
+    // ee's list is g1-g5: g1 declined, g2 cancelled, g3 expired, g4 pending past 48 hours, g5 still pending.
+    await endRequests([['g1', 'declined', 5], ['g2', 'cancelled', 5], ['g3', 'expired', 60], ['g4', 'pending', 60], ['g5', 'pending', 1]]);
+    const ee = (await runMatching(1)).find((row) => row.observee.netid === 'ee')!;
+    // g5 keeps its slot and g6 is the only eligible replacement; the four ended observers are not shown or re-added.
+    assert.deepEqual(ee.candidates.map((c) => c.netid), ['g5', 'g6']);
+    assert.equal(ee.alert?.alertType, 'insufficient_observers');
+    // Request history is preserved: the ended rows are still there.
+    assert.deepEqual(await candidates('ee'), ['g1', 'g2', 'g3', 'g4', 'g5', 'g6']);
+    const { rows } = await sql('SELECT count(*)::int AS n FROM observation_request WHERE signup_id = $1', [signupOf('ee')]);
+    assert.equal(rows[0].n, 5);
+  });
+
+  test('when all five requests end and nobody else qualifies, running again raises no_observer', async () => {
+    await runMatching(1);
+    await endRequests([['g1', 'declined', 5], ['g2', 'declined', 5], ['g3', 'cancelled', 5], ['g4', 'expired', 60], ['g5', 'declined', 5]]);
+    await sql(`UPDATE professor SET is_active = false WHERE netid = 'g6'`);
+    const ee = (await runMatching(1)).find((row) => row.observee.netid === 'ee')!;
+    assert.deepEqual(ee.candidates, []);
+    assert.equal(ee.alert?.alertType, 'no_observer');
+    assert.equal((await candidates('ee')).length, 5);
+  });
+
+  test('when all five requests end and others qualify, running again gives a new usable list', async () => {
+    await runMatching(1);
+    await endRequests([['g1', 'declined', 5], ['g2', 'declined', 5], ['g3', 'cancelled', 5], ['g4', 'expired', 60], ['g5', 'declined', 5]]);
+    // Three more eligible observers join the pool.
+    for (const netid of ['h1', 'h2', 'h3']) {
+      await sql(`INSERT INTO professor (netid, first_name, last_name, email, rank, dept_id, eval_interval_years, start_term, is_active)
+                 VALUES ($1, $1, 'Test', $1 || '@example.edu', 'full', 1, 2, 1, true)`, [netid]);
+      await sql(`INSERT INTO section (course_id, term_id, section_num, instructor_id, class_mode) VALUES (1, 6, $2, $1, 'in-person')`,
+        [netid, `10${netid.slice(1)}`]);
+      await sql(`INSERT INTO sign_up (cycle_id, observee_netid, section_id) VALUES (1, $1, (SELECT max(section_id) FROM section))`, [netid]);
+    }
+    const ee = (await runMatching(1)).find((row) => row.observee.netid === 'ee')!;
+    assert.deepEqual(ee.candidates.map((c) => c.netid).sort(), ['g6', 'h1', 'h2', 'h3']);
+    assert.equal(ee.alert, null);
+  });
+
   test('refuses before the sign-up deadline and for a cycle that does not exist', async () => {
     await sql(`UPDATE eval_cycle SET signup_deadline = CURRENT_DATE WHERE cycle_id = 1`);
     await assert.rejects(runMatching(1), { code: 'SIGNUP_OPEN' });
