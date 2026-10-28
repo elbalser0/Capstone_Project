@@ -1,5 +1,6 @@
 import { Router, type Request } from 'express';
 import { ApiError } from '../middleware/error.middleware.js';
+import { listOutgoingRequests } from '../services/request.service.js';
 import { isIsoDate } from '../services/cycle.service.js';
 import { confirmRequest, declineRequest, listIncomingRequests } from '../services/request.service.js';
 
@@ -37,4 +38,9 @@ signupRequestsRouter.patch('/:observerNetId/confirm', async (req, res) => {
 signupRequestsRouter.patch('/:observerNetId/decline', async (req, res) => {
   const { signupId, observerNetid } = requestTarget(req);
   res.status(200).json(await declineRequest(signupId, observerNetid));
+});
+
+// Requests sent for my own sign-up, so I can see who has answered.
+myRequestsRouter.get('/outgoing', async (req, res) => {
+  res.status(200).json(await listOutgoingRequests(req.user!.netid));
 });
