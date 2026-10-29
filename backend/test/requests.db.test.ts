@@ -104,6 +104,13 @@ describe('confirm and decline against the database', { skip }, () => {
     await assert.rejects(sendRequests(1, 'ee1', ['obsA']), { code: 'ALREADY_PAIRED' });
   });
 
+  test('sending is blocked after the observation deadline', async () => {
+    await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA')`);
+    await sql("UPDATE eval_cycle SET observation_deadline = CURRENT_DATE - 1 WHERE cycle_id = 1");
+    await assert.rejects(sendRequests(1, 'ee1', ['obsA']), { code: 'OBSERVATION_CLOSED' });
+    assert.equal((await sql('SELECT count(*)::int AS count FROM observation_request')).rows[0].count, 0);
+  });
+
   test('confirm cancels the other pending requests on the sign-up but leaves expired ones alone', async () => {
     await addRequest(1, 'obsA');
     await addRequest(1, 'obsB');

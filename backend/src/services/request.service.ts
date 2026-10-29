@@ -138,10 +138,15 @@ export function listIncomingRequests(netid: string) {
 export async function sendRequests(signupId: number, observeeNetid: string, observerNetids?: string[]) {
   await inTransaction(async (client) => {
     // Confirm also locks this sign-up, so sending cannot race with a new pairing.
-    const signup = await client.query(
-      'SELECT 1 FROM sign_up WHERE signup_id = $1 AND observee_netid = $2 FOR UPDATE',
+    const signup = await client.query<{ observation_closed: boolean }>(
+      `SELECT c.observation_deadline < CURRENT_DATE AS observation_closed
+       FROM sign_up AS s JOIN eval_cycle AS c ON c.cycle_id = s.cycle_id
+       WHERE s.signup_id = $1 AND s.observee_netid = $2 FOR UPDATE OF s`,
       [signupId, observeeNetid]);
     if (!signup.rowCount) throw new ApiError(404, 'NOT_FOUND', 'Sign-up not found.');
+    if (signup.rows[0].observation_closed) {
+      throw new ApiError(409, 'OBSERVATION_CLOSED', 'The observation deadline has passed.');
+    }
 
     const paired = await client.query('SELECT 1 FROM observation WHERE signup_id = $1', [signupId]);
     if (paired.rowCount) throw new ApiError(409, 'ALREADY_PAIRED', 'You are already paired with an observer.');
