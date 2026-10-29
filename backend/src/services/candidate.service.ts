@@ -1,6 +1,6 @@
 import { getPool } from '../db/pool.js';
 import { ApiError } from '../middleware/error.middleware.js';
-import { requestStatus } from './request.service.js';
+import { REQUEST_HOURS, requestStatus } from './request.service.js';
 import { displayName, type Rank } from './user.service.js';
 
 type StoredRequestStatus = 'pending' | 'accepted' | 'declined' | 'cancelled' | 'expired';
@@ -61,6 +61,13 @@ export async function listSignupCandidates(signupId: number, netid: string) {
     JOIN section AS signup_section ON signup_section.section_id = signup.section_id
     JOIN course AS signup_course ON signup_course.course_id = signup_section.course_id
     LEFT JOIN observer_match AS m ON m.signup_id = signup.signup_id
+      AND NOT EXISTS (
+        SELECT 1 FROM observation_request AS ended
+        WHERE ended.signup_id = m.signup_id AND ended.observer_netid = m.observer_netid
+          AND (ended.status IN ('declined', 'cancelled', 'expired')
+               OR (ended.status = 'pending'
+                   AND ended.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS})))
+      )
     LEFT JOIN professor AS p ON p.netid = m.observer_netid
     LEFT JOIN observation_request AS r ON r.signup_id = m.signup_id AND r.observer_netid = m.observer_netid
     WHERE signup.signup_id = $1 AND signup.observee_netid = $2

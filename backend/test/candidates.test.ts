@@ -43,14 +43,14 @@ test('candidates are scoped to the signup owner and include request state', asyn
 
     rows = [{
       observer_netid: 'grace', first_name: 'Grace', last_name: 'Hopper', rank: 'full', round_no: 1,
-      request_status: 'pending', sent_date: new Date('2026-10-20T12:00:00Z'),
+      request_status: 'pending', sent_date: new Date('2026-10-22T11:00:00Z'),
       db_now: new Date('2026-10-22T12:00:00Z'),
       teaches: ['Computer Science 1337'], free_at_proposed_times: true,
     }];
     assert.deepEqual(await listSignupCandidates(9, 'maya'), [{
       observer: { netid: 'grace', firstName: 'Grace', lastName: 'Hopper', displayName: 'Dr. Grace Hopper', rank: 'full' },
       roundNo: 1,
-      request: { status: 'expired', sentDate: '2026-10-20T12:00:00.000Z' },
+      request: { status: 'pending', sentDate: '2026-10-22T11:00:00.000Z' },
       teaches: ['Computer Science 1337'], freeAtProposedTimes: true,
     }]);
   } finally {

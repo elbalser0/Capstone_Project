@@ -82,7 +82,7 @@ function ChooseObservers({ signup, candidates, signupDeadline }: { signup: Signu
   const navigate = useNavigate();
   const notifications = useNotifications();
   const send = useSendRequests(signup.signupId);
-  const open = candidates.filter((c) => !c.request || c.request.status === 'expired');
+  const open = candidates.filter((c) => !c.request);
   const openIds = open.map((c) => c.observer.netid);
   const [selected, setSelected] = useState<string[]>(openIds);
   // Only observers still on the current list can be sent; a refreshed list drops anyone who left it.

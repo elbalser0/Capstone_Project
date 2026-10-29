@@ -243,11 +243,11 @@ test('drops an observer who left the refreshed list from the selection and the p
   expect(bodies).toEqual([{ observerNetids: ['er123', 'ap123'] }]);
 });
 
-test('lists an observer whose earlier request expired so it can be sent again (mock API contract)', async () => {
+test('only fresh candidates can be selected after previous requests end', async () => {
   current.candidates = [candidate(observer, { status: 'expired', sentDate: '2026-09-10T15:00:00Z' }), candidate(second), candidate(third, { status: 'declined', sentDate: '2026-09-10T15:00:00Z' })];
   renderRequests();
-  expect(await screen.findByText('2 of 2 selected')).toBeVisible();
-  expect(screen.getByRole('checkbox', { name: 'Dr. Elena Ruiz' })).toBeChecked();
+  expect(await screen.findByText('1 of 1 selected')).toBeVisible();
+  expect(screen.queryByRole('checkbox', { name: 'Dr. Elena Ruiz' })).toBeNull();
   expect(screen.queryByRole('checkbox', { name: 'Dr. Ana Park' })).toBeNull();
 });
 
