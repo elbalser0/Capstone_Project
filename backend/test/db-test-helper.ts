@@ -1,12 +1,17 @@
-// Shared setup for the *.db.test.ts files. Run them with a separate, empty PostgreSQL database:
+// Shared setup for the *.db.test.ts files. Run them with a separate, empty PostgreSQL database
+// by setting TEST_DATABASE_URL in backend/.env or in the shell:
 //   TEST_DATABASE_URL=postgresql://.../assessment_test npm test
 // The database name must end in "_test" because the setup drops and rebuilds the schema.
 // Without TEST_DATABASE_URL the database tests are skipped.
 import { readFile } from 'node:fs/promises';
 import { after, before } from 'node:test';
 import type { PoolClient } from 'pg';
+// Load backend/.env so TEST_DATABASE_URL can live there. Shell variables still win.
+import '../src/env.js';
 
-const url = process.env.TEST_DATABASE_URL?.trim();
+// Neon's pooled host (-pooler) does not keep the session advisory lock below, so test files
+// would rebuild the schema at the same time. Use the direct host for the same database.
+const url = process.env.TEST_DATABASE_URL?.trim().replace('-pooler.', '.');
 export const skip = !url
   ? 'set TEST_DATABASE_URL to run database tests'
   : !new URL(url).pathname.replace('/', '').endsWith('_test')
