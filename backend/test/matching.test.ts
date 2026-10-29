@@ -10,6 +10,7 @@ test('matching requires a login', async () => {
     await new Promise<void>((resolve, reject) => server.once('listening', resolve).once('error', reject));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     assert.equal((await fetch(`${base}/api/cycles/1/matching`, { method: 'POST' })).status, 401);
+    assert.equal((await fetch(`${base}/api/cycles/1/matching`)).status, 401);
   } finally {
     if (server.listening) {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

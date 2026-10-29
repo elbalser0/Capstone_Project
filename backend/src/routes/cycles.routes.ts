@@ -9,7 +9,7 @@ import {
   type Deadlines,
 } from '../services/cycle.service.js';
 import { listCycleSignups } from '../services/cycle-signups.service.js';
-import { runMatching } from '../services/matching.service.js';
+import { listMatching, runMatching } from '../services/matching.service.js';
 
 // Mounted at /api/cycles (after requireLogin)
 export const cyclesRouter = Router();
@@ -69,4 +69,9 @@ cyclesRouter.patch('/:cycleId', requireAC, async (req, res) => {
 cyclesRouter.post('/:cycleId/matching', requireAC, async (req, res) => {
   const cycleId = positiveId(req.params.cycleId, 'INVALID_CYCLE_ID', 'cycleId');
   res.status(200).json(await runMatching(cycleId));
+});
+
+cyclesRouter.get('/:cycleId/matching', requireAC, async (req, res) => {
+  const cycleId = positiveId(req.params.cycleId, 'INVALID_CYCLE_ID', 'cycleId');
+  res.status(200).json(await listMatching(cycleId));
 });
