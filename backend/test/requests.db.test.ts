@@ -134,11 +134,13 @@ describe('confirm and decline against the database', { skip }, () => {
   test('the limit of 3 holds when the same observer confirms two sign-ups at once', async () => {
     await addAccepted(1, 'obsA');
     await addAccepted(2, 'obsA');
+    await sql(`INSERT INTO proposed_date (signup_id, date)
+               VALUES (3, ${dayOffset(11)}), (4, ${dayOffset(11)})`);
     await addRequest(3, 'obsA');
     await addRequest(4, 'obsA');
     await addRequest(5, 'obsA');
     await addRequest(6, 'obsA', 72);
-    const date = await futureDate(7);
+    const date = await futureDate(11);
     const results = await Promise.allSettled([confirmRequest(3, 'obsA', date), confirmRequest(4, 'obsA', date)]);
     assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
     const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
@@ -179,7 +181,7 @@ describe('confirm and decline against the database', { skip }, () => {
   test('confirm rejects a date when the observer teaches at the same time', async () => {
     // obsA teaches 10:30-11:20 on Mondays; the observed class meets 10:00-10:50 every day.
     await sql(`INSERT INTO section (course_id, term_id, section_num, instructor_id, class_mode)
-               VALUES (1, 1, '900', 'obsA', 'in-person')`);
+               VALUES (1, 1, '900', 'obsA', 'online')`);
     await sql(`INSERT INTO meeting_time (section_id, day_of_week, start_time, end_time)
                VALUES (7, 'monday', '10:30', '11:20'), (7, 'tuesday', '10:50', '12:05')`);
     await sql(`DELETE FROM proposed_date WHERE signup_id = 1`);
@@ -199,6 +201,15 @@ describe('confirm and decline against the database', { skip }, () => {
     // Tuesday's class starts exactly when the observed class ends, so it doesn't overlap.
     const result = await confirmRequest(1, 'obsA', dayDate('tuesday'));
     assert.equal(result.status, 'accepted');
+  });
+
+  test('confirm rejects an overlapping scheduled observation but allows a different date', async () => {
+    await addAccepted(2, 'obsA');
+    await addRequest(1, 'obsA');
+    await assert.rejects(confirmRequest(1, 'obsA', await futureDate(7)),
+      { code: 'SCHEDULE_CONFLICT', message: 'You already have an observation scheduled at that time.' });
+    assert.equal(await status(1, 'obsA'), 'pending');
+    assert.equal((await confirmRequest(1, 'obsA', await futureDate(9))).status, 'accepted');
   });
 
   test('a class in a different term does not count as a conflict', async () => {

@@ -245,6 +245,26 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
         `You teach ${c.course_num}.${c.section_num} from ${c.start_time.slice(0, 5)} to ${c.end_time.slice(0, 5)} at that time.`);
     }
 
+    // The observer cannot accept two observations whose class meetings overlap.
+    const booked = await client.query(`
+      SELECT 1 FROM sign_up AS target
+      JOIN meeting_time AS target_meeting ON target_meeting.section_id = target.section_id
+        AND target_meeting.day_of_week = lower(trim(to_char($3::date, 'FMDay')))
+      JOIN observation AS existing ON existing.observer_netid = $2
+        AND existing.signup_id <> target.signup_id AND existing.scheduled_date = $3::date
+        AND existing.status <> 'not_completed'
+      JOIN sign_up AS existing_signup ON existing_signup.signup_id = existing.signup_id
+      JOIN meeting_time AS existing_meeting ON existing_meeting.section_id = existing_signup.section_id
+        AND existing_meeting.day_of_week = target_meeting.day_of_week
+      WHERE target.signup_id = $1
+        AND existing_meeting.start_time < target_meeting.end_time
+        AND target_meeting.start_time < existing_meeting.end_time
+      LIMIT 1
+    `, [signupId, observerNetid, date]);
+    if (booked.rowCount) {
+      throw new ApiError(409, 'SCHEDULE_CONFLICT', 'You already have an observation scheduled at that time.');
+    }
+
     const template = await client.query<{ version_id: number }>(`
       SELECT version_id FROM template_version WHERE status = 'live'
       ORDER BY published_date DESC, version_id DESC LIMIT 1
