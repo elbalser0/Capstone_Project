@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import { app } from '../src/app.js';
+import { readSendRequests } from '../src/routes/requests.routes.js';
 import { expiresAt, requestStatus, withStartTimes } from '../src/services/request.service.js';
 
 test('request endpoints require a login', async () => {
@@ -10,6 +11,7 @@ test('request endpoints require a login', async () => {
     await new Promise<void>((resolve, reject) => server.once('listening', resolve).once('error', reject));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     assert.equal((await fetch(`${base}/api/me/requests/incoming`)).status, 401);
+    assert.equal((await fetch(`${base}/api/signups/1/requests`, { method: 'POST' })).status, 401);
     for (const action of ['confirm', 'decline']) {
       const response = await fetch(`${base}/api/signups/1/requests/abc123/${action}`, {
         method: 'PATCH',
@@ -22,6 +24,15 @@ test('request endpoints require a login', async () => {
     if (server.listening) {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+  }
+});
+
+test('send requests accepts an optional list of distinct observer IDs', () => {
+  assert.equal(readSendRequests(undefined), undefined);
+  assert.deepEqual(readSendRequests({ observerNetids: [] }), []);
+  assert.deepEqual(readSendRequests({ observerNetids: ['obsA', 'obsA', 'obsB'] }), ['obsA', 'obsB']);
+  for (const body of [{ observerNetids: 'obsA' }, { observerNetids: [5] }, { observerNetids: [''] }]) {
+    assert.throws(() => readSendRequests(body), { code: 'INVALID_OBSERVERS' });
   }
 });
 

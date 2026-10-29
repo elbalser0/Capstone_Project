@@ -134,6 +134,51 @@ export function listIncomingRequests(netid: string) {
       ORDER BY start_date DESC, cycle_id DESC LIMIT 1)`, [netid]);
 }
 
+// POST /api/signups/{signupId}/requests: send to all or selected matched observers.
+export async function sendRequests(signupId: number, observeeNetid: string, observerNetids?: string[]) {
+  await inTransaction(async (client) => {
+    // Confirm also locks this sign-up, so sending cannot race with a new pairing.
+    const signup = await client.query<{ observation_closed: boolean }>(
+      `SELECT c.observation_deadline < CURRENT_DATE AS observation_closed
+       FROM sign_up AS s JOIN eval_cycle AS c ON c.cycle_id = s.cycle_id
+       WHERE s.signup_id = $1 AND s.observee_netid = $2 FOR UPDATE OF s`,
+      [signupId, observeeNetid]);
+    if (!signup.rowCount) throw new ApiError(404, 'NOT_FOUND', 'Sign-up not found.');
+    if (signup.rows[0].observation_closed) {
+      throw new ApiError(409, 'OBSERVATION_CLOSED', 'The observation deadline has passed.');
+    }
+
+    const paired = await client.query('SELECT 1 FROM observation WHERE signup_id = $1', [signupId]);
+    if (paired.rowCount) throw new ApiError(409, 'ALREADY_PAIRED', 'You are already paired with an observer.');
+
+    const { rows } = await client.query<{ observer_netid: string }>(
+      `SELECT m.observer_netid FROM observer_match AS m
+       WHERE m.signup_id = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM observation_request AS ended
+           WHERE ended.signup_id = m.signup_id AND ended.observer_netid = m.observer_netid
+             AND (ended.status IN ('declined', 'cancelled', 'expired')
+                  OR (ended.status = 'pending'
+                      AND ended.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS})))
+         )`, [signupId]);
+    const candidates = new Set(rows.map((row) => row.observer_netid));
+    if (!candidates.size) throw new ApiError(409, 'NO_CANDIDATES', 'Your observer list is not ready yet.');
+    const targets = observerNetids?.length ? observerNetids : [...candidates];
+    if (targets.some((id) => !candidates.has(id))) {
+      throw new ApiError(400, 'NOT_A_CANDIDATE', 'Requests can only go to observers on your list.');
+    }
+
+    for (const observerNetid of targets) {
+      await client.query(`
+        INSERT INTO observation_request (signup_id, observer_netid, status, sent_date)
+        VALUES ($1, $2, 'pending', now())
+        ON CONFLICT (signup_id, observer_netid) DO NOTHING
+      `, [signupId, observerNetid]);
+    }
+  });
+  return fetchRequests('r.signup_id = $1', [signupId]);
+}
+
 async function getRequest(signupId: number, observerNetid: string) {
   const [request] = await fetchRequests('r.signup_id = $1 AND r.observer_netid = $2', [signupId, observerNetid]);
   if (!request) throw new ApiError(404, 'NOT_FOUND', 'Request not found.');
@@ -203,6 +248,26 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
       const c = conflict.rows[0];
       throw new ApiError(409, 'SCHEDULE_CONFLICT',
         `You teach ${c.course_num}.${c.section_num} from ${c.start_time.slice(0, 5)} to ${c.end_time.slice(0, 5)} at that time.`);
+    }
+
+    // The observer cannot accept two observations whose class meetings overlap.
+    const booked = await client.query(`
+      SELECT 1 FROM sign_up AS target
+      JOIN meeting_time AS target_meeting ON target_meeting.section_id = target.section_id
+        AND target_meeting.day_of_week = lower(trim(to_char($3::date, 'FMDay')))
+      JOIN observation AS existing ON existing.observer_netid = $2
+        AND existing.signup_id <> target.signup_id AND existing.scheduled_date = $3::date
+        AND existing.status <> 'not_completed'
+      JOIN sign_up AS existing_signup ON existing_signup.signup_id = existing.signup_id
+      JOIN meeting_time AS existing_meeting ON existing_meeting.section_id = existing_signup.section_id
+        AND existing_meeting.day_of_week = target_meeting.day_of_week
+      WHERE target.signup_id = $1
+        AND existing_meeting.start_time < target_meeting.end_time
+        AND target_meeting.start_time < existing_meeting.end_time
+      LIMIT 1
+    `, [signupId, observerNetid, date]);
+    if (booked.rowCount) {
+      throw new ApiError(409, 'SCHEDULE_CONFLICT', 'You already have an observation scheduled at that time.');
     }
 
     const template = await client.query<{ version_id: number }>(`
