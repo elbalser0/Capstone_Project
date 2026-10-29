@@ -277,6 +277,7 @@ export const facultyHandlers = [
     }
     const { date } = (await request.json()) as ConfirmRequestInput;
     if (!db.proposed_date.some((p) => p.signup_id === s.signup_id && p.date === date)) return fail(400, 'INVALID_DATE', 'Pick one of the proposed dates.');
+    if (!freeDates(db, s, me.netid).includes(date)) return fail(409, 'SCHEDULE_CONFLICT', 'You have a class or observation at that time.');
     const live = db.template_version.find((v) => v.status === 'live')!;
     db.observation.push({
       observation_id: newId('OB'), signup_id: s.signup_id, observer_netid: me.netid, version_id: live.version_id,

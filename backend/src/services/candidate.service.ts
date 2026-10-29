@@ -48,12 +48,25 @@ export async function listSignupCandidates(signupId: number, netid: string) {
              JOIN meeting_time AS signup_meeting ON signup_meeting.section_id = signup.section_id
                AND signup_meeting.day_of_week = lower(trim(to_char(proposed.date, 'FMDay')))
              JOIN section AS observer_section ON observer_section.instructor_id = m.observer_netid
-               AND observer_section.term_id = cycle.term_id AND observer_section.class_mode = 'in-person'
+               AND observer_section.term_id = cycle.term_id
              JOIN meeting_time AS observer_meeting ON observer_meeting.section_id = observer_section.section_id
                AND observer_meeting.day_of_week = signup_meeting.day_of_week
              WHERE proposed.signup_id = signup.signup_id
                AND observer_meeting.start_time < signup_meeting.end_time
                AND signup_meeting.start_time < observer_meeting.end_time
+           ) AND NOT EXISTS (
+             SELECT 1 FROM proposed_date AS proposed
+             JOIN meeting_time AS signup_meeting ON signup_meeting.section_id = signup.section_id
+               AND signup_meeting.day_of_week = lower(trim(to_char(proposed.date, 'FMDay')))
+             JOIN observation AS booked ON booked.observer_netid = m.observer_netid
+               AND booked.signup_id <> signup.signup_id AND booked.scheduled_date = proposed.date
+               AND booked.status <> 'not_completed'
+             JOIN sign_up AS booked_signup ON booked_signup.signup_id = booked.signup_id
+             JOIN meeting_time AS booked_meeting ON booked_meeting.section_id = booked_signup.section_id
+               AND booked_meeting.day_of_week = signup_meeting.day_of_week
+             WHERE proposed.signup_id = signup.signup_id
+               AND booked_meeting.start_time < signup_meeting.end_time
+               AND signup_meeting.start_time < booked_meeting.end_time
            ) AS free_at_proposed_times
     FROM sign_up AS signup
     JOIN eval_cycle AS cycle ON cycle.cycle_id = signup.cycle_id
