@@ -81,6 +81,13 @@ async function loadSections(sectionIds: number[]): Promise<Map<string, CourseSec
   return new Map(mapCourseRows(rows).map((section) => [section.sectionId, section]));
 }
 
+
+async function raiseNoAcceptanceAlert(client: { query: (sql: string, params?: unknown[]) => Promise<{ rowCount?: number | null }> }, signupId: number) {
+  const result = await client.query(`SELECT 1 WHERE EXISTS (SELECT 1 FROM observation_request WHERE signup_id = $1) AND NOT EXISTS (SELECT 1 FROM observation WHERE signup_id = $1) AND NOT EXISTS (SELECT 1 FROM observation_request WHERE signup_id = $1 AND status = 'pending' AND sent_date > now() - make_interval(hours => 48))`, [signupId]);
+  if (!result.rowCount) return;
+  await client.query(`INSERT INTO alert (signup_id, alert_type) SELECT $1, 'no_acceptance' WHERE NOT EXISTS (SELECT 1 FROM alert WHERE signup_id = $1 AND alert_type = 'no_acceptance' AND resolved_date IS NULL)`, [signupId]);
+}
+
 async function fetchRequests(where: string, params: unknown[]) {
   const db = getPool();
   const { rows } = await db.query<RequestRow>(`
@@ -162,7 +169,7 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
                       AND ended.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS})))
          )`, [signupId]);
     const candidates = new Set(rows.map((row) => row.observer_netid));
-    if (!candidates.size) throw new ApiError(409, 'NO_CANDIDATES', 'Your observer list is not ready yet.');
+    if (!candidates.size) { await raiseNoAcceptanceAlert(client, signupId); throw new ApiError(409, 'NO_CANDIDATES', 'Your observer list is not ready yet.'); }
     const targets = observerNetids?.length ? observerNetids : [...candidates];
     if (targets.some((id) => !candidates.has(id))) {
       throw new ApiError(400, 'NOT_A_CANDIDATE', 'Requests can only go to observers on your list.');
@@ -304,10 +311,11 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
 
 // PATCH .../decline
 export async function declineRequest(signupId: number, observerNetid: string) {
-  const updated = await getPool().query(`
-    UPDATE observation_request SET status = 'declined', responded_date = now()
-    WHERE signup_id = $1 AND observer_netid = $2 AND status = 'pending' AND ${NOT_EXPIRED}
-  `, [signupId, observerNetid]);
+  const updated = await inTransaction(async (client) => {
+    const result = await client.query(`UPDATE observation_request SET status = 'declined', responded_date = now() WHERE signup_id = $1 AND observer_netid = $2 AND status = 'pending' AND ` + NOT_EXPIRED + `[`, [signupId, observerNetid]);
+    if (result.rowCount) await raiseNoAcceptanceAlert(client, signupId);
+    return result;
+  });
   const request = await getRequest(signupId, observerNetid);
   if (!updated.rowCount) throw new ApiError(409, 'NOT_PENDING', `This request is ${request.status}.`);
   return request;
