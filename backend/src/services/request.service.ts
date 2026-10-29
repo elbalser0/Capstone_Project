@@ -83,9 +83,25 @@ async function loadSections(sectionIds: number[]): Promise<Map<string, CourseSec
 
 
 async function raiseNoAcceptanceAlert(client: { query: (sql: string, params?: unknown[]) => Promise<{ rowCount?: number | null }> }, signupId: number) {
-  const result = await client.query(`SELECT 1 WHERE EXISTS (SELECT 1 FROM observation_request WHERE signup_id = $1) AND NOT EXISTS (SELECT 1 FROM observation WHERE signup_id = $1) AND NOT EXISTS (SELECT 1 FROM observation_request WHERE signup_id = $1 AND status = 'pending' AND sent_date > now() - make_interval(hours => 48))`, [signupId]);
+  const result = await client.query(`
+    SELECT 1
+    WHERE EXISTS (SELECT 1 FROM observation_request WHERE signup_id = $1)
+      AND NOT EXISTS (SELECT 1 FROM observation WHERE signup_id = $1)
+      AND NOT EXISTS (
+        SELECT 1 FROM observation_request
+        WHERE signup_id = $1 AND status = 'pending' AND ${NOT_EXPIRED}
+      )
+  `, [signupId]);
   if (!result.rowCount) return;
-  await client.query(`INSERT INTO alert (signup_id, alert_type) SELECT $1, 'no_acceptance' WHERE NOT EXISTS (SELECT 1 FROM alert WHERE signup_id = $1 AND alert_type = 'no_acceptance' AND resolved_date IS NULL)`, [signupId]);
+
+  await client.query(`
+    INSERT INTO alert (signup_id, alert_type)
+    SELECT $1, 'no_acceptance'
+    WHERE NOT EXISTS (
+      SELECT 1 FROM alert
+      WHERE signup_id = $1 AND alert_type = 'no_acceptance' AND resolved_date IS NULL
+    )
+  `, [signupId]);
 }
 
 async function fetchRequests(where: string, params: unknown[]) {
@@ -143,6 +159,7 @@ export function listIncomingRequests(netid: string) {
 
 // POST /api/signups/{signupId}/requests: send to all or selected matched observers.
 export async function sendRequests(signupId: number, observeeNetid: string, observerNetids?: string[]) {
+  let noCandidates = false;
   await inTransaction(async (client) => {
     // Confirm also locks this sign-up, so sending cannot race with a new pairing.
     const signup = await client.query<{ observation_closed: boolean }>(
@@ -169,7 +186,11 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
                       AND ended.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS})))
          )`, [signupId]);
     const candidates = new Set(rows.map((row) => row.observer_netid));
-    if (!candidates.size) { await raiseNoAcceptanceAlert(client, signupId); throw new ApiError(409, 'NO_CANDIDATES', 'Your observer list is not ready yet.'); }
+    if (!candidates.size) {
+      await raiseNoAcceptanceAlert(client, signupId);
+      noCandidates = true;
+      return;
+    }
     const targets = observerNetids?.length ? observerNetids : [...candidates];
     if (targets.some((id) => !candidates.has(id))) {
       throw new ApiError(400, 'NOT_A_CANDIDATE', 'Requests can only go to observers on your list.');
@@ -183,6 +204,7 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
       `, [signupId, observerNetid]);
     }
   });
+  if (noCandidates) throw new ApiError(409, 'NO_CANDIDATES', 'Your observer list is not ready yet.');
   return fetchRequests('r.signup_id = $1', [signupId]);
 }
 
@@ -312,7 +334,12 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
 // PATCH .../decline
 export async function declineRequest(signupId: number, observerNetid: string) {
   const updated = await inTransaction(async (client) => {
-    const result = await client.query(`UPDATE observation_request SET status = 'declined', responded_date = now() WHERE signup_id = $1 AND observer_netid = $2 AND status = 'pending' AND ${NOT_EXPIRED}`, [signupId, observerNetid]);
+    // Serialize declines for one sign-up so simultaneous final declines see each other.
+    await client.query('SELECT signup_id FROM sign_up WHERE signup_id = $1 FOR UPDATE', [signupId]);
+    const result = await client.query(`
+      UPDATE observation_request SET status = 'declined', responded_date = now()
+      WHERE signup_id = $1 AND observer_netid = $2 AND status = 'pending' AND ${NOT_EXPIRED}
+    `, [signupId, observerNetid]);
     if (result.rowCount) await raiseNoAcceptanceAlert(client, signupId);
     return result;
   });
