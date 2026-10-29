@@ -154,6 +154,8 @@ async function loadSections(sectionIds: number[]): Promise<Map<string, CourseSec
 // Each sign-up in the cycle with its observer list and its newest open alert.
 export async function listMatching(cycleId: number) {
   const db = getPool();
+  const cycle = await db.query('SELECT 1 FROM eval_cycle WHERE cycle_id = $1', [cycleId]);
+  if (cycle.rowCount === 0) throw new ApiError(404, 'NOT_FOUND', 'Cycle not found.');
   const { rows } = await db.query<MatchingSignupRow>(`
     SELECT s.signup_id, s.section_id, p.netid, p.first_name, p.last_name, p.rank,
            (SELECT max(generated_date) FROM observer_match WHERE signup_id = s.signup_id) AS ran_at,
