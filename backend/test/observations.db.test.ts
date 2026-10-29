@@ -4,7 +4,7 @@ import { beforeEach, describe, test } from 'node:test';
 import { getPool, skip, sql, useTestDatabase } from './db-test-helper.js';
 import type { AuthUser } from '../src/services/user.service.js';
 
-const { getObservation, listAssignments, signObservation, submitSignedForm } = await import('../src/services/observation.service.js');
+const { getObservation, listAssignments, listReceivedObservations, reportMissed, signObservation, submitSignedForm } = await import('../src/services/observation.service.js');
 const { inTransaction } = await import('../src/db/transaction.js');
 
 function user(netid: string, role: AuthUser['role'] = 'faculty'): AuthUser {
@@ -24,7 +24,8 @@ async function sign(signer: AuthUser) {
 }
 
 async function observationRow() {
-  const { rows } = await sql(`SELECT status, observer_signed_date, observee_signed_date, other_comments
+  const { rows } = await sql(`SELECT status, observer_signed_date, observee_signed_date, other_comments,
+                                     reason_not_completed, last_saved_date
                               FROM observation WHERE observation_id = 1`);
   return rows[0];
 }
@@ -214,6 +215,46 @@ describe('observation form and signing against the database', { skip }, () => {
     await submitSignedForm(1, user('obs', 'AC'), fullForm, '');
     const signed = await sign(user('ee', 'AC'));
     assert.equal(signed.status, 'completed');
+  });
+
+  test('the observee sees the observations they received; others see none', async () => {
+    const received = await listReceivedObservations('ee');
+    assert.equal(received.length, 1);
+    assert.equal(received[0].observationId, '1');
+    assert.equal(received[0].observer.netid, 'obs');
+    assert.equal(received[0].status, 'scheduled');
+    assert.deepEqual(await listReceivedObservations('obs'), []);
+    assert.deepEqual(await listReceivedObservations('other'), []);
+  });
+
+  test('the observee reports a missed observation: it is not_completed with the reason', async () => {
+    const before = await observationRow();
+    const result = await reportMissed(1, observee, 'Class was cancelled for a holiday');
+    assert.equal(result.status, 'not_completed');
+    assert.equal(result.reasonNotCompleted, 'Class was cancelled for a holiday');
+    const after = await observationRow();
+    assert.equal(after.status, 'not_completed');
+    assert.equal(after.reason_not_completed, 'Class was cancelled for a holiday');
+    // The form's version stamp is untouched (Samuel's note on #119).
+    assert.deepEqual(after.last_saved_date, before.last_saved_date);
+    // A missed observation can't be filled in or reported again.
+    await assert.rejects(submitSignedForm(1, observer, fullForm, ''), { code: 'NOT_SCHEDULED' });
+    await assert.rejects(reportMissed(1, observee, 'again'), { code: 'NOT_SCHEDULED' });
+  });
+
+  test('only the observee can report a missed observation', async () => {
+    await assert.rejects(reportMissed(1, observer, 'x'), { code: 'FORBIDDEN' });
+    await assert.rejects(reportMissed(1, user('ac1', 'AC'), 'x'), { code: 'FORBIDDEN' });
+    await assert.rejects(reportMissed(1, someoneElse, 'x'), { code: 'NOT_FOUND' });
+    assert.equal((await observationRow()).status, 'scheduled');
+  });
+
+  test('after the observer submits the form, it can no longer be reported as missed', async () => {
+    await submitSignedForm(1, observer, fullForm, '');
+    await assert.rejects(reportMissed(1, observee, 'x'), { code: 'FORM_SUBMITTED' });
+    await sign(observee);
+    await assert.rejects(reportMissed(1, observee, 'x'), { code: 'NOT_SCHEDULED' });
+    assert.equal((await observationRow()).status, 'completed');
   });
 
   test('the observer sees the observation in their assignments', async () => {
