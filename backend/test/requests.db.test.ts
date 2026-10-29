@@ -71,7 +71,7 @@ describe('confirm and decline against the database', { skip }, () => {
     assert.deepEqual(rows, [{ observer_netid: 'obsA', scheduled_date: date, status: 'scheduled' }]);
   });
 
-  test('observee sends to selected candidates, and expired requests can be resent', async () => {
+  test('observee sends to selected candidates, while expired requests remain history', async () => {
     await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA'), (1, 'obsB')`);
     const first = await sendRequests(1, 'ee1', ['obsA']);
     assert.equal(first.length, 1);
@@ -82,10 +82,11 @@ describe('confirm and decline against the database', { skip }, () => {
     assert.equal((await sendRequests(1, 'ee1', ['obsA']))[0].sentDate, sentDate);
 
     await sql("UPDATE observation_request SET sent_date = now() - interval '49 hours' WHERE signup_id = 1");
-    const resent = await sendRequests(1, 'ee1', ['obsA']);
-    assert.equal(resent[0].status, 'pending');
-    assert.notEqual(resent[0].sentDate, sentDate);
-    assert.equal((await sendRequests(1, 'ee1')).length, 2);
+    await assert.rejects(sendRequests(1, 'ee1', ['obsA']), { code: 'NOT_A_CANDIDATE' });
+    const sent = await sendRequests(1, 'ee1');
+    assert.equal(sent.length, 2);
+    assert.equal(sent.find((r) => r.observer.netid === 'obsA')?.status, 'expired');
+    assert.equal(sent.find((r) => r.observer.netid === 'obsB')?.status, 'pending');
   });
 
   test('sending rejects other sign-ups, unknown candidates, and paired sign-ups', async () => {
@@ -96,7 +97,8 @@ describe('confirm and decline against the database', { skip }, () => {
     assert.equal((await sql('SELECT count(*)::int AS count FROM observation_request')).rows[0].count, 0);
     await sendRequests(1, 'ee1', ['obsA']);
     await declineRequest(1, 'obsA');
-    assert.equal((await sendRequests(1, 'ee1', ['obsA']))[0].status, 'declined');
+    await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsB')`);
+    await assert.rejects(sendRequests(1, 'ee1', ['obsA']), { code: 'NOT_A_CANDIDATE' });
     await sql("UPDATE observation_request SET status = 'pending', responded_date = NULL WHERE signup_id = 1");
     await confirmRequest(1, 'obsA', await futureDate(7));
     await assert.rejects(sendRequests(1, 'ee1', ['obsA']), { code: 'ALREADY_PAIRED' });

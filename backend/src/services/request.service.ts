@@ -147,7 +147,15 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
     if (paired.rowCount) throw new ApiError(409, 'ALREADY_PAIRED', 'You are already paired with an observer.');
 
     const { rows } = await client.query<{ observer_netid: string }>(
-      'SELECT observer_netid FROM observer_match WHERE signup_id = $1', [signupId]);
+      `SELECT m.observer_netid FROM observer_match AS m
+       WHERE m.signup_id = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM observation_request AS ended
+           WHERE ended.signup_id = m.signup_id AND ended.observer_netid = m.observer_netid
+             AND (ended.status IN ('declined', 'cancelled', 'expired')
+                  OR (ended.status = 'pending'
+                      AND ended.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS})))
+         )`, [signupId]);
     const candidates = new Set(rows.map((row) => row.observer_netid));
     if (!candidates.size) throw new ApiError(409, 'NO_CANDIDATES', 'Your observer list is not ready yet.');
     const targets = observerNetids?.length ? observerNetids : [...candidates];
@@ -159,11 +167,7 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
       await client.query(`
         INSERT INTO observation_request (signup_id, observer_netid, status, sent_date)
         VALUES ($1, $2, 'pending', now())
-        ON CONFLICT (signup_id, observer_netid) DO UPDATE
-        SET status = 'pending', sent_date = now(), responded_date = NULL
-        WHERE observation_request.status = 'expired'
-           OR (observation_request.status = 'pending'
-               AND observation_request.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS}))
+        ON CONFLICT (signup_id, observer_netid) DO NOTHING
       `, [signupId, observerNetid]);
     }
   });
