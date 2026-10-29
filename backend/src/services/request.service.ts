@@ -312,7 +312,7 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
 // PATCH .../decline
 export async function declineRequest(signupId: number, observerNetid: string) {
   const updated = await inTransaction(async (client) => {
-    const result = await client.query(`UPDATE observation_request SET status = 'declined', responded_date = now() WHERE signup_id = $1 AND observer_netid = $2 AND status = 'pending' AND ` + NOT_EXPIRED + `[`, [signupId, observerNetid]);
+    const result = await client.query(`UPDATE observation_request SET status = 'declined', responded_date = now() WHERE signup_id = $1 AND observer_netid = $2 AND status = 'pending' AND ${NOT_EXPIRED}`, [signupId, observerNetid]);
     if (result.rowCount) await raiseNoAcceptanceAlert(client, signupId);
     return result;
   });
