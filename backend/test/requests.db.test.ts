@@ -108,8 +108,8 @@ describe('confirm and decline against the database', { skip }, () => {
 
     const requests = await sendRequests(1, 'ee1');
     assert.deepEqual(requests.map((r) => [r.observer.netid, r.status]), [
-      ['obsA', 'declined'],
       ['obsB', 'pending'],
+      ['obsA', 'declined'],
     ]);
   });
 
