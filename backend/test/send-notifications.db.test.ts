@@ -43,12 +43,17 @@ describe('sending notifications against the database', { skip }, () => {
     await sql(`INSERT INTO observation (signup_id, observer_netid, version_id, scheduled_date) VALUES (1, 'obs', 1, CURRENT_DATE + 7)`);
   });
 
-  test('due reminders go to due professors in this cycle who have not signed up', async () => {
+  test('due reminders go to due professors in this cycle who have not signed up, with status and deadlines', async () => {
     assert.deepEqual(await sendDueReminders(1, 'ac1'), { sent: 1 });
-    const { rows: [deadline] } = await sql(`SELECT (CURRENT_DATE + 5)::text AS d`);
-    assert.deepEqual(await sent('reminder'), [
-      { recipient_netid: 'due2', sent_by: 'ac1', cycle_id: 1, subject: `Reminder: sign up to be observed by ${deadline.d}` },
-    ]);
+    const { rows: [d] } = await sql(`SELECT (CURRENT_DATE + 5)::text AS s, (CURRENT_DATE + 30)::text AS o, (CURRENT_DATE + 45)::text AS f`);
+    assert.deepEqual(await sent('reminder'), [{
+      recipient_netid: 'due2', sent_by: 'ac1', cycle_id: 1,
+      subject: `Reminder: you are overdue for a classroom observation. Sign up by ${d.s}. Observations are due by ${d.o} and feedback by ${d.f}.`,
+    }]);
+    await sql(`DELETE FROM notification`);
+    await sql(`UPDATE eval_due SET due_status = 'due' WHERE netid = 'due2'`);
+    await sendDueReminders(1, 'ac1');
+    assert.match((await sent('reminder'))[0].subject, /^Reminder: you are due for a classroom observation\./);
   });
 
   test('due reminders can target chosen netids, and skip anyone not due or already signed up', async () => {
@@ -59,12 +64,14 @@ describe('sending notifications against the database', { skip }, () => {
 
   test('lists-ready goes only to observees who have an observer list', async () => {
     assert.deepEqual(await sendListsReady(1, 'ac1'), { sent: 1 });
-    assert.deepEqual((await sent('matches_ready')).map((r) => r.recipient_netid), ['due1']);
+    assert.deepEqual((await sent('matches_ready')).map((r) => [r.recipient_netid, r.subject]), [['due1', 'Your observer list is ready']]);
   });
 
   test('the survey goes to every observee and observer once', async () => {
     assert.deepEqual(await sendSurveyOpen(1, 'ac1'), { sent: 3 });
     assert.deepEqual((await sent('survey_open')).map((r) => r.recipient_netid), ['due1', 'ee3', 'obs']);
+    const { rows: [d] } = await sql(`SELECT (CURRENT_DATE + 45)::text AS f`);
+    assert.equal((await sent('survey_open'))[0].subject, `The end-of-process survey is open until ${d.f}.`);
   });
 
   test('an unknown cycle returns NOT_FOUND and sends nothing', async () => {
