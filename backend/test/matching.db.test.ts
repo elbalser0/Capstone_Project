@@ -4,6 +4,7 @@ import { beforeEach, describe, test } from 'node:test';
 import { skip, sql, useTestDatabase } from './db-test-helper.js';
 
 const { listMatching, runMatching } = await import('../src/services/matching.service.js');
+const { listUnmatchedFaculty } = await import('../src/services/unmatched.service.js');
 
 // Section per professor in the current term (term 6). Course 1 is 1000 level, course 2 is 4000 level.
 const CURRENT = [
@@ -170,6 +171,7 @@ describe('observer matching against the database', { skip }, () => {
   test('when all five requests end and others qualify, running again gives a new usable list', async () => {
     await runMatching(1);
     await endRequests([['g1', 'declined', 5], ['g2', 'declined', 5], ['g3', 'cancelled', 5], ['g4', 'expired', 60], ['g5', 'declined', 5]]);
+    await sql(`INSERT INTO alert (signup_id, alert_type) VALUES ($1, 'no_acceptance')`, [signupOf('ee')]);
     // Three more eligible observers join the pool.
     for (const netid of ['h1', 'h2', 'h3']) {
       await sql(`INSERT INTO professor (netid, first_name, last_name, email, rank, dept_id, eval_interval_years, start_term, is_active)
@@ -181,6 +183,20 @@ describe('observer matching against the database', { skip }, () => {
     const ee = (await runMatching(1)).find((row) => row.observee.netid === 'ee')!;
     assert.deepEqual(ee.candidates.map((c) => c.netid).sort(), ['g6', 'h1', 'h2', 'h3']);
     assert.equal(ee.alert, null);
+    const { rows: alertsForEe } = await sql(`SELECT resolved_date FROM alert
+      WHERE signup_id = $1 AND alert_type = 'no_acceptance'`, [signupOf('ee')]);
+    assert.ok(alertsForEe[0].resolved_date);
+  });
+
+  test('the unmatched dashboard derives an alert when the final request expires', async () => {
+    await sql(`UPDATE professor SET is_active = false WHERE netid = 'g6'`);
+    await runMatching(1);
+    await endRequests(['g1', 'g2', 'g3', 'g4', 'g5'].map((netid) => [netid, 'pending', 60]));
+
+    const unmatched = await listUnmatchedFaculty();
+    assert.equal(unmatched.items.find((item) => item.signupId === String(signupOf('ee')))?.alertType, 'no_acceptance');
+    assert.equal((await sql(`SELECT count(*)::int AS n FROM alert
+      WHERE signup_id = $1 AND alert_type = 'no_acceptance'`, [signupOf('ee')])).rows[0].n, 0);
   });
 
   test('refuses before the sign-up deadline and for a cycle that does not exist', async () => {

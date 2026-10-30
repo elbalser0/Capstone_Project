@@ -1,6 +1,7 @@
 import { getPool } from '../db/pool.js';
 import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
+import type { PoolClient } from 'pg';
 import { mapCourseRows } from './course.service.js';
 import { displayName, type Rank } from './user.service.js';
 
@@ -82,14 +83,41 @@ async function loadSections(sectionIds: number[]): Promise<Map<string, CourseSec
 }
 
 
-async function raiseNoAcceptanceAlert(client: { query: (sql: string, params?: unknown[]) => Promise<{ rowCount?: number | null }> }, signupId: number) {
+// A matched observer remains usable if they have not been asked yet, have a live
+// request, or have an accepted request that has not produced an observation yet.
+// Expired pending rows are treated as ended using the database clock.
+export function noUsableCandidatesSql(signupIdSql: string) {
+  return `NOT EXISTS (
+    SELECT 1 FROM observer_match AS m
+    WHERE m.signup_id = ${signupIdSql}
+      AND NOT EXISTS (
+        SELECT 1 FROM observation_request AS r
+        WHERE r.signup_id = m.signup_id AND r.observer_netid = m.observer_netid
+          AND (r.status IN ('declined', 'cancelled', 'expired')
+               OR (r.status = 'pending' AND r.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS})))
+      )
+  )`;
+}
+
+export function latestAlertActivitySql(signupIdSql: string) {
+  return `GREATEST(
+    COALESCE((SELECT max(sent_date) FROM observation_request WHERE signup_id = ${signupIdSql}), '-infinity'::timestamptz),
+    COALESCE((SELECT max(responded_date) FROM observation_request WHERE signup_id = ${signupIdSql}), '-infinity'::timestamptz),
+    COALESCE((SELECT max(generated_date) FROM observer_match WHERE signup_id = ${signupIdSql}), '-infinity'::timestamptz)
+  )`;
+}
+
+export async function raiseNoAcceptanceAlert(client: PoolClient, signupId: number) {
   const result = await client.query(`
     SELECT 1
     WHERE EXISTS (SELECT 1 FROM observation_request WHERE signup_id = $1)
       AND NOT EXISTS (SELECT 1 FROM observation WHERE signup_id = $1)
+      AND ${noUsableCandidatesSql('$1')}
       AND NOT EXISTS (
-        SELECT 1 FROM observation_request
-        WHERE signup_id = $1 AND status = 'pending' AND ${NOT_EXPIRED}
+        SELECT 1 FROM alert AS dismissed
+        WHERE dismissed.signup_id = $1 AND dismissed.alert_type = 'no_acceptance'
+          AND dismissed.resolved_by IS NOT NULL
+          AND dismissed.resolved_date >= ${latestAlertActivitySql('$1')}
       )
   `, [signupId]);
   if (!result.rowCount) return;
@@ -101,6 +129,13 @@ async function raiseNoAcceptanceAlert(client: { query: (sql: string, params?: un
       SELECT 1 FROM alert
       WHERE signup_id = $1 AND alert_type = 'no_acceptance' AND resolved_date IS NULL
     )
+  `, [signupId]);
+}
+
+export async function resolveNoAcceptanceAlert(client: PoolClient, signupId: number) {
+  await client.query(`
+    UPDATE alert SET resolved_date = now()
+    WHERE signup_id = $1 AND alert_type = 'no_acceptance' AND resolved_date IS NULL
   `, [signupId]);
 }
 
@@ -197,11 +232,12 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
     }
 
     for (const observerNetid of targets) {
-      await client.query(`
+      const inserted = await client.query(`
         INSERT INTO observation_request (signup_id, observer_netid, status, sent_date)
         VALUES ($1, $2, 'pending', now())
         ON CONFLICT (signup_id, observer_netid) DO NOTHING
       `, [signupId, observerNetid]);
+      if (inserted.rowCount) await resolveNoAcceptanceAlert(client, signupId);
     }
   });
   if (noCandidates) throw new ApiError(409, 'NO_CANDIDATES', 'Your observer list is not ready yet.');
@@ -309,6 +345,7 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
       INSERT INTO observation (signup_id, observer_netid, version_id, scheduled_date)
       VALUES ($1, $2, $3, $4::date)
     `, [signupId, observerNetid, template.rows[0].version_id, date]);
+    await resolveNoAcceptanceAlert(client, signupId);
     await client.query(`
       UPDATE observation_request SET status = 'accepted', responded_date = now()
       WHERE signup_id = $1 AND observer_netid = $2
@@ -320,12 +357,16 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
     `, [signupId, observerNetid]);
     // Reaching the limit cancels this observer's other open requests in the cycle.
     if (acceptedCount + 1 >= MAX_ACCEPTED) {
-      await client.query(`
+      const cancelled = await client.query<{ signup_id: number }>(`
         UPDATE observation_request AS r SET status = 'cancelled'
         FROM sign_up AS s
         WHERE s.signup_id = r.signup_id AND s.cycle_id = $1
           AND r.observer_netid = $2 AND r.status = 'pending' AND r.${NOT_EXPIRED}
+        RETURNING r.signup_id
       `, [cycleId, observerNetid]);
+      for (const { signup_id: cancelledSignupId } of cancelled.rows) {
+        await raiseNoAcceptanceAlert(client, cancelledSignupId);
+      }
     }
   });
   return getRequest(signupId, observerNetid);

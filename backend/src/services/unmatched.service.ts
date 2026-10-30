@@ -3,6 +3,10 @@ import { ApiError } from '../middleware/error.middleware.js';
 import { mapCourseRows, type CourseRow } from './course.service.js';
 import { getCurrentCycle } from './cycle.service.js';
 import { displayName, type Rank } from './user.service.js';
+import {
+  latestAlertActivitySql,
+  noUsableCandidatesSql,
+} from './request.service.js';
 
 interface UnmatchedRow extends CourseRow {
   signup_id: number;
@@ -10,7 +14,7 @@ interface UnmatchedRow extends CourseRow {
   observee_first_name: string;
   observee_last_name: string;
   observee_rank: Rank;
-  alert_type: 'no_observer' | 'no_acceptance';
+  alert_type: 'no_observer' | 'insufficient_observers' | 'no_acceptance';
 }
 
 export function mapUnmatchedRows(rows: UnmatchedRow[]) {
@@ -37,9 +41,22 @@ export async function listUnmatchedFaculty() {
   const cycle = await getCurrentCycle();
   if (!cycle) throw new ApiError(404, 'NO_CYCLE', 'No cycle has started yet.');
 
+  const hasRequests = `EXISTS (SELECT 1 FROM observation_request WHERE signup_id = s.signup_id)`;
+  const noUsableCandidates = noUsableCandidatesSql('s.signup_id');
+  const notManuallyDismissed = `NOT EXISTS (
+    SELECT 1 FROM alert AS dismissed
+    WHERE dismissed.signup_id = s.signup_id AND dismissed.alert_type = 'no_acceptance'
+      AND dismissed.resolved_by IS NOT NULL
+      AND dismissed.resolved_date >= ${latestAlertActivitySql('s.signup_id')}
+  )`;
   const { rows } = await getPool().query<UnmatchedRow>(`
     SELECT s.signup_id, p.netid AS observee_netid, p.first_name AS observee_first_name,
-           p.last_name AS observee_last_name, p.rank AS observee_rank, a.alert_type,
+           p.last_name AS observee_last_name, p.rank AS observee_rank,
+           CASE
+             WHEN ${hasRequests} AND ${noUsableCandidates}
+               THEN CASE WHEN ${notManuallyDismissed} THEN 'no_acceptance' END
+             WHEN a.alert_type IN ('no_observer', 'insufficient_observers') THEN a.alert_type
+           END AS alert_type,
            sec.section_id, sec.section_num, sec.class_mode,
            course.course_num, course.title, course.course_level, dept.dept_name,
            term.term_id, term.season, term.year,
@@ -51,14 +68,18 @@ export async function listUnmatchedFaculty() {
     JOIN course ON course.course_id = sec.course_id
     JOIN department AS dept ON dept.dept_id = course.dept_id
     JOIN term ON term.term_id = sec.term_id
-    JOIN LATERAL (
+    LEFT JOIN LATERAL (
       SELECT alert_type FROM alert
       WHERE alert.signup_id = s.signup_id AND resolved_date IS NULL
       ORDER BY created_date DESC, alert_id DESC LIMIT 1
     ) AS a ON true
     LEFT JOIN meeting_time AS meeting ON meeting.section_id = sec.section_id
     WHERE s.cycle_id = $1
-      AND a.alert_type IN ('no_observer', 'no_acceptance')
+      AND (
+        (${hasRequests} AND ${noUsableCandidates} AND ${notManuallyDismissed})
+        OR (NOT (${hasRequests} AND ${noUsableCandidates})
+            AND a.alert_type IN ('no_observer', 'insufficient_observers'))
+      )
       AND NOT EXISTS (SELECT 1 FROM observation AS o WHERE o.signup_id = s.signup_id)
     ORDER BY s.signup_id, meeting.day_of_week, meeting.start_time
   `, [cycle.cycleId]);
