@@ -210,7 +210,7 @@ CREATE TABLE public.notification (
         REFERENCES public.eval_cycle(cycle_id),
     recipient_netid TEXT NOT NULL
         REFERENCES public.professor(netid),
-    sent_by TEXT NOT NULL
+    sent_by TEXT 
         REFERENCES public.ac_member(netid),
     notif_type TEXT NOT NULL,
     subject TEXT NOT NULL,

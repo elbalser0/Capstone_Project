@@ -177,21 +177,26 @@ export function checkEligibility(db: Db, signup: SignupRow, observerNetid: strin
 export const isEligible = (c: EligibilityCheck) => Object.values(c).every(Boolean);
 
 /**
- * Proposed dates on which the observer has no class of their own overlapping the
- * observee's class (shown in E3 "Free at your times").
+ * Proposed dates on which the observer has no class or scheduled observation
+ * overlapping the observee's class (shown in E3 "Free at your times").
  */
 export function freeDates(db: Db, signup: SignupRow, observerNetid: string): string[] {
   const cycle = db.eval_cycle.find((c) => c.cycle_id === signup.cycle_id)!;
   const theirs = db.meeting_time.filter((m) => m.section_id === signup.section_id);
   const mine = db.section
-    .filter((s) => s.instructor_id === observerNetid && s.term_id === cycle.term_id && s.class_mode === 'in-person')
+    .filter((s) => s.instructor_id === observerNetid && s.term_id === cycle.term_id)
     .flatMap((s) => db.meeting_time.filter((m) => m.section_id === s.section_id));
   return db.proposed_date
     .filter((p) => p.signup_id === signup.signup_id)
     .map((p) => p.date)
     .filter((date) => {
       const slot = meetingOn(theirs, date);
-      return !mine.some((m) => m.day_of_week === weekdayOf(date) && slot && m.start_time < slot.end_time && slot.start_time < m.end_time);
+      const overlaps = (m: MeetingTimeRow) => m.day_of_week === weekdayOf(date) && slot && m.start_time < slot.end_time && slot.start_time < m.end_time;
+      const booked = db.observation
+        .filter((o) => o.observer_netid === observerNetid && o.signup_id !== signup.signup_id
+          && o.scheduled_date === date && o.status !== 'not_completed')
+        .flatMap((o) => db.meeting_time.filter((m) => m.section_id === db.sign_up.find((s) => s.signup_id === o.signup_id)?.section_id));
+      return !mine.some(overlaps) && !booked.some(overlaps);
     });
 }
 

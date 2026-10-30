@@ -3,6 +3,8 @@ import { ApiError } from '../middleware/error.middleware.js';
 import {
   getObservation,
   listAssignments,
+  listReceivedObservations,
+  reportMissed,
   signObservation,
   submitSignedForm,
   type FormAnswer,
@@ -10,6 +12,8 @@ import {
 
 // Mounted at /api/me/assignments
 export const myAssignmentsRouter = Router();
+// Mounted at /api/me/observations
+export const myObservationsRouter = Router();
 // Mounted at /api/observations
 export const observationsRouter = Router();
 
@@ -51,6 +55,22 @@ export function readSignBody(body: unknown): string {
   return lastSavedDate;
 }
 
+// Checks the body of POST .../report-missed: a non-empty reason.
+export function readReportMissed(body: unknown): string {
+  const input = typeof body === 'object' && body !== null && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+  if (!reason) throw new ApiError(400, 'REASON_REQUIRED', 'Say why the observation did not happen.');
+  return reason;
+}
+
+// GET /api/me/observations only lists observations as the observee; the observer's list is /api/me/assignments.
+myObservationsRouter.get('/', async (req, res) => {
+  if (req.query.as !== 'observee') {
+    throw new ApiError(400, 'INVALID_AS', 'Use as=observee. Observations you observe are at /api/me/assignments.');
+  }
+  res.status(200).json(await listReceivedObservations(req.user!.netid));
+});
+
 myAssignmentsRouter.get('/', async (req, res) => {
   res.status(200).json(await listAssignments(req.user!.netid));
 });
@@ -68,4 +88,9 @@ observationsRouter.post('/:observationId/signed-form', async (req, res) => {
 observationsRouter.post('/:observationId/sign', async (req, res) => {
   const id = observationId(req);
   res.status(200).json(await signObservation(id, req.user!, readSignBody(req.body)));
+});
+
+observationsRouter.post('/:observationId/report-missed', async (req, res) => {
+  const id = observationId(req);
+  res.status(200).json(await reportMissed(id, req.user!, readReportMissed(req.body)));
 });

@@ -134,6 +134,11 @@ export async function listAssignments(netid: string) {
   return (await fetchObservations('o.observer_netid = $1', [netid])).map(({ row, section }) => summary(row, section));
 }
 
+// GET /api/me/observations?as=observee: observations I received (I am the observee), past and current, latest first.
+export async function listReceivedObservations(netid: string) {
+  return (await fetchObservations('s.observee_netid = $1', [netid])).map(({ row, section }) => summary(row, section));
+}
+
 // The observer, the observee, and AC members can see an observation; anyone else gets 404.
 // Only the observer and the observee can change it (checked in submitSignedForm and signObservation).
 async function findObservation(observationId: number, user: AuthUser) {
@@ -265,6 +270,33 @@ export async function signObservation(observationId: number, user: AuthUser, las
     if (current.status !== 'scheduled') throw new ApiError(409, 'NOT_SCHEDULED', 'Only a scheduled observation can be signed.');
     if (!current.observer_signed_date) throw new ApiError(409, 'FORM_NOT_SUBMITTED', 'The observer has not submitted the form yet.');
     throw new ApiError(409, 'STALE_FORM', 'The observer changed the form after you opened it. Reload it and review it before signing.');
+  }
+  return getObservation(observationId, user);
+}
+
+// POST /api/observations/{observationId}/report-missed: the observee reports that the observation
+// could not take place this cycle, with the reason. Only a scheduled observation whose form the
+// observer has not submitted can be reported; afterwards it is not_completed and can't be filled in.
+// last_saved_date is left alone: it only tracks changes to the form's content.
+export async function reportMissed(observationId: number, user: AuthUser, reason: string) {
+  const { row } = await findObservation(observationId, user);
+  if (row.observee_netid !== user.netid) {
+    throw new ApiError(403, 'FORBIDDEN', 'Only the observee can report a missed observation.');
+  }
+  const updated = await getPool().query(`
+    UPDATE observation
+    SET status = 'not_completed', reason_not_completed = $2
+    WHERE observation_id = $1 AND status = 'scheduled' AND observer_signed_date IS NULL
+  `, [observationId, reason]);
+  if (!updated.rowCount) {
+    // Read the row again: it may have changed since findObservation (for example, a form submitted meanwhile).
+    const { rows: [current] } = await getPool().query<{ status: ObservationStatus; observer_signed_date: Date | null }>(
+      'SELECT status, observer_signed_date FROM observation WHERE observation_id = $1', [observationId]);
+    if (!current) throw new ApiError(404, 'NOT_FOUND', 'Observation not found.');
+    if (current.status !== 'scheduled') {
+      throw new ApiError(409, 'NOT_SCHEDULED', 'Only a scheduled observation can be reported as missed.');
+    }
+    throw new ApiError(409, 'FORM_SUBMITTED', 'The observer already submitted the form, so the observation took place.');
   }
   return getObservation(observationId, user);
 }

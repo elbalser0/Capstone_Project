@@ -74,7 +74,7 @@ function FreeAt({ candidate, signup }: { candidate: Candidate; signup: Signup })
 /** "CS 1336, 1000 level": the first course they taught at the sign-up's level (UTD numbers start with the level). */
 function teachesLabel(candidate: Candidate, level: number) {
   const courses = candidate.teaches ?? [];
-  const atLevel = courses.find((label) => Math.floor(Number(label.split(' ')[1]) / 1000) * 1000 === level);
+  const atLevel = courses.find((label) => Math.floor(Number(label.split(' ').at(-1)) / 1000) * 1000 === level);
   return atLevel ? `${atLevel}, ${level} level` : (courses[0] ?? '');
 }
 
@@ -82,7 +82,7 @@ function ChooseObservers({ signup, candidates, signupDeadline }: { signup: Signu
   const navigate = useNavigate();
   const notifications = useNotifications();
   const send = useSendRequests(signup.signupId);
-  const open = candidates.filter((c) => !c.request || c.request.status === 'expired');
+  const open = candidates.filter((c) => !c.request);
   const openIds = open.map((c) => c.observer.netid);
   const [selected, setSelected] = useState<string[]>(openIds);
   // Only observers still on the current list can be sent; a refreshed list drops anyone who left it.
@@ -156,7 +156,7 @@ function ChooseObservers({ signup, candidates, signupDeadline }: { signup: Signu
           ))}
         </div>
       </div>
-      <p className="mt-3 text-xs text-gray-500">Set when you signed up. Every observer above is free at these times.</p>
+      <p className="mt-3 text-xs text-gray-500">Set when you signed up. Observers choose one of these dates when confirming a request.</p>
 
       <ErrorNote error={send.error} className="mt-4" />
       <div className="mt-[21px] flex flex-wrap items-center gap-3">

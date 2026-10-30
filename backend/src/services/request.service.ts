@@ -347,3 +347,11 @@ export async function declineRequest(signupId: number, observerNetid: string) {
   if (!updated.rowCount) throw new ApiError(409, 'NOT_PENDING', `This request is ${request.status}.`);
   return request;
 }
+
+// GET /api/me/requests/outgoing: requests sent for my own sign-up (I am the observee) in the
+// current cycle, newest first. Same shape and cycle rule as incoming.
+export function listOutgoingRequests(netid: string) {
+  return fetchRequests(`s.observee_netid = $1 AND s.cycle_id = (
+      SELECT cycle_id FROM eval_cycle WHERE start_date <= CURRENT_DATE
+      ORDER BY start_date DESC, cycle_id DESC LIMIT 1)`, [netid]);
+}

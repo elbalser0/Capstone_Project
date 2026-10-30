@@ -96,7 +96,7 @@ Faculty choose observers from their recommended list, send requests, and follow 
 | --- | --- |
 | No sign-up | `GET /api/me/signup` returns `null` |
 | No observer list yet | no candidates and no requests; before the sign-up deadline it names the deadline, after it the message stays neutral |
-| Choose observers | at least one candidate has no request (candidates whose request expired are listed again) |
+| Choose observers | at least one current candidate has no request; ended requests remain in request history |
 | Requests sent | any request is pending, or accepted while the sign-up has no observation yet |
 | None accepted | requests exist but none is pending or accepted |
 | Matched | the sign-up has an observation |
