@@ -107,7 +107,10 @@ describe('confirm and decline against the database', { skip }, () => {
       WHERE signup_id = 1 AND alert_type = 'no_acceptance' AND resolved_date IS NULL`)).rows[0].n, 0);
 
     const requests = await sendRequests(1, 'ee1');
-    assert.deepEqual(requests.map((r) => r.observer.netid), ['obsB']);
+    assert.deepEqual(requests.map((r) => [r.observer.netid, r.status]), [
+      ['obsA', 'declined'],
+      ['obsB', 'pending'],
+    ]);
   });
 
   test('the final decline alerts once, and a later send resolves it when matching adds a candidate', async () => {
