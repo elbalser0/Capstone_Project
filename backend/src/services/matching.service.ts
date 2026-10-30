@@ -3,7 +3,12 @@ import { getPool } from '../db/pool.js';
 import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { mapCourseRows, type CourseSection } from './course.service.js';
-import { MAX_ACCEPTED, REQUEST_HOURS } from './request.service.js';
+import {
+  MAX_ACCEPTED,
+  REQUEST_HOURS,
+  raiseNoAcceptanceAlert,
+  resolveNoAcceptanceAlert,
+} from './request.service.js';
 import { displayName, type Rank } from './user.service.js';
 
 // Observer selection lists up to this many observers per sign-up (Business Logic doc).
@@ -104,10 +109,14 @@ export async function runMatching(cycleId: number) {
                           WHERE r.signup_id = m.signup_id AND r.observer_netid = m.observer_netid)
       `, [signupId]);
       await client.query(`
-        DELETE FROM alert WHERE signup_id = $1 AND resolved_date IS NULL
+        UPDATE alert SET resolved_date = now()
+        WHERE signup_id = $1 AND resolved_date IS NULL
           AND alert_type IN ('no_observer', 'insufficient_observers')
       `, [signupId]);
-      const alert = alertFor(await addCandidates(client, signupId, cycleId));
+      const candidateCount = await addCandidates(client, signupId, cycleId);
+      if (candidateCount > 0) await resolveNoAcceptanceAlert(client, signupId);
+      else await raiseNoAcceptanceAlert(client, signupId);
+      const alert = alertFor(candidateCount);
       if (alert) await client.query('INSERT INTO alert (signup_id, alert_type) VALUES ($1, $2)', [signupId, alert]);
     }
   });
