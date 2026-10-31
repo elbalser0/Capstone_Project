@@ -1,5 +1,6 @@
 import express from 'express';
 import { cyclesRouter } from './routes/cycles.routes.js';
+import { dashboardRouter } from './routes/dashboard.routes.js';
 import { healthRouter } from './routes/health.routes.js';
 import { facultyMeRouter, signupsRouter } from './routes/faculty-scaffold.routes.js';
 import { errorHandler } from './middleware/error.middleware.js';
@@ -13,6 +14,7 @@ export const app = express();
 app.disable('x-powered-by');
 app.use(express.json());
 app.use('/api/cycles', requireLogin, cyclesRouter);
+app.use('/api/dashboard', requireLogin, dashboardRouter);
 app.use('/api/health', healthRouter);
 app.use('/api/me/requests', requireLogin, myRequestsRouter);
 app.use('/api/me/notifications', requireLogin, myNotificationsRouter);
