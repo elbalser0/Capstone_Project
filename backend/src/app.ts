@@ -1,6 +1,7 @@
 import express from 'express';
 import { cyclesRouter } from './routes/cycles.routes.js';
 import { dashboardRouter } from './routes/dashboard.routes.js';
+import { templatesRouter } from './routes/templates.routes.js';
 import { healthRouter } from './routes/health.routes.js';
 import { facultyMeRouter, signupsRouter } from './routes/faculty-scaffold.routes.js';
 import { errorHandler } from './middleware/error.middleware.js';
@@ -24,6 +25,7 @@ app.use('/api/signups/:signupId/requests', requireLogin, signupRequestsRouter);
 app.use('/api/me', requireLogin, meRouter, facultyMeRouter);
 app.use('/api/signups', requireLogin, signupsRouter);
 app.use('/api/observations', requireLogin, observationsRouter);
+app.use('/api/templates', requireLogin, templatesRouter);
 app.use((_req, res) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'The requested endpoint does not exist.' } });
 });
