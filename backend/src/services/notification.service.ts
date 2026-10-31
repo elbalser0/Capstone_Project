@@ -1,5 +1,6 @@
 import { getPool } from '../db/pool.js';
 import { ApiError } from '../middleware/error.middleware.js';
+import { queueReminderEmails } from './email.service.js';
 import { displayName, type Rank } from './user.service.js';
 
 // The newest notifications are enough for the inbox; older ones aren't shown.
@@ -55,7 +56,7 @@ type NotifType = 'reminder' | 'matches_ready' | 'survey_open';
 
 // Inserts one notification per recipient chosen by `recipientsSql` (a query returning `netid`
 // and `subject` columns, with the cycle as $1 and the cycle's deadlines in the `deadlines`
-// row) and returns how many were sent. Extra parameters start at $7.
+// row) and returns each recipient's email and subject. Extra parameters start at $7.
 async function sendToCycle(cycleId: number, sentBy: string, type: NotifType, recipientsSql: string, extra: unknown[] = []) {
   const db = getPool();
   const { rows: [cycle] } = await db.query<{ signup: string; observation: string; feedback: string }>(`
@@ -64,20 +65,25 @@ async function sendToCycle(cycleId: number, sentBy: string, type: NotifType, rec
   `, [cycleId]);
   if (!cycle) throw new ApiError(404, 'NOT_FOUND', 'Cycle not found.');
 
-  const { rowCount } = await db.query(`
-    WITH deadlines AS (SELECT $4::text AS signup, $5::text AS observation, $6::text AS feedback)
-    INSERT INTO notification (cycle_id, recipient_netid, sent_by, notif_type, subject)
-    SELECT $1, recipients.netid, $2, $3, recipients.subject
-    FROM (${recipientsSql}) AS recipients
+  const { rows } = await db.query<{ email: string; first_name: string; last_name: string; subject: string }>(`
+    WITH deadlines AS (SELECT $4::text AS signup, $5::text AS observation, $6::text AS feedback),
+    inserted AS (
+      INSERT INTO notification (cycle_id, recipient_netid, sent_by, notif_type, subject)
+      SELECT $1, recipients.netid, $2, $3, recipients.subject
+      FROM (${recipientsSql}) AS recipients
+      RETURNING recipient_netid, subject
+    )
+    SELECT p.email, p.first_name, p.last_name, inserted.subject
+    FROM inserted JOIN professor AS p ON p.netid = inserted.recipient_netid
   `, [cycleId, sentBy, type, cycle.signup, cycle.observation, cycle.feedback, ...extra]);
-  return { sent: rowCount ?? 0 };
+  return rows;
 }
 
 // POST /api/cycles/{cycleId}/notifications/due-reminders: remind DUE/OVERDUE professors who
 // have not signed up yet; all of them, or only the netids given. The subject names their
-// status and all three deadlines.
-export function sendDueReminders(cycleId: number, sentBy: string, netids?: string[]) {
-  return sendToCycle(cycleId, sentBy, 'reminder', `
+// status and all three deadlines. Each one also gets an email (see email.service.ts).
+export async function sendDueReminders(cycleId: number, sentBy: string, netids?: string[]) {
+  const rows = await sendToCycle(cycleId, sentBy, 'reminder', `
     SELECT due.netid,
            'Reminder: you are ' || CASE due.due_status WHEN 'overdue' THEN 'overdue' ELSE 'due' END
              || ' for a classroom observation. Sign up by ' || deadlines.signup
@@ -88,26 +94,30 @@ export function sendDueReminders(cycleId: number, sentBy: string, netids?: strin
       AND ($7::text[] IS NULL OR due.netid = ANY($7::text[]))
       AND NOT EXISTS (SELECT 1 FROM sign_up AS s WHERE s.cycle_id = $1 AND s.observee_netid = due.netid)
   `, [netids?.length ? netids : null]);
+  queueReminderEmails(rows.map((row) => ({
+    to: row.email, name: displayName(row.first_name, row.last_name), subject: row.subject,
+  })));
+  return { sent: rows.length };
 }
 
 // POST /api/cycles/{cycleId}/notifications/lists-ready: tell each observee who has an
 // observer list that it is ready.
-export function sendListsReady(cycleId: number, sentBy: string) {
-  return sendToCycle(cycleId, sentBy, 'matches_ready', `
+export async function sendListsReady(cycleId: number, sentBy: string) {
+  return { sent: (await sendToCycle(cycleId, sentBy, 'matches_ready', `
     SELECT s.observee_netid AS netid, 'Your observer list is ready' AS subject FROM sign_up AS s
     WHERE s.cycle_id = $1 AND EXISTS (SELECT 1 FROM observer_match AS m WHERE m.signup_id = s.signup_id)
-  `);
+  `)).length };
 }
 
 // POST /api/cycles/{cycleId}/notifications/survey: every observee and observer in the cycle,
 // once each.
-export function sendSurveyOpen(cycleId: number, sentBy: string) {
-  return sendToCycle(cycleId, sentBy, 'survey_open', `
+export async function sendSurveyOpen(cycleId: number, sentBy: string) {
+  return { sent: (await sendToCycle(cycleId, sentBy, 'survey_open', `
     SELECT netid, 'The end-of-process survey is open until ' || deadlines.feedback || '.' AS subject FROM (
       SELECT s.observee_netid AS netid FROM sign_up AS s WHERE s.cycle_id = $1
       UNION
       SELECT o.observer_netid FROM observation AS o
       JOIN sign_up AS s ON s.signup_id = o.signup_id WHERE s.cycle_id = $1
     ) AS participants CROSS JOIN deadlines
-  `);
+  `)).length };
 }
