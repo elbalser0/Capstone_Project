@@ -66,15 +66,16 @@ describe('outstanding observations dashboard against the database', { skip }, ()
                VALUES (1, 1, '001', 'assistant', 'in-person'),
                       (1, 1, '002', 'associate', 'in-person'),
                       (1, 1, '003', 'full', 'in-person'),
-                      (1, 2, '004', 'assistant', 'in-person')`);
+                      (1, 2, '004', 'assistant', 'in-person'),
+                      (1, 1, '005', 'assistant', 'in-person')`);
     await sql(`INSERT INTO sign_up (cycle_id, observee_netid, section_id)
-               VALUES (1, 'assistant', 1), (1, 'associate', 2), (1, 'full', 3), (2, 'assistant', 4)`);
+               VALUES (1, 'assistant', 1), (1, 'associate', 2), (1, 'full', 3), (2, 'assistant', 4), (1, 'assistant', 5)`);
     await sql(`INSERT INTO proposed_date (signup_id, date)
                SELECT signup_id, CURRENT_DATE + 1 FROM sign_up`);
     await sql(`INSERT INTO observer_match (signup_id, observer_netid)
-               SELECT signup_id, 'observer' FROM sign_up`);
+               SELECT signup_id, 'observer' FROM sign_up WHERE signup_id <= 4`);
     await sql(`INSERT INTO observation_request (signup_id, observer_netid, status, responded_date)
-               SELECT signup_id, 'observer', 'accepted', now() FROM sign_up`);
+               SELECT signup_id, 'observer', 'accepted', now() FROM sign_up WHERE signup_id <= 4`);
     await sql(`INSERT INTO observation (signup_id, observer_netid, version_id, scheduled_date, status, reason_not_completed,
                                        observer_signed_date, observee_signed_date)
                VALUES (1, 'observer', 1, CURRENT_DATE + 1, 'scheduled', NULL, NULL, NULL),
@@ -83,15 +84,15 @@ describe('outstanding observations dashboard against the database', { skip }, ()
                       (4, 'observer', 1, CURRENT_DATE + 1, 'scheduled', NULL, NULL, NULL)`);
   });
 
-  test('AC gets current-cycle counts grouped by observee rank, excluding completed and other-cycle observations', async () => {
+  test('AC counts current-cycle sign-ups by observee rank, including those without observations and excluding completed or other-cycle records', async () => {
     await withDashboardServer(async (base) => {
       const response = await fetch(`${base}/api/dashboard/outstanding-observations`, {
         headers: { authorization: 'Bearer ac' },
       });
       assert.equal(response.status, 200);
       assert.deepEqual(await response.json(), {
-        cycleId: '1', total: 2,
-        byRank: { assistant: 1, associate: 1, full: 0 },
+        cycleId: '1', total: 3,
+        byRank: { assistant: 2, associate: 1, full: 0 },
       });
     });
   });
@@ -108,6 +109,7 @@ describe('outstanding observations dashboard against the database', { skip }, ()
 
   test('ranks with no outstanding observations are still returned as zero', async () => {
     await sql('DELETE FROM observation WHERE signup_id IN (1, 2)');
+    await sql('DELETE FROM sign_up WHERE signup_id = 5');
     await withDashboardServer(async (base) => {
       const response = await fetch(`${base}/api/dashboard/outstanding-observations`, {
         headers: { authorization: 'Bearer ac' },
