@@ -6,13 +6,13 @@ import express from 'express';
 import { skip, sql, useTestDatabase } from './db-test-helper.js';
 
 const { listSurveyResponses, submitSurvey } = await import('../src/services/survey.service.js');
-const { surveyRouter } = await import('../src/routes/survey.routes.js');
+const { MAX_FORM_BYTES, surveyRouter } = await import('../src/routes/survey.routes.js');
 const { errorHandler } = await import('../src/middleware/error.middleware.js');
 
 const answers = { processOk: true, difficulties: null, additionalFeedback: null };
 
 // Posts like the frontend does (multipart form data) as the given professor.
-async function post(netid: string, form: FormData, cycle = '1') {
+async function post(netid: string, form: FormData | { stream: ReadableStream; type: string }, cycle = '1') {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => { req.user = { netid } as typeof req.user; next(); });
@@ -22,7 +22,10 @@ async function post(netid: string, form: FormData, cycle = '1') {
   await new Promise<void>((resolve) => server.once('listening', resolve));
   try {
     const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/cycles/${cycle}/survey-responses`,
-      { method: 'POST', body: form });
+      form instanceof FormData
+        ? { method: 'POST', body: form }
+        // A streamed body is sent chunked, without a Content-Length header.
+        : { method: 'POST', body: form.stream, headers: { 'Content-Type': form.type }, duplex: 'half' } as RequestInit);
     return { status: response.status, body: await response.json() };
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -106,5 +109,26 @@ describe('survey against the database', { skip }, () => {
     await assert.rejects(submitSurvey(99, 'ee', { respondentRole: 'observee', ...answers }), { status: 404, code: 'NOT_FOUND' });
     await assert.rejects(listSurveyResponses(99), { status: 404, code: 'NOT_FOUND' });
     assert.equal((await sql('SELECT count(*)::int AS n FROM survey_response')).rows[0].n, 0);
+  });
+
+  test('a form over the size limit is rejected even when sent chunked without Content-Length', async () => {
+    const big = form({ respondentRole: 'observee', processOk: 'true', difficulties: 'x'.repeat(MAX_FORM_BYTES + 1) });
+    const encoded = new Request('http://x/', { method: 'POST', body: big });
+    const type = encoded.headers.get('content-type')!;
+    const bytes = new Uint8Array(await encoded.arrayBuffer());
+    let offset = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        if (offset >= bytes.length) return controller.close();
+        controller.enqueue(bytes.subarray(offset, offset += 64 * 1024));
+      },
+    });
+    assert.deepEqual(await post('ee', { stream, type }).then((r) => [r.status, r.body.error.code]), [413, 'TOO_LARGE']);
+    // A normal chunked form still works.
+    const small = new Request('http://x/', { method: 'POST', body: form({ respondentRole: 'observee', processOk: 'true' }) });
+    const smallBytes = new Uint8Array(await small.arrayBuffer());
+    const smallStream = new ReadableStream({ start(c) { c.enqueue(smallBytes); c.close(); } });
+    assert.equal((await post('ee', { stream: smallStream, type: small.headers.get('content-type')! })).status, 201);
+    assert.equal((await sql('SELECT count(*)::int AS n FROM survey_response')).rows[0].n, 1);
   });
 });
