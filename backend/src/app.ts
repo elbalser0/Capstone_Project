@@ -9,10 +9,12 @@ import { requireLogin } from './middleware/auth.middleware.js';
 import { myAssignmentsRouter, myObservationsRouter, observationsRouter } from './routes/observations.routes.js';
 import { meRouter } from './routes/me.routes.js';
 import { myRequestsRouter, signupRequestsRouter } from './routes/requests.routes.js';
+import { surveyRouter } from './routes/survey.routes.js';
 
 export const app = express();
 app.disable('x-powered-by');
 app.use(express.json());
+app.use('/api/cycles/:cycleId/survey-responses', requireLogin, surveyRouter);
 app.use('/api/cycles', requireLogin, cyclesRouter);
 app.use('/api/dashboard', requireLogin, dashboardRouter);
 app.use('/api/health', healthRouter);
