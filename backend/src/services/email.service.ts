@@ -4,7 +4,9 @@ import nodemailer, { type Transporter } from 'nodemailer';
 //   (unset) or off: no emails, only in-app notifications
 //   ethereal:       a free Ethereal test inbox; nothing is delivered, and the server log
 //                   prints a link to view each email (for the demo)
-//   smtp:           a real mail server from SMTP_URL (smtp://user:pass@host:port)
+//   smtp:           a real mail server from SMTP_URL (smtp://user:pass@host:port); set
+//                   SMTP_FROM to an address that server is allowed to send from
+// SMTP_FROM sets the sender in any mode; the default is a placeholder example.edu address.
 // The professor emails in the seed data are example.edu addresses, so ethereal is the
 // mode to use for now. Email is a stretch goal; a failed email never fails the request.
 
@@ -14,7 +16,11 @@ export interface ReminderEmail {
   subject: string;
 }
 
-const FROM = 'Assessment Helper <no-reply@assessment-helper.example.edu>';
+const DEFAULT_FROM = 'Assessment Helper <no-reply@assessment-helper.example.edu>';
+
+export function senderAddress() {
+  return process.env.SMTP_FROM?.trim() || DEFAULT_FROM;
+}
 
 let transport: Promise<Transporter | null> | undefined;
 let override: Transporter | null | undefined;
@@ -78,7 +84,7 @@ export async function sendReminderEmails(emails: ReminderEmail[]) {
   for (const email of emails) {
     try {
       const info = await mailer.sendMail({
-        from: FROM, to: email.to, subject: 'Classroom observation reminder', text: reminderText(email),
+        from: senderAddress(), to: email.to, subject: 'Classroom observation reminder', text: reminderText(email),
       });
       const preview = nodemailer.getTestMessageUrl(info);
       if (preview) console.log(`Reminder email to ${email.to}: ${preview}`);
