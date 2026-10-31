@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAC } from '../middleware/auth.middleware.js';
 import { ApiError } from '../middleware/error.middleware.js';
-import { createDraft, getActiveTemplate, publishDraft, type QuestionInput } from '../services/template.service.js';
+import { createDraft, getActiveTemplate, loadTemplateVersions, publishDraft, type QuestionInput } from '../services/template.service.js';
 
 // Mounted at /api/templates (after requireLogin)
 export const templatesRouter = Router();
@@ -85,6 +85,10 @@ function versionId(value: unknown): number {
   }
   return Number(value);
 }
+
+templatesRouter.get('/', requireAC, async (_req, res) => {
+  res.status(200).json(await loadTemplateVersions('true', []));
+});
 
 templatesRouter.get('/active', async (_req, res) => {
   res.status(200).json(await getActiveTemplate());
