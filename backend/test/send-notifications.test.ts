@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { app } from '../src/app.js';
 import { readReminderNetids } from '../src/routes/cycles.routes.js';
 import { mapNotification } from '../src/services/notification.service.js';
-import { reminderText, sendReminderEmails, setMailTransportForTests } from '../src/services/email.service.js';
+import { reminderText, sendReminderEmails, senderAddress, setMailTransportForTests } from '../src/services/email.service.js';
 
 test('notification sending endpoints require a login', async () => {
   const server = app.listen(0, '127.0.0.1');
@@ -59,5 +59,24 @@ test('EMAIL_MODE off or unknown sends nothing and does not throw', async () => {
   } finally {
     console.error = errors;
     if (saved === undefined) delete process.env.EMAIL_MODE; else process.env.EMAIL_MODE = saved;
+  }
+});
+
+test('SMTP_FROM sets the sender, with a placeholder by default', async () => {
+  const saved = process.env.SMTP_FROM;
+  const sent: { from: string }[] = [];
+  setMailTransportForTests({ sendMail: async (m: { from: string }) => { sent.push(m); return {}; } } as unknown as Parameters<typeof setMailTransportForTests>[0]);
+  try {
+    delete process.env.SMTP_FROM;
+    assert.equal(senderAddress(), 'Assessment Helper <no-reply@assessment-helper.example.edu>');
+    process.env.SMTP_FROM = '  ';
+    assert.equal(senderAddress(), 'Assessment Helper <no-reply@assessment-helper.example.edu>');
+    process.env.SMTP_FROM = ' Assessment Committee <ac@utdallas.edu> ';
+    assert.equal(senderAddress(), 'Assessment Committee <ac@utdallas.edu>');
+    await sendReminderEmails([{ to: 'a@example.edu', name: 'Dr. Ana Park', subject: 'x' }]);
+    assert.equal(sent[0].from, 'Assessment Committee <ac@utdallas.edu>');
+  } finally {
+    setMailTransportForTests(undefined);
+    if (saved === undefined) delete process.env.SMTP_FROM; else process.env.SMTP_FROM = saved;
   }
 });
