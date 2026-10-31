@@ -211,7 +211,7 @@ CREATE TABLE public.notification (
     recipient_netid TEXT NOT NULL
         REFERENCES public.professor(netid),
     sent_by TEXT 
-        REFERENCES public.ac_member(netid),
+        REFERENCES public.professor(netid),
     notif_type TEXT NOT NULL,
     subject TEXT NOT NULL,
     sent_date TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
