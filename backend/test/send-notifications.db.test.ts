@@ -1,10 +1,24 @@
 // Database tests for the AC notification-sending endpoints. Setup is in db-test-helper.ts.
 import assert from 'node:assert/strict';
-import { beforeEach, describe, test } from 'node:test';
+import { after, beforeEach, describe, test } from 'node:test';
 import { skip, sql, useTestDatabase } from './db-test-helper.js';
 
 const { listMyNotifications, sendDueReminders, sendListsReady, sendSurveyOpen } =
   await import('../src/services/notification.service.js');
+const { setMailTransportForTests, waitForEmails } = await import('../src/services/email.service.js');
+
+// An offline mailer that records what would be sent, so tests never reach the internet.
+function fakeMailer(fail = false) {
+  const sent: { to: string; subject: string; text: string }[] = [];
+  const transport = {
+    async sendMail(message: { to: string; subject: string; text: string }) {
+      if (fail) throw new Error('mail server down');
+      sent.push({ to: message.to, subject: message.subject, text: message.text });
+      return { messageId: String(sent.length) };
+    },
+  };
+  return { sent, transport: transport as unknown as Parameters<typeof setMailTransportForTests>[0] };
+}
 
 async function sent(type: string) {
   const { rows } = await sql(`SELECT recipient_netid, sent_by, cycle_id, subject FROM notification
@@ -14,6 +28,9 @@ async function sent(type: string) {
 
 describe('sending notifications against the database', { skip }, () => {
   useTestDatabase();
+  // No emails unless a test asks for them, even if backend/.env sets EMAIL_MODE.
+  beforeEach(() => setMailTransportForTests(null));
+  after(() => setMailTransportForTests(undefined));
 
   // Cycle 1 (current): due1 and due2 are due, due1 signed up; obs observes due1.
   // ee3 signed up but has no observer list. Cycle 2 is an older cycle with its own due row.
@@ -60,6 +77,38 @@ describe('sending notifications against the database', { skip }, () => {
     assert.deepEqual(await sendDueReminders(1, 'ac1', ['due1', 'obs', 'old']), { sent: 0 });
     assert.deepEqual(await sendDueReminders(1, 'ac1', ['due2']), { sent: 1 });
     assert.deepEqual(await sendDueReminders(1, 'ac1', []), { sent: 1 }); // empty list means everyone
+  });
+
+  test('each due reminder also goes out by email to the professor, with the same subject', async () => {
+    const mailer = fakeMailer();
+    setMailTransportForTests(mailer.transport);
+    await sql(`INSERT INTO eval_due (cycle_id, netid, due_status) VALUES (1, 'obs', 'due')`);
+    assert.deepEqual(await sendDueReminders(1, 'ac1'), { sent: 2 });
+    await waitForEmails();
+    const subjects = (await sent('reminder')).map((r) => r.subject);
+    assert.deepEqual(mailer.sent.map((m) => m.to).sort(), ['due2@example.edu', 'obs@example.edu']);
+    for (const m of mailer.sent) {
+      assert.equal(m.subject, 'Classroom observation reminder');
+      assert.match(m.text, /^Hello Dr\. (due2|obs) Test,/);
+      assert.ok(subjects.some((subject) => m.text.includes(subject)));
+    }
+  });
+
+  test('a failing mail server does not fail the reminders or undo the in-app notifications', async () => {
+    const mailer = fakeMailer(true);
+    setMailTransportForTests(mailer.transport);
+    assert.deepEqual(await sendDueReminders(1, 'ac1'), { sent: 1 });
+    await waitForEmails();
+    assert.equal((await sent('reminder')).length, 1);
+  });
+
+  test('only due reminders send email', async () => {
+    const mailer = fakeMailer();
+    setMailTransportForTests(mailer.transport);
+    await sendListsReady(1, 'ac1');
+    await sendSurveyOpen(1, 'ac1');
+    await waitForEmails();
+    assert.equal(mailer.sent.length, 0);
   });
 
   test('lists-ready goes only to observees who have an observer list', async () => {
