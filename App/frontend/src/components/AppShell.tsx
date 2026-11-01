@@ -24,6 +24,17 @@ export function usePageTitle(title: string | null | undefined) {
   }, [set, title]);
 }
 
+const NavContext = createContext<(nav: string | null) => void>(() => {});
+
+/** Overrides the route's sidebar highlight once the page knows who is viewing; "" highlights nothing, null keeps the route's. */
+export function useActiveNav(nav: string | null) {
+  const set = useContext(NavContext);
+  useLayoutEffect(() => {
+    set(nav);
+    return () => set(null);
+  }, [set, nav]);
+}
+
 function TopBar({ title, mode }: { title: string; mode: Mode }) {
   const { data: me } = useMe();
   const { data: cycle } = useCurrentCycle();
@@ -60,6 +71,7 @@ export function AppShell() {
   const matches = useMatches();
   const me = useMe({ enabled: Boolean(session) });
   const [override, setOverride] = useState<string | null>(null);
+  const [navOverride, setNavOverride] = useState<string | null>(null);
 
   if (!ready) return <p role="status" className="p-8 text-sm text-gray-500">Checking your sign-in…</p>;
   if (!session) return <Navigate to="/login" replace state={{ from: pathname }} />;
@@ -69,7 +81,7 @@ export function AppShell() {
 
   const handles = [...matches].reverse().map((m) => m.handle as RouteHandle | undefined);
   const title = override ?? handles.map((h) => h?.title).find(Boolean) ?? '';
-  const nav = handles.map((h) => h?.nav).find(Boolean);
+  const nav = navOverride ?? handles.map((h) => h?.nav).find(Boolean);
   return (
     <div className="flex min-h-screen">
       <Sidebar mode={mode} activeNav={nav} />
@@ -77,7 +89,9 @@ export function AppShell() {
         <TopBar title={title} mode={mode} />
         <main className="w-full max-w-[1060px] px-8 pb-12">
           <TitleContext.Provider value={setOverride}>
-            <Outlet />
+            <NavContext.Provider value={setNavOverride}>
+              <Outlet />
+            </NavContext.Provider>
           </TitleContext.Provider>
         </main>
       </div>

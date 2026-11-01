@@ -16,6 +16,7 @@ interface NavItem {
 const FACULTY_NAV: NavItem[] = [
   { to: '/faculty/evaluation', label: 'My evaluation', icon: ClipboardIcon },
   { to: '/faculty/requests', label: 'My requests', icon: SendIcon },
+  { to: '/faculty/assignments', label: 'My assignments', icon: ClipboardIcon },
 ];
 
 const COMMITTEE_NAV: NavItem[] = [
