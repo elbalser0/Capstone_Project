@@ -91,7 +91,7 @@ export function mapCycle(row: CycleRow) {
   };
 }
 
-async function fetchCycle(where: string, params: unknown[]) {
+export async function fetchCycle(where: string, params: unknown[]) {
   const { rows } = await getPool().query<CycleRow>(`
     SELECT c.cycle_id, t.term_id, t.season, t.year,
            t.start_date::text AS term_start, t.end_date::text AS term_end,
