@@ -19,9 +19,12 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 - `/login`: email/password form, password visibility toggle, and sign-in errors.
 - `/faculty/evaluation`: faculty identity, evaluation status, deadlines, and observation history.
 - `/faculty/sign-up`: pick a course and the class meetings you'd like to be observed in.
+- `/faculty/assignments`: assigned observations with links to their record and form.
+- `/faculty/observe/:observationId`: read-only assigned observation record.
+- `/faculty/observe/:observationId/form`: observer-only local draft editor using the assigned observation's question ranges.
 - `/committee/dashboard`: committee home with sample KPI results and a current-cycle summary.
 
-Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Faculty who are due can open sign-up from My evaluation. The observation record buttons are still disabled. Other later-sprint pages are not included.
+Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Faculty who are due can open sign-up from My evaluation. Current and past observations link to the read-only record. Other later-sprint pages are not included.
 
 The dashboard keeps the existing prototype's KPI cards and CSV export; these are a preview of later dashboard work, not a claim that the backend implements those features.
 
@@ -71,9 +74,11 @@ Response types are in `src/api/types.ts`. Roles are `faculty` and `AC`; committe
 
 Vite's proxy is development configuration; production API routing requires separate configuration. If switching away from a previous mock session, clear old site/service-worker data if mock interception persists.
 
-## Observation status
+## Observation form and status
 
-The evaluation view distinguishes loading, failed requests, empty history, and current-cycle sign-up details. Signature labels use both the observation lifecycle and the available signature dates. When only a sign-up summary is available, the page does not guess whether the record is signed. Observation history is horizontally scrollable on narrower screens; record actions remain disabled until the record route is implemented.
+The form saves a bounded draft in this browser, scoped to the signed-in account and observation. Saving does not submit answers or sign the record. If local storage is corrupt or blocked, the page explains the fallback or failure; unsaved edits last only while the editor stays open. Signing/submission and printing are not implemented here. The server enforces access and remains authoritative; these UI checks are not authorization. The assigned observation's historical template fields determine ratings, including zero, and required flags. Connected Firebase/backend/database testing was not performed by the mock-backed page tests.
+
+The evaluation view distinguishes loading, failed requests, empty history, and current-cycle sign-up details. Signature labels use both the observation lifecycle and the available signature dates. When only a sign-up summary is available, the page does not guess whether the record is signed. Observation history is horizontally scrollable on narrower screens; its available record links open the read-only route.
 
 Run `npm test` for page-level regression tests using controlled HTTP responses. These tests do not establish real-backend authentication or database persistence. The evaluation-status, current sign-up, and observee observation-history endpoints must be available before connected status-view acceptance can be verified.
 
