@@ -5,6 +5,8 @@ import { DashboardPage } from './pages/committee/DashboardPage';
 import { RequestsPage } from './pages/faculty/RequestsPage';
 import { MyEvaluationPage } from './pages/faculty/MyEvaluationPage';
 import { SignUpPage } from './pages/faculty/SignUpPage';
+import { MyAssignmentsPage } from './pages/faculty/MyAssignmentsPage';
+import { ObservationRecordPage } from './pages/faculty/ObservationRecordPage';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -32,6 +34,8 @@ export const router = createBrowserRouter([
         element: <RequestsPage />,
         handle: { title: 'My requests' } satisfies RouteHandle,
       },
+      { path: '/faculty/assignments', element: <MyAssignmentsPage />, handle: { title: 'My assignments' } satisfies RouteHandle },
+      { path: '/faculty/observe/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/faculty/assignments' } satisfies RouteHandle },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
