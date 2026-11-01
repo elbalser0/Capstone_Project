@@ -261,7 +261,10 @@ export const committeeHandlers = [
   http.get('/api/dashboard/due-by-rank', ({ request }) => {
     committeeMember(request);
     const c = currentCycleOr404();
-    const due = db.eval_due.filter((d) => d.cycle_id === c.cycle_id).map((d) => d.netid);
+    const due = db.eval_due
+      .filter((d) => d.cycle_id === c.cycle_id)
+      .filter((d) => professor(d.netid).is_active)
+      .map((d) => d.netid);
     return HttpResponse.json({ cycleId: c.cycle_id, total: due.length, byRank: byRank(due) } satisfies DueByRank);
   }),
 
