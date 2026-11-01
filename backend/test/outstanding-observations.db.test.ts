@@ -50,7 +50,7 @@ describe('outstanding observations dashboard against the database', { skip }, ()
                VALUES ('fall', 2026, CURRENT_DATE - 30, CURRENT_DATE + 90),
                       ('spring', 2026, CURRENT_DATE - 200, CURRENT_DATE - 100)`);
     for (const [netid, rank] of [
-      ['ac', 'full'], ['assistant', 'assistant'], ['associate', 'associate'],
+      ['ac', 'full'], ['assistant', 'assistant'], ['assistant2', 'assistant'], ['associate', 'associate'],
       ['full', 'full'], ['observer', 'full'],
     ]) {
       await sql(`INSERT INTO professor (netid, first_name, last_name, email, rank, dept_id, eval_interval_years, start_term)
@@ -67,9 +67,9 @@ describe('outstanding observations dashboard against the database', { skip }, ()
                       (1, 1, '002', 'associate', 'in-person'),
                       (1, 1, '003', 'full', 'in-person'),
                       (1, 2, '004', 'assistant', 'in-person'),
-                      (1, 1, '005', 'assistant', 'in-person')`);
+                      (1, 1, '005', 'assistant2', 'in-person')`);
     await sql(`INSERT INTO sign_up (cycle_id, observee_netid, section_id)
-               VALUES (1, 'assistant', 1), (1, 'associate', 2), (1, 'full', 3), (2, 'assistant', 4), (1, 'assistant', 5)`);
+               VALUES (1, 'assistant', 1), (1, 'associate', 2), (1, 'full', 3), (2, 'assistant', 4), (1, 'assistant2', 5)`);
     await sql(`INSERT INTO proposed_date (signup_id, date)
                SELECT signup_id, CURRENT_DATE + 1 FROM sign_up`);
     await sql(`INSERT INTO observer_match (signup_id, observer_netid)
@@ -108,7 +108,11 @@ describe('outstanding observations dashboard against the database', { skip }, ()
   });
 
   test('ranks with no outstanding observations are still returned as zero', async () => {
-    await sql('DELETE FROM observation WHERE signup_id IN (1, 2)');
+    await sql(`UPDATE observation
+               SET status = 'completed', reason_not_completed = NULL,
+                   observer_signed_date = now(), observee_signed_date = now()
+               WHERE signup_id IN (1, 2)`);
+    await sql('DELETE FROM proposed_date WHERE signup_id = 5');
     await sql('DELETE FROM sign_up WHERE signup_id = 5');
     await withDashboardServer(async (base) => {
       const response = await fetch(`${base}/api/dashboard/outstanding-observations`, {
