@@ -91,7 +91,7 @@ export function mapCycle(row: CycleRow) {
   };
 }
 
-async function fetchCycle(where: string, params: unknown[]) {
+export async function fetchCycle(where: string, params: unknown[]) {
   const { rows } = await getPool().query<CycleRow>(`
     SELECT c.cycle_id, t.term_id, t.season, t.year,
            t.start_date::text AS term_start, t.end_date::text AS term_end,
@@ -164,10 +164,16 @@ export async function updateCycle(cycleId: number, changes: Partial<Deadlines>) 
     feedbackDeadline: changes.feedbackDeadline ?? current.feedbackDeadline,
   };
   checkDeadlineOrder(current.startDate, deadlines);
-  await getPool().query(`
-    UPDATE eval_cycle
-    SET signup_deadline = $2::date, observation_deadline = $3::date, feedback_deadline = $4::date
-    WHERE cycle_id = $1
-  `, [cycleId, deadlines.signupDeadline, deadlines.observationDeadline, deadlines.feedbackDeadline]);
+  await inTransaction(async (client) => {
+    await client.query(`
+      UPDATE eval_cycle
+      SET signup_deadline = $2::date, observation_deadline = $3::date, feedback_deadline = $4::date
+      WHERE cycle_id = $1
+    `, [cycleId, deadlines.signupDeadline, deadlines.observationDeadline, deadlines.feedbackDeadline]);
+    // A cycle reopened by a later feedback deadline loses its saved KPIs; the KPI job
+    // generates them again once the new deadline has passed.
+    await client.query('DELETE FROM kpi_result WHERE cycle_id = $1 AND $2::date >= CURRENT_DATE',
+      [cycleId, deadlines.feedbackDeadline]);
+  });
   return (await fetchCycle('c.cycle_id = $1', [cycleId]))!;
 }
