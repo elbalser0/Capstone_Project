@@ -1,12 +1,13 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 
 import { useCycleKpis, useDueByRank, useOutstandingObservations, useUnmatchedFaculty } from '../../api/hooks/committee';
+import { useCurrentCycle } from '../../api/hooks/shared';
 import type { CycleKpis, KpiCode, KpiResult } from '../../api/types';
 import { DownloadIcon } from '../../components/icons';
-import { Button, Card, ErrorNote } from '../../components/ui';
+import { Banner, Button, Card, ErrorNote } from '../../components/ui';
 import { downloadCsv } from '../../lib/csv';
 import { formatDate, formatShort, percent, ranks } from '../../lib/format';
-import { DashboardSections, isNoCycle } from './DashboardSections';
+import { DashboardSections, NO_CYCLE_TEXT, TryAgain, errorText, failureKey, headingFocus, isNoCycle, type Retryable } from './DashboardSections';
 
 // A1. KPIs are generated the day after a cycle's feedback deadline, so the cards show the
 // latest cycle that has results; the executive summary and the lists below are the current cycle so far.
@@ -37,14 +38,15 @@ const value = (k: KpiResult | undefined, meta: KpiMeta) => {
   return String(k.kpiValue);
 };
 
-function KpiCard({ code, kpi }: { code: KpiCode; kpi: KpiResult | undefined }) {
+/** `missing` stands in for the value while the KPIs are loading or failed, so the card never reads N/A for them. */
+function KpiCard({ code, kpi, missing, className = '' }: { code: KpiCode; kpi: KpiResult | undefined; missing?: string; className?: string }) {
   const meta = KPI_META[code];
   return (
-    <Card className="flex min-h-[154px] flex-col px-4 pt-3.5 pb-3">
+    <Card className={`flex min-h-[154px] flex-col px-4 pt-3.5 pb-3 ${className}`}>
       <p className="text-xs text-gray-500"><span className="font-bold text-gray-900">{code}</span> {meta.group}</p>
       <h3 className="mt-[3px] text-sm font-bold text-gray-900">{meta.name}</h3>
-      <p className="mt-auto text-[28px] leading-[34px] font-bold text-gray-900">{value(kpi, meta)}</p>
-      <p className="mt-1 min-h-8 text-xs text-gray-500">{kpi ? meta.describe(kpi) : 'Generated after the feedback deadline.'}</p>
+      <p className="mt-auto text-[28px] leading-[34px] font-bold text-gray-900">{missing ? '–' : value(kpi, meta)}</p>
+      <p className="mt-1 min-h-8 text-xs text-gray-500">{missing ?? (kpi ? meta.describe(kpi) : 'Generated after the feedback deadline.')}</p>
     </Card>
   );
 }
@@ -55,13 +57,22 @@ function exportCsv(data: CycleKpis) {
   downloadCsv('kpis', data.cycle.term.label, lines);
 }
 
-function SummaryCell({ label, total, detail, children }: { label: string; total: number | undefined; detail: string; children?: ReactNode }) {
+/**
+ * `failed` shows the detail in red and, unless another part of the page already announces the same failure
+ * (`announce` false), makes it an alert that names the count; `failedAt` re-creates it on every new failure.
+ */
+function SummaryCell({ label, total, detail, failed = false, failedAt, announce = true, children }: { label: string; total: number | undefined; detail: string; failed?: boolean; failedAt?: number; announce?: boolean; children?: ReactNode }) {
+  const alert = failed && announce;
   return (
-    <div className="my-4 flex flex-col px-5">
+    <div className="flex min-w-0 flex-col px-5 py-4 @2xl:my-4 @2xl:py-0">
       <span className="text-xs text-gray-500">{label}</span>
-      <span className="mt-[3px] flex items-baseline gap-3.5">
+      {/* min-w-0 and wrap-anywhere let a long name break inside the cell instead of widening the page. */}
+      <span className="mt-[3px] flex flex-wrap items-baseline gap-x-3.5">
         <span className="text-[22px] font-bold">{total ?? '–'}</span>
-        <span className="text-[13px] text-gray-700">{detail}</span>
+        <span key={failed ? failedAt : 'loaded'} role={alert ? 'alert' : undefined} className={`min-w-0 text-[13px] wrap-anywhere ${failed ? 'text-red-800' : 'text-gray-700'}`}>
+          {alert && <span className="sr-only">{label}: </span>}
+          {detail}
+        </span>
       </span>
       {children}
     </div>
@@ -69,7 +80,29 @@ function SummaryCell({ label, total, detail, children }: { label: string; total:
 }
 
 /** Shown in place of a count that has not arrived, so a pending or failed request never reads as 0. */
-const notLoaded = ({ error }: { error: unknown }) => (isNoCycle(error) ? 'No cycle has started' : error ? "Couldn't load" : 'Loading');
+const notLoaded = ({ error }: { error: unknown }) => (isNoCycle(error) ? NO_CYCLE_TEXT : error ? "Couldn't load" : 'Loading');
+
+/** A count that never arrived because its request failed (not because no cycle has started). */
+const loadFailed = (q: { data?: unknown; error: unknown }) => q.data === undefined && Boolean(q.error) && !isNoCycle(q.error);
+
+/**
+ * Under a count whose request failed: a failed refresh keeps the last count and says so, and Try again
+ * repeats the request, unless another part of the page already offers it (`retry` false).
+ */
+function CountNote({ label, query, focus, retry = true }: { label: string; query: Retryable & { data?: unknown }; focus: RefObject<HTMLElement | null>; retry?: boolean }) {
+  if (!query.error || isNoCycle(query.error) || (!retry && query.data === undefined)) return null;
+  // The part of the page that offers Try again also announces the failure.
+  return (
+    <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+      {query.data !== undefined && (
+        <span key={query.errorUpdatedAt} role={retry ? 'alert' : undefined} className="text-xs text-red-800">
+          {retry && <span className="sr-only">{label}: </span>}Couldn't refresh.
+        </span>
+      )}
+      {retry && <TryAgain queries={[query]} focus={focus} />}
+    </span>
+  );
+}
 
 function Summary() {
   const due = useDueByRank();
@@ -77,21 +110,35 @@ function Summary() {
   const unmatched = useUnmatchedFaculty();
   const first = unmatched.data?.items[0];
   const more = (unmatched.data?.total ?? 0) - 1;
+  const heading = useRef<HTMLHeadingElement>(null);
   return (
     <section aria-labelledby="executive-summary">
-      <h2 id="executive-summary" className="mt-[30px] mb-3 text-base font-bold text-gray-900">Executive summary</h2>
-      <Card className="grid grid-cols-3 divide-x divide-gray-200">
-        <SummaryCell label="Due for evaluation" total={due.data?.total} detail={due.data ? ranks(due.data.byRank) : notLoaded(due)} />
+      <h2 id="executive-summary" ref={heading} tabIndex={-1} className={`mt-[30px] mb-3 w-fit text-base font-bold text-gray-900 ${headingFocus}`}>Executive summary</h2>
+      {/* The three counts stack until the content column is wide enough for them side by side. */}
+      <Card className="grid grid-cols-1 divide-y divide-gray-200 @2xl:grid-cols-3 @2xl:divide-x @2xl:divide-y-0">
+        <SummaryCell label="Due for evaluation" total={due.data?.total} detail={due.data ? ranks(due.data.byRank) : notLoaded(due)} failed={loadFailed(due)} failedAt={due.errorUpdatedAt}>
+          <CountNote label="Due for evaluation" query={due} focus={heading} />
+        </SummaryCell>
         <SummaryCell
           label="Signed up but not observed"
           total={outstanding.data?.total}
           detail={outstanding.data ? ranks(outstanding.data.byRank) : notLoaded(outstanding)}
-        />
+          failed={loadFailed(outstanding)}
+          failedAt={outstanding.errorUpdatedAt}
+        >
+          <CountNote label="Signed up but not observed" query={outstanding} focus={heading} />
+        </SummaryCell>
+        {/* The unmatched list below reads the same request and offers its own Try again. */}
         <SummaryCell
           label="Unmatched faculty"
           total={unmatched.data?.total}
           detail={!unmatched.data ? notLoaded(unmatched) : first ? `${first.observee.displayName}, ${first.section.label}${more > 0 ? `, and ${more} more` : ''}` : 'None'}
-        />
+          failed={loadFailed(unmatched)}
+          failedAt={unmatched.errorUpdatedAt}
+          announce={false}
+        >
+          <CountNote label="Unmatched faculty" query={unmatched} focus={heading} retry={false} />
+        </SummaryCell>
       </Card>
     </section>
   );
@@ -99,27 +146,72 @@ function Summary() {
 
 export function DashboardPage() {
   const kpis = useCycleKpis('latest');
+  const cycle = useCurrentCycle();
   const data = kpis.data;
   const byCode = new Map(data?.kpis.map((k) => [k.kpiCode, k]));
   const subtitle = data
     ? `${data.cycle.term.label} cycle. ${data.computedDate ? `Generated ${formatDate(data.computedDate)}, after` : 'KPIs are generated after'} the feedback deadline (${formatShort(data.cycle.feedbackDeadline)}).`
     : '';
+  const kpiBlock = useRef<HTMLElement>(null);
+  // Until the current cycle is known, a KPI 404 may only mean no cycle has started, so the cards keep loading.
+  const missing = data ? undefined : kpis.error && !cycle.isPending ? "Couldn't load" : 'Loading';
 
+  // Before the first cycle there is nothing to show yet, so the page says so once. A cycle read that is
+  // only refreshing still counts, and KPIs that did arrive are shown rather than hidden behind an old answer.
+  const noCycle = cycle.data === null && !data;
+  const noCycleBox = useRef<HTMLDivElement>(null);
+  const focusWithin = useRef(false);
+  useEffect(() => {
+    // A Try again that ends here removes the element it focused, so focus the message instead of the page body.
+    const lost = !document.activeElement || document.activeElement === document.body;
+    if (noCycle && focusWithin.current && lost) noCycleBox.current?.focus();
+  }, [noCycle]);
+
+  if (noCycle) {
+    return (
+      <div className="flex flex-col pt-4">
+        <div ref={noCycleBox} tabIndex={-1} className={`rounded-lg ${headingFocus}`}>
+          <Banner tone="info"><span className="wrap-anywhere">{NO_CYCLE_TEXT}</span></Banner>
+        </div>
+      </div>
+    );
+  }
+
+  // A container: the layout follows the content column, which the sidebar keeps narrower than the window.
   return (
-    <div className="flex flex-col pt-4">
-      <div className="flex items-center justify-between">
+    <div className="@container flex flex-col pt-4" onFocus={() => { focusWithin.current = true; }}>
+      <div className="flex flex-col gap-3 @xl:flex-row @xl:items-center @xl:justify-between">
         <p className="text-sm text-gray-500">{subtitle}</p>
-        <Button variant="secondary" size="compact" disabled={!data?.kpis.length} onClick={() => data && exportCsv(data)}>
+        <Button variant="secondary" size="compact" className="self-start @xl:self-auto" disabled={!data?.kpis.length} onClick={() => data && exportCsv(data)}>
           <DownloadIcon /> Export CSV
         </Button>
       </div>
-      <ErrorNote error={kpis.error} />
-      <div className="mt-4 grid grid-cols-4 gap-4">
-        {ROW_1.map((code) => <KpiCard key={code} code={code} kpi={byCode.get(code)} />)}
-      </div>
-      <div className="mt-4 grid grid-cols-3 gap-4">
-        {ROW_2.map((code) => <KpiCard key={code} code={code} kpi={byCode.get(code)} />)}
-      </div>
+      {/* The KPI block, named by a screen-reader heading. Its Try again moves focus here, where the ring shows;
+          the block's own top margin keeps that ring clear of Export CSV. */}
+      <section ref={kpiBlock} aria-labelledby="kpi-results" tabIndex={-1} className="mt-4 flex flex-col gap-4 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand">
+        <h2 id="kpi-results" className="sr-only">KPI results</h2>
+        {kpis.error && !data && !cycle.isPending && (
+          <div key={failureKey([kpis, cycle])} className="flex flex-col items-start gap-3">
+            <ErrorNote error={new Error(`Couldn't load the KPIs: ${errorText(kpis.error)}`)} className="w-full" />
+            <TryAgain queries={[kpis, cycle]} focus={kpiBlock} look="button" />
+          </div>
+        )}
+        {kpis.error && data && (
+          <div key={failureKey([kpis])}>
+            <Banner tone="danger" action={<TryAgain queries={[kpis]} focus={kpiBlock} />}>Couldn't refresh the KPIs: {errorText(kpis.error)}</Banner>
+          </div>
+        )}
+        {/* Four cards, then three, as on A1. As the content column narrows: two per row (the last of the
+            three spanning both), then one. */}
+        <div className="grid grid-cols-1 gap-4 @md:grid-cols-2 @2xl:grid-cols-4">
+          {ROW_1.map((code) => <KpiCard key={code} code={code} kpi={byCode.get(code)} missing={missing} />)}
+        </div>
+        <div className="grid grid-cols-1 gap-4 @md:grid-cols-2 @2xl:grid-cols-3">
+          {ROW_2.map((code, i) => (
+            <KpiCard key={code} code={code} kpi={byCode.get(code)} missing={missing} className={i === ROW_2.length - 1 ? '@md:col-span-2 @2xl:col-span-1' : ''} />
+          ))}
+        </div>
+      </section>
       <Summary />
       <DashboardSections />
     </div>
