@@ -8,6 +8,7 @@ import { SignUpPage } from './pages/faculty/SignUpPage';
 import { MyAssignmentsPage } from './pages/faculty/MyAssignmentsPage';
 import { ObservationRecordPage } from './pages/faculty/ObservationRecordPage';
 import { ObservationFormPage } from './pages/faculty/ObservationFormPage';
+import { ObservationSignPage } from './pages/faculty/ObservationSignPage';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -38,6 +39,7 @@ export const router = createBrowserRouter([
       { path: '/faculty/assignments', element: <MyAssignmentsPage />, handle: { title: 'My assignments' } satisfies RouteHandle },
       { path: '/faculty/observe/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/faculty/assignments' } satisfies RouteHandle },
       { path: '/faculty/observe/:observationId/form', element: <ObservationFormPage />, handle: { title: 'Observation form', nav: '/faculty/assignments' } satisfies RouteHandle },
+      { path: '/faculty/observe/:observationId/sign', element: <ObservationSignPage />, handle: { title: 'Review and sign observation', nav: '/faculty/assignments' } satisfies RouteHandle },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
