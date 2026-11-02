@@ -30,6 +30,12 @@ Do not rerun schema.sql on a database where these tables already exist.
 clear_data.sql deletes data. It is not part of normal setup.
 Coordinate with the team before using it on the shared database.
 
+## Migrations
+
+- `migrations/20261030_alert_auto_resolution.sql`: Apply to an existing database
+  to allow automatic alert resolution without attributing it to an AC member.
+  New databases get this constraint from `schema.sql`.
+
 ## Connection details
 
 Obtain database credentials privately from the database team.

@@ -71,6 +71,16 @@ describe('confirm and decline against the database', { skip }, () => {
     assert.deepEqual(rows, [{ observer_netid: 'obsA', scheduled_date: date, status: 'scheduled' }]);
   });
 
+  test('confirming resolves an open no_acceptance alert', async () => {
+    await addRequest(1, 'obsA');
+    await sql(`INSERT INTO alert (signup_id, alert_type) VALUES (1, 'no_acceptance')`);
+    await confirmRequest(1, 'obsA', await futureDate(7));
+    const { rows } = await sql(`SELECT resolved_by, resolved_date FROM alert
+      WHERE signup_id = 1 AND alert_type = 'no_acceptance'`);
+    assert.equal(rows[0].resolved_by, null);
+    assert.ok(rows[0].resolved_date);
+  });
+
   test('observee sends to selected candidates, while expired requests remain history', async () => {
     await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA'), (1, 'obsB')`);
     const first = await sendRequests(1, 'ee1', ['obsA']);
@@ -87,6 +97,49 @@ describe('confirm and decline against the database', { skip }, () => {
     assert.equal(sent.length, 2);
     assert.equal(sent.find((r) => r.observer.netid === 'obsA')?.status, 'expired');
     assert.equal(sent.find((r) => r.observer.netid === 'obsB')?.status, 'pending');
+  });
+
+  test('a decline does not alert while an unrequested matched observer remains', async () => {
+    await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA'), (1, 'obsB')`);
+    await sendRequests(1, 'ee1', ['obsA']);
+    await declineRequest(1, 'obsA');
+    assert.equal((await sql(`SELECT count(*)::int AS n FROM alert
+      WHERE signup_id = 1 AND alert_type = 'no_acceptance' AND resolved_date IS NULL`)).rows[0].n, 0);
+
+    const requests = await sendRequests(1, 'ee1');
+    assert.deepEqual(requests.map((r) => [r.observer.netid, r.status]), [
+      ['obsB', 'pending'],
+      ['obsA', 'declined'],
+    ]);
+  });
+
+  test('the final decline alerts once, and a later send resolves it when matching adds a candidate', async () => {
+    await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA')`);
+    await sendRequests(1, 'ee1', ['obsA']);
+    await declineRequest(1, 'obsA');
+    const alert = (await sql(`SELECT alert_id FROM alert
+      WHERE signup_id = 1 AND alert_type = 'no_acceptance' AND resolved_date IS NULL`)).rows[0];
+    assert.ok(alert);
+    await assert.rejects(sendRequests(1, 'ee1'), { code: 'NO_CANDIDATES' });
+    assert.equal((await sql(`SELECT count(*)::int AS n FROM alert
+      WHERE signup_id = 1 AND alert_type = 'no_acceptance' AND resolved_date IS NULL`)).rows[0].n, 1);
+
+    await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsB')`);
+    await sendRequests(1, 'ee1', ['obsB']);
+    const resolved = (await sql('SELECT resolved_by, resolved_date FROM alert WHERE alert_id = $1', [alert.alert_id])).rows[0];
+    assert.equal(resolved.resolved_by, null);
+    assert.ok(resolved.resolved_date);
+  });
+
+  test('an AC dismissal is not reopened by a retry with no intervening change', async () => {
+    await sql(`INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA')`);
+    await sendRequests(1, 'ee1', ['obsA']);
+    await declineRequest(1, 'obsA');
+    await sql(`UPDATE alert SET resolved_by = 'ac1', resolved_date = now(), resolution_note = 'Handled offline'
+      WHERE signup_id = 1 AND alert_type = 'no_acceptance'`);
+    await assert.rejects(sendRequests(1, 'ee1'), { code: 'NO_CANDIDATES' });
+    assert.equal((await sql(`SELECT count(*)::int AS n FROM alert
+      WHERE signup_id = 1 AND alert_type = 'no_acceptance' AND resolved_date IS NULL`)).rows[0].n, 0);
   });
 
   test('sending rejects other sign-ups, unknown candidates, and paired sign-ups', async () => {
@@ -156,6 +209,8 @@ describe('confirm and decline against the database', { skip }, () => {
     // Reaching 3 cancels the observer's other open requests, but not expired ones.
     assert.equal(await status(5, 'obsA'), 'cancelled');
     assert.equal(await status(6, 'obsA'), 'pending');
+    assert.equal((await sql(`SELECT count(*)::int AS n FROM alert
+      WHERE signup_id = 5 AND alert_type = 'no_acceptance' AND resolved_date IS NULL`)).rows[0].n, 1);
   });
 
   test('confirming a request you already accepted returns NOT_PENDING, even at the limit', async () => {

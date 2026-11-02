@@ -235,11 +235,9 @@ CREATE TABLE public.alert (
     resolved_date TIMESTAMPTZ,
     resolution_note TEXT,
 
-    CHECK (
-        (resolved_by IS NULL AND resolved_date IS NULL)
-        OR
-        (resolved_by IS NOT NULL AND resolved_date IS NOT NULL)
-    ),
+    -- A null resolver with a resolution date means the system resolved the alert.
+    CONSTRAINT alert_resolution_actor_check
+        CHECK (resolved_by IS NULL OR resolved_date IS NOT NULL),
 
     CHECK (
         resolved_date IS NULL
