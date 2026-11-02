@@ -6,7 +6,7 @@ import { DownloadIcon } from '../../components/icons';
 import { Button, Card, ErrorNote } from '../../components/ui';
 import { downloadCsv } from '../../lib/csv';
 import { formatDate, formatShort, percent, ranks } from '../../lib/format';
-import { DashboardSections } from './DashboardSections';
+import { DashboardSections, isNoCycle } from './DashboardSections';
 
 // A1. KPIs are generated the day after a cycle's feedback deadline, so the cards show the
 // latest cycle that has results; the executive summary and the lists below are the current cycle so far.
@@ -55,18 +55,21 @@ function exportCsv(data: CycleKpis) {
   downloadCsv('kpis', data.cycle.term.label, lines);
 }
 
-function SummaryCell({ label, total, detail, children }: { label: string; total: number; detail: string | undefined; children?: ReactNode }) {
+function SummaryCell({ label, total, detail, children }: { label: string; total: number | undefined; detail: string; children?: ReactNode }) {
   return (
     <div className="my-4 flex flex-col px-5">
       <span className="text-xs text-gray-500">{label}</span>
       <span className="mt-[3px] flex items-baseline gap-3.5">
-        <span className="text-[22px] font-bold">{total}</span>
-        {detail !== undefined && <span className="text-[13px] text-gray-700">{detail}</span>}
+        <span className="text-[22px] font-bold">{total ?? '–'}</span>
+        <span className="text-[13px] text-gray-700">{detail}</span>
       </span>
       {children}
     </div>
   );
 }
+
+/** Shown in place of a count that has not arrived, so a pending or failed request never reads as 0. */
+const notLoaded = ({ error }: { error: unknown }) => (isNoCycle(error) ? 'No cycle has started' : error ? "Couldn't load" : 'Loading');
 
 function Summary() {
   const due = useDueByRank();
@@ -78,12 +81,16 @@ function Summary() {
     <section aria-labelledby="executive-summary">
       <h2 id="executive-summary" className="mt-[30px] mb-3 text-base font-bold text-gray-900">Executive summary</h2>
       <Card className="grid grid-cols-3 divide-x divide-gray-200">
-        <SummaryCell label="Due for evaluation" total={due.data?.total ?? 0} detail={due.data && ranks(due.data.byRank)} />
-        <SummaryCell label="Signed up but not observed" total={outstanding.data?.total ?? 0} detail={outstanding.data && ranks(outstanding.data.byRank)} />
+        <SummaryCell label="Due for evaluation" total={due.data?.total} detail={due.data ? ranks(due.data.byRank) : notLoaded(due)} />
+        <SummaryCell
+          label="Signed up but not observed"
+          total={outstanding.data?.total}
+          detail={outstanding.data ? ranks(outstanding.data.byRank) : notLoaded(outstanding)}
+        />
         <SummaryCell
           label="Unmatched faculty"
-          total={unmatched.data?.total ?? 0}
-          detail={first ? `${first.observee.displayName}, ${first.section.label}${more > 0 ? `, and ${more} more` : ''}` : 'None'}
+          total={unmatched.data?.total}
+          detail={!unmatched.data ? notLoaded(unmatched) : first ? `${first.observee.displayName}, ${first.section.label}${more > 0 ? `, and ${more} more` : ''}` : 'None'}
         />
       </Card>
     </section>

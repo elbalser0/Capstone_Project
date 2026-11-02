@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from 'react';
 
+import { ApiError } from '../../api/client';
 import { useCycleSignups, useDueProfessors, useUnmatchedFaculty } from '../../api/hooks/committee';
 import { useCurrentCycle } from '../../api/hooks/shared';
 import type { AlertType, CourseSection, DueProfessor, ObservationStatus, Signup, UnmatchedFaculty } from '../../api/types';
@@ -12,6 +13,9 @@ import { RANK_SHORT, dayLetters, formatDate, formatTime } from '../../lib/format
 
 const PAGE_SIZE = 5;
 
+/** The dashboard endpoints answer 404 NO_CYCLE before the first cycle starts. */
+export const isNoCycle = (error: unknown) => error instanceof ApiError && error.code === 'NO_CYCLE';
+
 interface ListProps<T> {
   title: string;
   /** Each column has a minimum width that fits its longest tag or word. */
@@ -22,18 +26,21 @@ interface ListProps<T> {
   /** undefined until the list has loaded */
   rows: T[] | undefined;
   error: unknown;
+  noCycle: boolean;
   loading: string;
   empty: string;
   rowKey: (row: T) => string;
   cells: (row: T) => ReactNode;
 }
 
-function DetailList<T>({ title, columns, minWidth, head, rows, error, loading, empty, rowKey, cells }: ListProps<T>) {
+function DetailList<T>({ title, columns, minWidth, head, rows, error, noCycle, loading, empty, rowKey, cells }: ListProps<T>) {
   const headingId = useId();
   const pager = usePages(rows ?? [], PAGE_SIZE);
 
   let message: ReactNode = null;
-  if (error) message = <div className="p-4"><ErrorNote error={error} /></div>;
+  // No cycle comes first: before one starts, the unmatched endpoint answers with a NO_CYCLE error.
+  if (noCycle) message = <EmptyRow>No evaluation cycle has started yet.</EmptyRow>;
+  else if (error) message = <div className="p-4"><ErrorNote error={error} /></div>;
   else if (!rows) message = <p role="status" className="px-4 py-4 text-sm text-gray-500">{loading}</p>;
   else if (!rows.length) message = <EmptyRow>{empty}</EmptyRow>;
 
@@ -78,6 +85,7 @@ function DueFaculty() {
       head={['Name', 'Rank', 'Department', 'Last observed', 'Status']}
       rows={rows}
       error={cycle.error ?? due.error}
+      noCycle={cycle.isSuccess && !cycle.data}
       loading="Loading faculty…"
       empty="Nobody is due or overdue this cycle."
       rowKey={(r) => r.professor.netid}
@@ -111,6 +119,7 @@ function Unmatched() {
       head={['Observee', 'Rank', 'Course', 'Days and time', 'Reason']}
       rows={unmatched.data?.items}
       error={unmatched.error}
+      noCycle={isNoCycle(unmatched.error)}
       loading="Loading unmatched faculty…"
       empty="Every sign-up has an observer or is still being matched."
       rowKey={(r) => r.signupId}
@@ -151,6 +160,7 @@ function Outstanding() {
       head={['Observee', 'Rank', 'Observer', 'Course', 'Date', 'Status']}
       rows={rows}
       error={cycle.error ?? signups.error}
+      noCycle={cycle.isSuccess && !cycle.data}
       loading="Loading observations…"
       empty="Every sign-up has a completed observation."
       rowKey={(s) => s.signupId}
