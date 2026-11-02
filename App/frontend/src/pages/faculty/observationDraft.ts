@@ -10,11 +10,33 @@ export const serverDraft = (o: ObservationDetail): Draft => ({
   answers: Object.fromEntries(o.answers.map(a => [a.questionId, { rating: a.rating, comment: a.comment }])),
   otherComments: o.otherComments,
 });
+const inMemoryDrafts = new Map<string, { versionId: string; lastSavedDate: string; draft: Draft }>();
+
+export function rememberDraft(user: string, o: ObservationDetail, draft: Draft) {
+  inMemoryDrafts.set(draftKey(user, o.observationId), {
+    versionId: o.templateVersion.versionId,
+    lastSavedDate: o.lastSavedDate,
+    draft,
+  });
+}
+
+export function clearDraft(user: string, observationId: string) {
+  inMemoryDrafts.delete(draftKey(user, observationId));
+  try { localStorage.removeItem(draftKey(user, observationId)); } catch { /* The server submission already succeeded. */ }
+}
+
 export function readDraft(user: string, o: ObservationDetail): { draft: Draft; warning: string | null } {
+  const key = draftKey(user, o.observationId);
   const fallback = serverDraft(o);
+  const inMemory = inMemoryDrafts.get(key);
+  if (inMemory && inMemory.lastSavedDate === o.lastSavedDate && inMemory.versionId === o.templateVersion.versionId) {
+    return { draft: inMemory.draft, warning: null };
+  }
   try {
-    const raw = localStorage.getItem(draftKey(user, o.observationId));
-    if (raw === null) return { draft: fallback, warning: null };
+    const raw = localStorage.getItem(key);
+    if (raw === null) {
+      return { draft: fallback, warning: inMemory ? 'The server record has changed since this draft was edited. Showing the saved server record instead.' : null };
+    }
     if (raw.length > 65536) throw new Error('Oversized draft');
     const saved: unknown = JSON.parse(raw);
     if (!saved || typeof saved !== 'object') throw new Error('Invalid draft');
@@ -28,7 +50,9 @@ export function readDraft(user: string, o: ObservationDetail): { draft: Draft; w
       const v = entries[a.questionId] as { rating?: unknown; comment?: unknown } | undefined;
       return !v || (v.rating !== null && (typeof v.rating !== 'number' || !Number.isInteger(v.rating) || v.rating < a.ratingMin || v.rating > a.ratingMax)) || typeof v.comment !== 'string' || v.comment.length > 4000;
     })) throw new Error('Invalid draft');
-    return { draft: { answers: entries as Draft['answers'], otherComments: d.otherComments }, warning: null };
+    const draft = { answers: entries as Draft['answers'], otherComments: d.otherComments };
+    rememberDraft(user, o, draft);
+    return { draft, warning: null };
   } catch {
     return { draft: fallback, warning: 'The saved draft could not be read. Showing the server record instead.' };
   }

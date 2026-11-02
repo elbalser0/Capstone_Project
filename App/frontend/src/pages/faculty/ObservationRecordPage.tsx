@@ -1,5 +1,8 @@
+import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { Card, LockNote, PageError, RatingScale, Tag, linkClass } from '../../components/ui';
+import { ApiError } from '../../api/client';
+import { useSignObservation } from '../../api/hooks/faculty';
+import { Button, Card, Checkbox, ErrorNote, LockNote, PageError, RatingScale, Tag, linkClass } from '../../components/ui';
 import { useActiveNav } from '../../components/AppShell';
 import { CheckIcon, ClockIcon, PenIcon } from '../../components/icons';
 import { isLocked } from '../../lib/format';
@@ -7,21 +10,26 @@ import type { PersonRef } from '../../api/types';
 import { recordStatus, signedOn, whenLong } from './observationDisplay';
 import { useObservationRecord } from './useObservationRecord';
 
-function Party({ role, person, date, you }: { role: string; person: PersonRef; date: string | null; you: boolean }) {
+function Party({ role, person, date, you, action }: { role: string; person: PersonRef; date: string | null; you: boolean; action?: ReactNode }) {
   return (
     <div className="flex items-start gap-3">
       <span className={`mt-0.5 shrink-0 ${date ? 'text-green-800' : 'text-gray-500'}`} aria-hidden>{date ? <CheckIcon /> : <ClockIcon />}</span>
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0 flex-1 space-y-1">
         <p className="text-sm font-bold">{role}: {person.displayName}{you && ' (you)'}</p>
         <p className="text-xs text-gray-500">{signedOn(date)}</p>
         {date && <Tag tone="signed">Signed</Tag>}
       </div>
+      {action}
     </div>
   );
 }
 
 export function ObservationRecordPage() {
   const { profile, record } = useObservationRecord();
+  const sign = useSignObservation();
+  const [staleRefresh, setStaleRefresh] = useState<'reloaded' | 'failed' | null>(null);
+  const [staleReviewed, setStaleReviewed] = useState(false);
+  const [signedNow, setSignedNow] = useState(false);
   const viewer = profile.data?.netid;
   const o = record.data;
   const observer = Boolean(o && o.observer.netid === viewer);
@@ -29,10 +37,26 @@ export function ObservationRecordPage() {
   // The sidebar item that led here: assignments for the observer, My evaluation for the observee, neither for others.
   useActiveNav(viewer && o ? (observer ? '/faculty/assignments' : observee ? '/faculty/evaluation' : '') : null);
   if (profile.error) return <PageError error={profile.error} />;
-  if (record.error) return <PageError error={record.error} />;
+  if (record.error && (!record.data || staleRefresh !== 'failed')) return <PageError error={record.error} />;
   if (!profile.data || !o) return <p role="status" className="pt-8">Loading observation record…</p>;
   const status = recordStatus(o, profile.data.netid);
   const hasForm = Boolean(o.templateVersion) && Array.isArray(o.answers);
+  const canObserveeSign = observee && o.status === 'scheduled' && Boolean(o.observerSignedDate) && !o.observeeSignedDate && staleRefresh !== 'failed';
+  const refreshLatest = async () => {
+    setStaleReviewed(false);
+    const result = await record.refetch();
+    setStaleRefresh(result.error ? 'failed' : 'reloaded');
+  };
+  const signAsObservee = () => {
+    setStaleRefresh(null);
+    setSignedNow(false);
+    sign.mutate({ observationId: o.observationId, lastSavedDate: o.lastSavedDate }, {
+      onSuccess: () => setSignedNow(true),
+      onError: async (error) => {
+        if (error instanceof ApiError && error.code === 'STALE_FORM') await refreshLatest();
+      },
+    });
+  };
   return (
     <div className="min-w-0 space-y-5 pt-8 text-gray-900 [overflow-wrap:anywhere]">
       <Link to={observer ? '/faculty/assignments' : '/faculty/evaluation'} className={linkClass}>Back to {observer ? 'assignments' : 'evaluation'}</Link>
@@ -69,8 +93,30 @@ export function ObservationRecordPage() {
         <Card className="min-w-0 space-y-4 p-5">
           <h3 className="font-bold">Signatures</h3>
           <Party role="Observer" person={o.observer} date={o.observerSignedDate} you={observer} />
-          <Party role="Observee" person={o.observee} date={o.observeeSignedDate} you={observee} />
-          <LockNote>{isLocked(o) ? 'Signed and locked. Nobody can change this record.' : 'Once both of you sign, nobody can change this record.'}</LockNote>
+          <Party role="Observee" person={o.observee} date={o.observeeSignedDate} you={observee} action={canObserveeSign && (
+            <Button size="compact" disabled={sign.isPending || staleRefresh === 'reloaded' && !staleReviewed} onClick={signAsObservee}>Sign</Button>
+          )} />
+          <div className="space-y-2">
+            {sign.isPending && <p role="status">Recording your signature…</p>}
+            {signedNow && <p role="status">You signed the observation. This record is now complete and locked.</p>}
+            {staleRefresh === 'reloaded' && (
+              <div className="space-y-2">
+                <p role="status">The saved form changed after you opened it. The latest record has been reloaded; review the updated responses before signing.</p>
+                <label className="flex cursor-pointer items-start gap-3 text-sm">
+                  <Checkbox checked={staleReviewed} onChange={(event) => setStaleReviewed(event.target.checked)} />
+                  <span>I reviewed the updated responses before signing.</span>
+                </label>
+              </div>
+            )}
+            {staleRefresh === 'failed' && (
+              <div className="space-y-2">
+                <p role="alert">Could not reload the latest record, so your signature was not recorded. Retry before signing.</p>
+                <Button size="compact" disabled={record.isFetching} onClick={() => void refreshLatest()}>Retry loading latest record</Button>
+              </div>
+            )}
+            <ErrorNote error={sign.error instanceof ApiError && sign.error.code === 'STALE_FORM' ? null : sign.error} />
+            <LockNote>{isLocked(o) ? 'Signed and locked. Nobody can change this record.' : 'Once both of you sign, nobody can change this record.'}</LockNote>
+          </div>
         </Card>
       </div>
       {observer && hasForm && !isLocked(o) && o.status !== 'not_completed' && (

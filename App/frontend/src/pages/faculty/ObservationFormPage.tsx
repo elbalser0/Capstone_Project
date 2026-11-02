@@ -4,7 +4,7 @@ import { Banner, Button, Card, PageError, RatingScale, TextArea, linkClass } fro
 import { nowMs } from '../../lib/clock';
 import { formatClock, isLocked } from '../../lib/format';
 import type { ObservationDetail } from '../../api/types';
-import { readDraft, saveDraft, type Draft } from './observationDraft';
+import { readDraft, rememberDraft, saveDraft, type Draft } from './observationDraft';
 import { whenShort } from './observationDisplay';
 import { useObservationRecord } from './useObservationRecord';
 
@@ -17,9 +17,13 @@ function Editor({ o, user }: { o: ObservationDetail; user: string }) {
   const [message, setMessage] = useState(initial.warning);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
-  const answer = (id: string, update: Partial<Draft['answers'][string]>) => {
-    setDraft(d => ({ ...d, answers: { ...d.answers, [id]: { ...d.answers[id], ...update } } }));
+  const updateDraft = (next: Draft) => {
+    rememberDraft(user, o, next);
+    setDraft(next);
     setDirty(true);
+  };
+  const answer = (id: string, update: Partial<Draft['answers'][string]>) => {
+    updateDraft({ ...draft, answers: { ...draft.answers, [id]: { ...draft.answers[id], ...update } } });
   };
   return <div className="min-w-0 space-y-5 pt-8 text-gray-900 [overflow-wrap:anywhere]">
     <Link to={`/faculty/observe/${o.observationId}`} className={linkClass}>Back to read-only record</Link>
@@ -52,7 +56,7 @@ function Editor({ o, user }: { o: ObservationDetail; user: string }) {
         <label className="text-sm font-bold" htmlFor="other-comments">Any other comments</label>
         <span className="text-xs text-gray-500">Always the last item on every form</span>
       </div>
-      <TextArea id="other-comments" maxLength={4000} value={draft.otherComments} onChange={e => { setDraft(d => ({ ...d, otherComments: e.target.value })); setDirty(true); }} />
+      <TextArea id="other-comments" maxLength={4000} value={draft.otherComments} onChange={e => updateDraft({ ...draft, otherComments: e.target.value })} />
     </div>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="min-w-0 space-y-1 text-sm text-gray-700">
@@ -61,10 +65,12 @@ function Editor({ o, user }: { o: ObservationDetail; user: string }) {
         {dirty && <p role="status">Unsaved changes on this page.</p>}
       </div>
       <Button variant="secondary" onClick={() => {
+        rememberDraft(user, o, draft);
         const ok = saveDraft(user, o, draft);
         setMessage(ok ? 'Draft saved on this device only. Not submitted or signed.' : 'Draft could not be saved on this device. Edits remain only while this page stays open.');
         if (ok) { setDirty(false); setSavedAt(formatClock(nowMs())); }
       }}>Save draft on this device</Button>
+      <Link to={`/faculty/observe/${o.observationId}/sign`} className={linkClass}>Go to signatures</Link>
     </div>
   </div>;
 }
