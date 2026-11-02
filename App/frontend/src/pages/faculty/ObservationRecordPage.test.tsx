@@ -45,6 +45,27 @@ it('loads the assigned record with its saved zero rating and no signing control'
   expect(screen.getByText('Good pacing')).toBeVisible();
   expect(screen.queryByRole('button', { name: /sign/i })).not.toBeInTheDocument();
 });
+it('calls the browser print dialog from the saved record', async () => {
+  const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+  serveRecord({ ...detail, observerSignedDate: '2026-09-22', observeeSignedDate: null });
+  const user = userEvent.setup();
+  openRecord();
+  expect(await screen.findByText('Clear examples')).toBeVisible();
+  expect(screen.getByRole('heading', { level: 2, name: 'CS 1337.002 Computer Science I, Mon Sep 21, 2026, 8:30 AM' })).toBeVisible();
+  expect(screen.getByText('Observation Template v3, observer Dr. Elena Ruiz')).toBeVisible();
+  expect(screen.getByText('Was the explanation clear?')).toBeVisible();
+  expect(screen.getByRole('img', { name: 'Clarity: 0 of 2' })).toBeVisible();
+  expect(screen.getByText('Observer: Dr. Elena Ruiz')).toBeVisible();
+  expect(screen.getByText('Observee: Dr. Maya Lin (you)')).toBeVisible();
+  expect(screen.getByText('signed Sep 22, 2026')).toBeVisible();
+  expect(screen.getByText('Not signed yet')).toBeVisible();
+  expect(screen.getByText('Good pacing')).toBeVisible();
+  const printButton = screen.getByRole('button', { name: 'Print record' });
+  expect(printButton).toHaveClass('screen-only');
+  await user.click(printButton);
+  expect(print).toHaveBeenCalledOnce();
+  expect(screen.getByText('Waiting for your signature')).toBeVisible();
+});
 it('keeps line breaks in saved comments', async () => {
   serveRecord({ ...detail, otherComments: 'First\nSecond', answers: [{ ...detail.answers[0], comment: 'Line one\n\nLine three' }] }); openRecord();
   const comment = await screen.findByText((_, el) => el?.tagName === 'P' && el.textContent === 'Line one\n\nLine three');
@@ -168,6 +189,8 @@ it('reports a failed stale-record refresh and requires a successful retry before
   openRecord();
   await user.click(await screen.findByRole('button', { name: 'Sign' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(/could not reload the latest record/i);
+  expect(screen.getByRole('alert').closest('.screen-only')).not.toBeNull();
+  expect(screen.getByRole('button', { name: /retry loading latest record/i }).closest('.screen-only')).not.toBeNull();
 
   expect(screen.queryByText(/latest record has been reloaded/i)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();

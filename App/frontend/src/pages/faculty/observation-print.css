@@ -1,0 +1,90 @@
+@media print {
+  html:has(.observation-record-page),
+  body:has(.observation-record-page),
+  #root:has(.observation-record-page) {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  body:has(.observation-record-page) {
+    background: #fff !important;
+    color: #111827 !important;
+    font-size: 10pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body:has(.observation-record-page) .app-shell {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  body:has(.observation-record-page) .app-shell-sidebar,
+  body:has(.observation-record-page) .app-shell-header,
+  .observation-record-page .screen-only {
+    display: none !important;
+  }
+
+  body:has(.observation-record-page) .app-shell-content {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  body:has(.observation-record-page) .app-shell-main {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .observation-record-page {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    color: #111827 !important;
+    font-size: 10pt;
+  }
+
+  .observation-record-grid {
+    display: block !important;
+  }
+
+  .observation-record-grid > * {
+    width: 100% !important;
+    max-width: none !important;
+    margin-bottom: 0.18in;
+  }
+
+  .observation-record-page .overflow-x-auto,
+  .observation-record-page .observation-rating-scale {
+    max-width: none !important;
+    overflow: visible !important;
+  }
+
+  .observation-record-page .whitespace-pre-line {
+    white-space: pre-line !important;
+  }
+
+  .observation-record-page .text-gray-500 {
+    color: #4b5563 !important;
+  }
+
+  .observation-record-page .text-gray-700 {
+    color: #374151 !important;
+  }
+
+  .observation-record-page h2,
+  .observation-record-page h3,
+  .observation-record-page h4 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .observation-record-page .observation-signatures-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

@@ -9,6 +9,7 @@ import { isLocked } from '../../lib/format';
 import type { PersonRef } from '../../api/types';
 import { recordStatus, signedOn, whenLong } from './observationDisplay';
 import { useObservationRecord } from './useObservationRecord';
+import './observation-print.css';
 
 function Party({ role, person, date, you, action }: { role: string; person: PersonRef; date: string | null; you: boolean; action?: ReactNode }) {
   return (
@@ -58,21 +59,24 @@ export function ObservationRecordPage() {
     });
   };
   return (
-    <div className="min-w-0 space-y-5 pt-8 text-gray-900 [overflow-wrap:anywhere]">
-      <Link to={observer ? '/faculty/assignments' : '/faculty/evaluation'} className={linkClass}>Back to {observer ? 'assignments' : 'evaluation'}</Link>
+    <div className="observation-record-page min-w-0 space-y-5 pt-8 text-gray-900 [overflow-wrap:anywhere]">
+      <Link to={observer ? '/faculty/assignments' : '/faculty/evaluation'} className={`${linkClass} screen-only`}>Back to {observer ? 'assignments' : 'evaluation'}</Link>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <h2 className="text-base font-bold">{o.section.label} {o.section.title}, {whenLong(o)}</h2>
           <p className="text-sm text-gray-500">Observation Template v{o.templateVersion?.versionNo ?? 'unavailable'}, observer {o.observer.displayName}</p>
         </div>
-        <div className="min-w-0 max-w-full [&>span]:h-auto [&>span]:whitespace-normal [&>span]:py-1"><Tag tone={status.tone}>{status.text}</Tag></div>
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <div className="min-w-0 max-w-full [&>span]:h-auto [&>span]:whitespace-normal [&>span]:py-1"><Tag tone={status.tone}>{status.text}</Tag></div>
+          {hasForm && <Button className="screen-only" onClick={() => window.print()}>Print record</Button>}
+        </div>
       </div>
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
+      <div className="observation-record-grid grid gap-5 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
         {!hasForm ? <p role="alert">The assigned observation form is unavailable.</p> : (
           <Card className="min-w-0">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-5 py-4">
               <h3 className="font-bold">Ratings and comments</h3>
-              <Tag tone="neutral">Read only</Tag>
+              <div className="screen-only"><Tag tone="neutral">Read only</Tag></div>
             </div>
             {o.answers.length === 0 && <p className="px-5 py-4 text-sm">No questions in this observation form.</p>}
             {o.answers.map(a => <section key={a.questionId} className="grid gap-2 border-b border-gray-200 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6">
@@ -81,7 +85,7 @@ export function ObservationRecordPage() {
                 <p className="text-xs text-gray-500">{a.wording}</p>
                 <p className="whitespace-pre-line text-sm text-gray-700">{a.comment || 'No comment'}</p>
               </div>
-              <div className="max-w-full overflow-x-auto sm:max-w-[16rem]"><RatingScale label={a.title} min={a.ratingMin} max={a.ratingMax} value={a.rating} /></div>
+              <div className="observation-rating-scale max-w-full overflow-x-auto sm:max-w-[16rem]"><RatingScale label={a.title} min={a.ratingMin} max={a.ratingMax} value={a.rating} /></div>
             </section>)}
             <section className="space-y-1 px-5 py-4">
               <h4 className="text-sm font-bold">Any other comments</h4>
@@ -90,13 +94,13 @@ export function ObservationRecordPage() {
             </section>
           </Card>
         )}
-        <Card className="min-w-0 space-y-4 p-5">
+        <Card className="observation-signatures-card min-w-0 space-y-4 p-5">
           <h3 className="font-bold">Signatures</h3>
           <Party role="Observer" person={o.observer} date={o.observerSignedDate} you={observer} />
           <Party role="Observee" person={o.observee} date={o.observeeSignedDate} you={observee} action={canObserveeSign && (
-            <Button size="compact" disabled={sign.isPending || staleRefresh === 'reloaded' && !staleReviewed} onClick={signAsObservee}>Sign</Button>
+            <Button className="screen-only" size="compact" disabled={sign.isPending || staleRefresh === 'reloaded' && !staleReviewed} onClick={signAsObservee}>Sign</Button>
           )} />
-          <div className="space-y-2">
+          <div className="screen-only space-y-2">
             {sign.isPending && <p role="status">Recording your signature…</p>}
             {signedNow && <p role="status">You signed the observation. This record is now complete and locked.</p>}
             {staleRefresh === 'reloaded' && (
@@ -120,7 +124,7 @@ export function ObservationRecordPage() {
         </Card>
       </div>
       {observer && hasForm && !isLocked(o) && o.status !== 'not_completed' && (
-        <Link to={`/faculty/observe/${o.observationId}/form`} className={linkClass}><PenIcon /> Edit local draft</Link>
+        <Link to={`/faculty/observe/${o.observationId}/form`} className={`${linkClass} screen-only`}><PenIcon /> Edit local draft</Link>
       )}
       {!observer && !observee && <p>Read-only record.</p>}
     </div>
