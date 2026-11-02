@@ -154,7 +154,7 @@ describe('My evaluation page', () => {
     await screen.findByText(label);
     const row = screen.getByRole('row', { name: /Dr\. Elena Ruiz/ });
     expect(within(row).getByText(label)).toBeInTheDocument();
-    expect(within(row).getByRole('button', { name: 'View' })).toBeDisabled();
+    expect(within(row).getByRole('link', { name: 'View' })).toHaveAttribute('href', '/faculty/observe/30');
   });
 
   it('shows observation history loading explicitly without claiming history is empty', async () => {

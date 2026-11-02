@@ -128,16 +128,20 @@ export const committeeHandlers = [
   http.get('/api/cycles/:cycleId/due-professors', ({ request, params }) => {
     committeeMember(request);
     const c = cycleOr404(params.cycleId);
+    const order = termOrder(db);
+    const cycleTermIndex = order.indexOf(c.term_id);
+    const previousTerm = order[cycleTermIndex - 1];
     const rows: DueProfessor[] = db.eval_due
       .filter((d) => d.cycle_id === c.cycle_id)
+      .filter((d) => professor(d.netid).is_active)
       .map((d): DueProfessor => {
         const p = professor(d.netid);
-        const last = lastCompletedTermId(db, p.netid);
+        const last = previousTerm ? lastCompletedTermId(db, p.netid, previousTerm) : null;
         return {
           professor: person(p.netid),
           department: department(p.dept_id),
           dueStatus: d.due_status === 'overdue' ? 'OVERDUE' : 'DUE',
-          lastObservedTerm: last ? term(last) : null,
+          lastObservedTerm: last && order.indexOf(last) < cycleTermIndex ? term(last) : null,
         };
       })
       .sort((a, b) => RANK_ORDER[a.professor.rank] - RANK_ORDER[b.professor.rank] || a.professor.lastName.localeCompare(b.professor.lastName));
@@ -148,7 +152,10 @@ export const committeeHandlers = [
     const me = committeeMember(request);
     const c = cycleOr404(params.cycleId);
     const { netids } = ((await request.json().catch(() => ({}))) ?? {}) as DueRemindersInput;
-    const due = db.eval_due.filter((d) => d.cycle_id === c.cycle_id && (!netids?.length || netids.includes(d.netid))).map((d) => d.netid);
+    const due = db.eval_due
+      .filter((d) => d.cycle_id === c.cycle_id && (!netids?.length || netids.includes(d.netid)))
+      .filter((d) => professor(d.netid).is_active)
+      .map((d) => d.netid);
     return HttpResponse.json({ sent: notify(due, 'reminder', `Reminder: sign up to be observed by ${c.signup_deadline}`, me.netid, c.cycle_id) });
   }),
 
@@ -261,7 +268,10 @@ export const committeeHandlers = [
   http.get('/api/dashboard/due-by-rank', ({ request }) => {
     committeeMember(request);
     const c = currentCycleOr404();
-    const due = db.eval_due.filter((d) => d.cycle_id === c.cycle_id).map((d) => d.netid);
+    const due = db.eval_due
+      .filter((d) => d.cycle_id === c.cycle_id)
+      .filter((d) => professor(d.netid).is_active)
+      .map((d) => d.netid);
     return HttpResponse.json({ cycleId: c.cycle_id, total: due.length, byRank: byRank(due) } satisfies DueByRank);
   }),
 

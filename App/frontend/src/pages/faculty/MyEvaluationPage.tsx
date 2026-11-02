@@ -108,7 +108,7 @@ function ObservationsTable({ status }: { status: EvaluationStatus }) {
               <span role="cell" className={currentSignup?.observation ? '' : 'text-gray-500'}>{signup.isPending ? 'Loading observer…' : currentSignup?.observation?.observer.displayName ?? 'Not chosen yet'}</span>
               {signup.isPending ? <span role="cell" className="text-gray-500">Loading sign-up…</span> : currentSignup ? <span role="cell">{currentSignup.section.label}</span> : <span role="cell" className="text-gray-500">Not signed up yet</span>}
               <span role="cell">{signup.isPending ? 'Loading schedule…' : currentSignup?.observation ? signupObservationTag(currentSignup.observation) : <Tag tone="neutral">Not scheduled yet</Tag>}</span>
-              <span role="cell" />
+              <span role="cell">{currentSignup?.observation && <Link to={`/faculty/observe/${currentSignup.observation.observationId}`} className="text-brand underline focus-visible:outline-2 focus-visible:outline-brand">View</Link>}</span>
             </div>
           )}
           {rows.map((o) => (
@@ -118,7 +118,7 @@ function ObservationsTable({ status }: { status: EvaluationStatus }) {
               <span role="cell">{o.section.label}</span>
               <span role="cell">{statusTag(o)}</span>
               <span role="cell">
-                <button type="button" disabled title="Observation record page is not available." className="cursor-not-allowed text-gray-400">View</button>
+                <Link to={`/faculty/observe/${o.observationId}`} className="text-brand underline focus-visible:outline-2 focus-visible:outline-brand">View</Link>
               </span>
             </div>
           ))}

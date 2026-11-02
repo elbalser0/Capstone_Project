@@ -12,6 +12,7 @@ test('dashboard endpoints require a login', async () => {
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     assert.equal((await fetch(`${base}/api/dashboard/unmatched`)).status, 401);
     assert.equal((await fetch(`${base}/api/dashboard/due-by-rank`)).status, 401);
+    assert.equal((await fetch(`${base}/api/dashboard/outstanding-observations`)).status, 401);
   } finally {
     if (server.listening) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
