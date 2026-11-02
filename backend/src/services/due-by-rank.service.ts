@@ -21,7 +21,7 @@ export async function listDueByRank() {
   const { rows } = await getPool().query<RankCountRow>(`
     SELECT p.rank, count(*)::int AS count
     FROM eval_due AS due
-    JOIN professor AS p ON p.netid = due.netid
+    JOIN professor AS p ON p.netid = due.netid AND p.is_active
     WHERE due.cycle_id = $1
     GROUP BY p.rank
   `, [cycle.cycleId]);
