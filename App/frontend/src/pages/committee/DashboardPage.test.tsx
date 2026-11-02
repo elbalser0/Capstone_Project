@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
 import { course, cycle, faculty, observer, otherCourse, signup, term } from '../../test/fixtures';
@@ -154,21 +154,21 @@ describe('Committee dashboard detail sections', () => {
     expect(within(region).queryByText('Dr. Dana Price')).not.toBeInTheDocument();
   });
 
-  it('pages a long list five rows at a time', async () => {
+  it('pages a long list seven rows at a time, as on A3', async () => {
     serve();
-    const many = Array.from({ length: 7 }, (_, i): DueProfessor => ({
+    const many = Array.from({ length: 10 }, (_, i): DueProfessor => ({
       professor: person(`p${i}`, 'Test', `Person ${i + 1}`, 'full'), department: cs, dueStatus: 'DUE', lastObservedTerm: null,
     }));
     server.use(http.get('*/api/cycles/1/due-professors', () => HttpResponse.json(many)));
     const user = userEvent.setup();
     openPage();
     const due = section(/Due or overdue/);
-    expect(await within(due).findByText('Dr. Test Person 5')).toBeVisible();
-    expect(within(due).queryByText('Dr. Test Person 6')).not.toBeInTheDocument();
-    expect(within(due).getByText('1 to 5 of 7')).toBeVisible();
+    expect(await within(due).findByText('Dr. Test Person 7')).toBeVisible();
+    expect(within(due).queryByText('Dr. Test Person 8')).not.toBeInTheDocument();
+    expect(within(due).getByText('1 to 7 of 10')).toBeVisible();
     await user.click(within(due).getByRole('button', { name: 'Next page' }));
-    expect(within(due).getByText('Dr. Test Person 7')).toBeVisible();
-    expect(within(due).getByText('6 to 7 of 7')).toBeVisible();
+    expect(within(due).getByText('Dr. Test Person 10')).toBeVisible();
+    expect(within(due).getByText('8 to 10 of 10')).toBeVisible();
   });
 
   it('says a list is empty only after it loads with no rows', async () => {
@@ -189,15 +189,28 @@ describe('Committee dashboard detail sections', () => {
     }
   });
 
-  it('keeps each table reachable by keyboard so a narrow screen can scroll it sideways', async () => {
+  it('makes a table a keyboard stop only while it is too wide to show at once', async () => {
     serve();
-    openPage();
+    // jsdom has no layout: every box measures 0 wide, so the tables fit.
+    const first = openPage();
     expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
     for (const name of LISTS) {
       const scroller = within(section(name)).getByRole('group', { name });
-      expect(scroller).toHaveAttribute('tabindex', '0');
+      expect(scroller).not.toHaveAttribute('tabindex');
       expect(within(scroller).getByRole('table')).toBeVisible();
       expectTableStructure(section(name));
+    }
+    first.unmount();
+
+    const wide = vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(900);
+    const box = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(500);
+    try {
+      openPage();
+      expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
+      for (const name of LISTS) expect(within(section(name)).getByRole('group', { name })).toHaveAttribute('tabindex', '0');
+    } finally {
+      wide.mockRestore();
+      box.mockRestore();
     }
   });
 

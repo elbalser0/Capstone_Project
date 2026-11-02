@@ -98,6 +98,8 @@ Each list says when it is loading, empty or failed, and one failing does not hid
 
 A list, a count or the KPI cards that fail to load offer Try again, which repeats only the requests that failed and moves keyboard focus to that part of the page. A failed refresh keeps the last data on screen with a "Couldn't refresh" note, and a failed count is announced. The KPI cards show a dash with Loading or Couldn't load until the KPIs arrive, and N/A only when the cycle has no value for a KPI (no result yet, or nothing to divide by).
 
+The KPI cards, the summary counts and the Export CSV row follow the width of the content column (not the window, since the sidebar takes part of it): four KPI cards per row, then two, then one. Each list keeps the Figma column order, status last. A table that is too wide for the column scrolls sideways inside its section, with a fade at the edge while columns are out of view, and its status moves next to the name so it stays in view. Loading, empty and failed lists show their message in a plain box instead. Lists show 7 rows a page, as in the A3 and A4 tables; the pager keeps at most seven page slots (the first, the last and the nearby pages), so its arrows stay put.
+
 Not settled with the backend yet:
 
 - The sign-ups response has no signature dates, so the outstanding list cannot tell "waiting for the observee to sign" apart from Scheduled.

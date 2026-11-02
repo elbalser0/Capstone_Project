@@ -39,10 +39,10 @@ const value = (k: KpiResult | undefined, meta: KpiMeta) => {
 };
 
 /** `missing` stands in for the value while the KPIs are loading or failed, so the card never reads N/A for them. */
-function KpiCard({ code, kpi, missing }: { code: KpiCode; kpi: KpiResult | undefined; missing?: string }) {
+function KpiCard({ code, kpi, missing, className = '' }: { code: KpiCode; kpi: KpiResult | undefined; missing?: string; className?: string }) {
   const meta = KPI_META[code];
   return (
-    <Card className="flex min-h-[154px] flex-col px-4 pt-3.5 pb-3">
+    <Card className={`flex min-h-[154px] flex-col px-4 pt-3.5 pb-3 ${className}`}>
       <p className="text-xs text-gray-500"><span className="font-bold text-gray-900">{code}</span> {meta.group}</p>
       <h3 className="mt-[3px] text-sm font-bold text-gray-900">{meta.name}</h3>
       <p className="mt-auto text-[28px] leading-[34px] font-bold text-gray-900">{missing ? '–' : value(kpi, meta)}</p>
@@ -64,11 +64,12 @@ function exportCsv(data: CycleKpis) {
 function SummaryCell({ label, total, detail, failed = false, failedAt, announce = true, children }: { label: string; total: number | undefined; detail: string; failed?: boolean; failedAt?: number; announce?: boolean; children?: ReactNode }) {
   const alert = failed && announce;
   return (
-    <div className="my-4 flex flex-col px-5">
+    <div className="flex min-w-0 flex-col px-5 py-4 @2xl:my-4 @2xl:py-0">
       <span className="text-xs text-gray-500">{label}</span>
-      <span className="mt-[3px] flex items-baseline gap-3.5">
+      {/* min-w-0 and wrap-anywhere let a long name break inside the cell instead of widening the page. */}
+      <span className="mt-[3px] flex flex-wrap items-baseline gap-x-3.5">
         <span className="text-[22px] font-bold">{total ?? '–'}</span>
-        <span key={failed ? failedAt : 'loaded'} role={alert ? 'alert' : undefined} className={`text-[13px] ${failed ? 'text-red-800' : 'text-gray-700'}`}>
+        <span key={failed ? failedAt : 'loaded'} role={alert ? 'alert' : undefined} className={`min-w-0 text-[13px] wrap-anywhere ${failed ? 'text-red-800' : 'text-gray-700'}`}>
           {alert && <span className="sr-only">{label}: </span>}
           {detail}
         </span>
@@ -113,7 +114,8 @@ function Summary() {
   return (
     <section aria-labelledby="executive-summary">
       <h2 id="executive-summary" ref={heading} tabIndex={-1} className={`mt-[30px] mb-3 w-fit text-base font-bold text-gray-900 ${headingFocus}`}>Executive summary</h2>
-      <Card className="grid grid-cols-3 divide-x divide-gray-200">
+      {/* The three counts stack until the content column is wide enough for them side by side. */}
+      <Card className="grid grid-cols-1 divide-y divide-gray-200 @2xl:grid-cols-3 @2xl:divide-x @2xl:divide-y-0">
         <SummaryCell label="Due for evaluation" total={due.data?.total} detail={due.data ? ranks(due.data.byRank) : notLoaded(due)} failed={loadFailed(due)} failedAt={due.errorUpdatedAt}>
           <CountNote label="Due for evaluation" query={due} focus={heading} />
         </SummaryCell>
@@ -175,11 +177,12 @@ export function DashboardPage() {
     );
   }
 
+  // A container: the layout follows the content column, which the sidebar keeps narrower than the window.
   return (
-    <div className="flex flex-col pt-4" onFocus={() => { focusWithin.current = true; }}>
-      <div className="flex items-center justify-between">
+    <div className="@container flex flex-col pt-4" onFocus={() => { focusWithin.current = true; }}>
+      <div className="flex flex-col gap-3 @xl:flex-row @xl:items-center @xl:justify-between">
         <p className="text-sm text-gray-500">{subtitle}</p>
-        <Button variant="secondary" size="compact" disabled={!data?.kpis.length} onClick={() => data && exportCsv(data)}>
+        <Button variant="secondary" size="compact" className="self-start @xl:self-auto" disabled={!data?.kpis.length} onClick={() => data && exportCsv(data)}>
           <DownloadIcon /> Export CSV
         </Button>
       </div>
@@ -198,11 +201,15 @@ export function DashboardPage() {
             <Banner tone="danger" action={<TryAgain queries={[kpis]} focus={kpiBlock} />}>Couldn't refresh the KPIs: {errorText(kpis.error)}</Banner>
           </div>
         )}
-        <div className="grid grid-cols-4 gap-4">
+        {/* Four cards, then three, as on A1. As the content column narrows: two per row (the last of the
+            three spanning both), then one. */}
+        <div className="grid grid-cols-1 gap-4 @md:grid-cols-2 @2xl:grid-cols-4">
           {ROW_1.map((code) => <KpiCard key={code} code={code} kpi={byCode.get(code)} missing={missing} />)}
         </div>
-        <div className="grid grid-cols-3 gap-4">
-          {ROW_2.map((code) => <KpiCard key={code} code={code} kpi={byCode.get(code)} missing={missing} />)}
+        <div className="grid grid-cols-1 gap-4 @md:grid-cols-2 @2xl:grid-cols-3">
+          {ROW_2.map((code, i) => (
+            <KpiCard key={code} code={code} kpi={byCode.get(code)} missing={missing} className={i === ROW_2.length - 1 ? '@md:col-span-2 @2xl:col-span-1' : ''} />
+          ))}
         </div>
       </section>
       <Summary />

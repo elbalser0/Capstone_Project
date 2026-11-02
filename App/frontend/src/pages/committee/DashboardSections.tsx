@@ -1,4 +1,4 @@
-import { useId, useRef, type ReactNode, type RefObject } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import { ApiError } from '../../api/client';
 import { useCycleSignups, useDueProfessors, useUnmatchedFaculty } from '../../api/hooks/committee';
@@ -10,8 +10,11 @@ import { RANK_SHORT, dayLetters, formatDate, formatTime } from '../../lib/format
 
 // A1 detail lists under the executive summary, in the table style of A3, A4 and A6.
 // Each list has its own request, so one failing or loading does not hold back the others.
+// Status is the last column, as on A3, A4 and A6; while a table is too wide to show at once it moves
+// next to the name, so it stays in view.
 
-const PAGE_SIZE = 5;
+// Seven rows a page, as in the A3 and A4 tables.
+const PAGE_SIZE = 7;
 
 /** The dashboard endpoints answer 404 NO_CYCLE before the first cycle starts. */
 export const isNoCycle = (error: unknown) => error instanceof ApiError && error.code === 'NO_CYCLE';
@@ -52,13 +55,51 @@ export function TryAgain({ queries, focus, look = 'link' }: { queries: Retryable
 /** A heading that Try again can move focus to. */
 export const headingFocus = 'rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand';
 
+/**
+ * Whether a table scrolls sideways, and whether columns are still hidden to its right. It is a tab
+ * stop only while it scrolls, and the edge fades while more columns are out of view.
+ */
+function useSideScroll() {
+  // A callback ref, because the scroller is only there while rows are (a message replaces it).
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const [state, setState] = useState({ scrolls: false, more: false });
+  useEffect(() => {
+    if (!el) {
+      setState((s) => (s.scrolls || s.more ? { scrolls: false, more: false } : s));
+      return;
+    }
+    const measure = () => {
+      const scrolls = el.scrollWidth > el.clientWidth + 1;
+      const more = scrolls && el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+      setState((s) => (s.scrolls === scrolls && s.more === more ? s : { scrolls, more }));
+    };
+    measure();
+    el.addEventListener('scroll', measure, { passive: true });
+    window.addEventListener('resize', measure);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    return () => {
+      el.removeEventListener('scroll', measure);
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
+  }, [el]);
+  return [setEl, state] as const;
+}
+
+/** One column of a list: its heading, its grid track (with a minimum that fits its longest tag or word), and its cell. */
+interface Column<T> {
+  head: string;
+  width: string;
+  cell: (row: T) => ReactNode;
+}
+
 interface ListProps<T> {
   title: string;
-  /** Each column has a minimum width that fits its longest tag or word. */
-  columns: string;
+  /** In Figma order, status last. */
+  columns: Column<T>[];
   /** The columns' minimums plus the row padding; below it the table scrolls sideways. */
   minWidth: string;
-  head: string[];
   /** undefined until the list has loaded */
   rows: T[] | undefined;
   /** The list's own failure. The cycle read counts only while there is no cycle to ask about, so its failed refresh does not mark the list. */
@@ -70,13 +111,15 @@ interface ListProps<T> {
   loading: string;
   empty: string;
   rowKey: (row: T) => string;
-  cells: (row: T) => ReactNode;
 }
 
-function DetailList<T>({ title, columns, minWidth, head, rows, error, requests, noCycle = false, loading, empty, rowKey, cells }: ListProps<T>) {
+function DetailList<T>({ title, columns, minWidth, rows, error, requests, noCycle = false, loading, empty, rowKey }: ListProps<T>) {
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
+  const [scroller, side] = useSideScroll();
   const pager = usePages(rows ?? [], PAGE_SIZE);
+  // Figma order while the table fits; while it scrolls, the status column moves next to the name.
+  const shown = side.scrolls ? [columns[0], columns[columns.length - 1], ...columns.slice(1, -1)] : columns;
 
   let message: ReactNode = null;
   // No cycle comes first: before one starts, the unmatched endpoint answers with a NO_CYCLE error.
@@ -107,16 +150,25 @@ function DetailList<T>({ title, columns, minWidth, head, rows, error, requests, 
         // A message sits in a plain box the width of the section, so it wraps instead of scrolling with the table.
         <div className="rounded-lg border border-gray-200 bg-white">{message}</div>
       ) : (
-        // Scrolls sideways on a narrow screen instead of overlapping; focusable so the keyboard can scroll it too.
-        <div role="group" aria-labelledby={headingId} tabIndex={0} className="max-w-full overflow-x-auto rounded-lg focus-visible:outline-2 focus-visible:outline-brand">
-          <div className={minWidth}>
-            <Table label={title} columns={columns} head={head}>
-              {pager.rows.map((row) => <Row key={rowKey(row)}>{cells(row)}</Row>)}
-            </Table>
+        // Scrolls sideways on a narrow screen instead of overlapping; focusable while it scrolls so the keyboard can scroll it too.
+        <div className="relative">
+          <div
+            ref={scroller}
+            role="group"
+            aria-labelledby={headingId}
+            tabIndex={side.scrolls ? 0 : undefined}
+            className="max-w-full overflow-x-auto rounded-lg focus-visible:outline-2 focus-visible:outline-brand"
+          >
+            <div className={`${minWidth} break-words`}>
+              <Table label={title} columns={shown.map((c) => c.width).join(' ')} head={shown.map((c) => c.head)}>
+                {pager.rows.map((row) => <Row key={rowKey(row)}>{shown.map((c) => <Fragment key={c.head}>{c.cell(row)}</Fragment>)}</Row>)}
+              </Table>
+            </div>
           </div>
+          {side.more && <div aria-hidden="true" className="pointer-events-none absolute inset-y-px right-px w-10 rounded-r-lg bg-linear-to-l from-white" />}
         </div>
       )}
-      {!message && pager.pages > 1 && <div className="mt-3"><Pagination pager={pager} /></div>}
+      {!message && pager.pages > 1 && <div className="mt-3"><Pagination pager={pager} label={`${title} pages`} /></div>}
     </section>
   );
 }
@@ -138,9 +190,14 @@ function DueFaculty() {
   return (
     <DetailList<DueProfessor>
       title="Due or overdue for evaluation"
-      columns="minmax(130px,2fr) minmax(80px,1fr) minmax(120px,2fr) minmax(110px,1.3fr) minmax(96px,1fr)"
+      columns={[
+        { head: 'Name', width: 'minmax(130px,2fr)', cell: (r) => <Cell className="font-bold">{r.professor.displayName}</Cell> },
+        { head: 'Rank', width: 'minmax(80px,1fr)', cell: (r) => <Cell>{RANK_SHORT[r.professor.rank]}</Cell> },
+        { head: 'Department', width: 'minmax(120px,2fr)', cell: (r) => <Cell>{r.department.deptName}</Cell> },
+        { head: 'Last observed', width: 'minmax(110px,1.3fr)', cell: (r) => <Cell>{r.lastObservedTerm?.label ?? 'Not observed yet'}</Cell> },
+        { head: 'Status', width: 'minmax(96px,1fr)', cell: (r) => <Cell><DueTag status={r.dueStatus} /></Cell> },
+      ]}
       minWidth="min-w-[568px]"
-      head={['Name', 'Rank', 'Department', 'Last observed', 'Status']}
       rows={rows}
       error={due.data || cycle.data !== undefined ? due.error : cycle.error ?? due.error}
       requests={[cycle, due]}
@@ -148,15 +205,6 @@ function DueFaculty() {
       loading="Loading faculty…"
       empty="Nobody is due or overdue this cycle."
       rowKey={(r) => r.professor.netid}
-      cells={(r) => (
-        <>
-          <Cell className="font-bold">{r.professor.displayName}</Cell>
-          <Cell>{RANK_SHORT[r.professor.rank]}</Cell>
-          <Cell>{r.department.deptName}</Cell>
-          <Cell>{r.lastObservedTerm?.label ?? 'Not observed yet'}</Cell>
-          <Cell><DueTag status={r.dueStatus} /></Cell>
-        </>
-      )}
     />
   );
 }
@@ -173,9 +221,14 @@ function Unmatched() {
   return (
     <DetailList<UnmatchedFaculty['items'][number]>
       title="Unmatched faculty"
-      columns="minmax(130px,2fr) minmax(80px,1fr) minmax(100px,1.3fr) minmax(100px,1.3fr) minmax(168px,1.6fr)"
+      columns={[
+        { head: 'Observee', width: 'minmax(130px,2fr)', cell: (r) => <Cell className="font-bold">{r.observee.displayName}</Cell> },
+        { head: 'Rank', width: 'minmax(80px,1fr)', cell: (r) => <Cell>{RANK_SHORT[r.observee.rank]}</Cell> },
+        { head: 'Course', width: 'minmax(100px,1.3fr)', cell: (r) => <Cell>{r.section.label}</Cell> },
+        { head: 'Days and time', width: 'minmax(100px,1.3fr)', cell: (r) => <Cell>{classTime(r.section)}</Cell> },
+        { head: 'Reason', width: 'minmax(168px,1.6fr)', cell: (r) => <Cell><Tag tone={ALERT_TAG[r.alertType][0]} icon={<AlertIcon width={11} height={10} />}>{ALERT_TAG[r.alertType][1]}</Tag></Cell> },
+      ]}
       minWidth="min-w-[610px]"
-      head={['Observee', 'Rank', 'Course', 'Days and time', 'Reason']}
       rows={unmatched.data?.items}
       error={unmatched.error}
       requests={[unmatched]}
@@ -183,18 +236,6 @@ function Unmatched() {
       loading="Loading unmatched faculty…"
       empty="No unmatched faculty."
       rowKey={(r) => r.signupId}
-      cells={(r) => {
-        const [tone, label] = ALERT_TAG[r.alertType];
-        return (
-          <>
-            <Cell className="font-bold">{r.observee.displayName}</Cell>
-            <Cell>{RANK_SHORT[r.observee.rank]}</Cell>
-            <Cell>{r.section.label}</Cell>
-            <Cell>{classTime(r.section)}</Cell>
-            <Cell><Tag tone={tone} icon={<AlertIcon width={11} height={10} />}>{label}</Tag></Cell>
-          </>
-        );
-      }}
     />
   );
 }
@@ -215,9 +256,15 @@ function Outstanding() {
   return (
     <DetailList<Signup>
       title="Outstanding observations"
-      columns="minmax(125px,2fr) minmax(80px,1fr) minmax(120px,2fr) minmax(95px,1.3fr) minmax(95px,1.3fr) minmax(168px,1.8fr)"
-      minWidth="min-w-[715px]"
-      head={['Observee', 'Rank', 'Observer', 'Course', 'Date', 'Status']}
+      columns={[
+        { head: 'Observee', width: 'minmax(120px,2fr)', cell: (s) => <Cell className="font-bold">{s.observee.displayName}</Cell> },
+        { head: 'Rank', width: 'minmax(80px,1fr)', cell: (s) => <Cell>{RANK_SHORT[s.observee.rank]}</Cell> },
+        { head: 'Observer', width: 'minmax(115px,2fr)', cell: (s) => <Cell className={s.observation ? '' : 'text-gray-500'}>{s.observation?.observer.displayName ?? 'None yet'}</Cell> },
+        { head: 'Course', width: 'minmax(110px,1.3fr)', cell: (s) => <Cell>{s.section.label}</Cell> },
+        { head: 'Date', width: 'minmax(105px,1.3fr)', cell: (s) => <Cell className="whitespace-nowrap">{s.observation?.scheduledDate ? formatDate(s.observation.scheduledDate) : ''}</Cell> },
+        { head: 'Status', width: 'minmax(168px,1.8fr)', cell: (s) => <Cell><Tag tone={OBSERVATION_TAG[s.observation?.status ?? 'none'][0]}>{OBSERVATION_TAG[s.observation?.status ?? 'none'][1]}</Tag></Cell> },
+      ]}
+      minWidth="min-w-[730px]"
       rows={rows}
       error={signups.data || cycle.data !== undefined ? signups.error : cycle.error ?? signups.error}
       requests={[cycle, signups]}
@@ -225,19 +272,6 @@ function Outstanding() {
       loading="Loading observations…"
       empty={signups.data?.length ? 'Every sign-up has a completed observation.' : 'No one has signed up yet this cycle.'}
       rowKey={(s) => s.signupId}
-      cells={(s) => {
-        const [tone, label] = OBSERVATION_TAG[s.observation?.status ?? 'none'];
-        return (
-          <>
-            <Cell className="font-bold">{s.observee.displayName}</Cell>
-            <Cell>{RANK_SHORT[s.observee.rank]}</Cell>
-            <Cell className={s.observation ? '' : 'text-gray-500'}>{s.observation?.observer.displayName ?? 'None yet'}</Cell>
-            <Cell>{s.section.label}</Cell>
-            <Cell>{s.observation?.scheduledDate ? formatDate(s.observation.scheduledDate) : ''}</Cell>
-            <Cell><Tag tone={tone}>{label}</Tag></Cell>
-          </>
-        );
-      }}
     />
   );
 }

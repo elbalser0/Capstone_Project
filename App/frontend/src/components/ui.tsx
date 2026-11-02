@@ -337,28 +337,52 @@ export function usePages<T>(items: T[], size: number) {
   };
 }
 
-export function Pagination({ pager }: { pager: ReturnType<typeof usePages<unknown>> }) {
+/**
+ * The page numbers to show, in at most 7 slots so the arrows do not move: every page up to 7; beyond that
+ * the first and last pages and the current page with its neighbours, where a gap (null) always hides two
+ * or more pages.
+ */
+export function pageNumbers(page: number, pages: number): (number | null)[] {
+  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);
+  if (page <= 4) return [1, 2, 3, 4, 5, null, pages];
+  if (page >= pages - 3) return [1, null, pages - 4, pages - 3, pages - 2, pages - 1, pages];
+  return [1, null, page - 1, page, page + 1, null, pages];
+}
+
+/** `label` names the navigation landmark, so several lists on one page each have their own. */
+export function Pagination({ pager, label = 'Pages' }: { pager: ReturnType<typeof usePages<unknown>>; label?: string }) {
   const { page, pages, setPage, from, to, total } = pager;
   if (total === 0) return null;
-  const btn = 'flex size-8 items-center justify-center rounded-md text-sm focus-visible:outline-2 focus-visible:outline-brand';
-  const plain = `${btn} border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:hover:bg-white`;
+  // The offset keeps the focus ring visible on the filled current-page button. In a narrow container the
+  // buttons shrink a little so nine slots still fit on one line.
+  const slot = 'flex size-8 items-center justify-center @max-xl:size-7';
+  const btn = `${slot} rounded-md text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand`;
+  const plain = `${btn} border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 aria-disabled:cursor-default aria-disabled:text-gray-400 aria-disabled:hover:bg-white`;
+  // Previous and Next stay focusable at either end (aria-disabled), so keyboard focus is not dropped.
+  const step = (target: number, name: string, symbol: string, off: boolean) => (
+    <button type="button" className={plain} aria-disabled={off || undefined} onClick={() => !off && setPage(target)} aria-label={name}>{symbol}</button>
+  );
   return (
-    <nav aria-label="Pages" className="flex items-center gap-5">
-      <span className="text-sm text-gray-500">{`${from} to ${to} of ${total}`}</span>
-      <span className="flex gap-1.5">
-        <button type="button" className={plain} disabled={page === 1} onClick={() => setPage(page - 1)} aria-label="Previous page">‹</button>
-        {Array.from({ length: pages }, (_, i) => i + 1).map((n) => (
+    <nav aria-label={label} className="flex flex-wrap items-center gap-x-5 gap-y-2">
+      {/* Even-width digits in a box sized for the longest range, so the buttons beside it never shift. */}
+      <span className="text-sm text-gray-500 tabular-nums" style={{ minWidth: `min(${3 * String(total).length + 8}ch, 100%)` }}>{`${from} to ${to} of ${total}`}</span>
+      <span className="flex flex-wrap gap-1.5 @max-xl:gap-1">
+        {step(page - 1, 'Previous page', '‹', page === 1)}
+        {pageNumbers(page, pages).map((n, i) => (n === null ? (
+          <span key={`gap-${i}`} aria-hidden="true" className={`${slot} text-sm text-gray-500`}>…</span>
+        ) : (
           <button
             key={n}
             type="button"
+            aria-label={`Page ${n}`}
             aria-current={n === page ? 'page' : undefined}
             className={n === page ? `${btn} bg-brand font-bold text-white` : plain}
             onClick={() => setPage(n)}
           >
             {n}
           </button>
-        ))}
-        <button type="button" className={plain} disabled={page === pages} onClick={() => setPage(page + 1)} aria-label="Next page">›</button>
+        )))}
+        {step(page + 1, 'Next page', '›', page === pages)}
       </span>
     </nav>
   );
