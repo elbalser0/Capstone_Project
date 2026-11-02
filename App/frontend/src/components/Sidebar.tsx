@@ -58,7 +58,7 @@ export function Sidebar({ mode, activeNav }: { mode: Mode; activeNav?: string })
   const items = mode === 'committee' ? COMMITTEE_NAV : FACULTY_NAV;
 
   return (
-    <aside className="sticky top-0 flex h-screen w-[220px] shrink-0 flex-col border-r border-gray-200 bg-gray-100">
+    <aside className="app-shell-sidebar sticky top-0 flex h-screen w-[220px] shrink-0 flex-col border-r border-gray-200 bg-gray-100">
       <div className="relative h-24 shrink-0">
         <div className="absolute top-[18px] left-6"><Logo /></div>
         {isCommitteeMember ? (

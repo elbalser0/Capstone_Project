@@ -39,7 +39,7 @@ function TopBar({ title, mode }: { title: string; mode: Mode }) {
   const { data: me } = useMe();
   const { data: cycle } = useCurrentCycle();
   return (
-    <header className="flex h-14 shrink-0 items-center gap-[18px] border-b border-gray-200 bg-white px-8">
+    <header className="app-shell-header flex h-14 shrink-0 items-center gap-[18px] border-b border-gray-200 bg-white px-8">
       <h1 className="text-[22px] font-bold text-gray-900">{title}</h1>
       {cycle && (
         <span className="inline-flex h-6 items-center gap-2 rounded-md border border-gray-300 px-[11px] text-xs font-bold text-gray-700">
@@ -83,11 +83,11 @@ export function AppShell() {
   const title = override ?? handles.map((h) => h?.title).find(Boolean) ?? '';
   const nav = navOverride ?? handles.map((h) => h?.nav).find(Boolean);
   return (
-    <div className="flex min-h-screen">
+    <div className="app-shell flex min-h-screen">
       <Sidebar mode={mode} activeNav={nav} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="app-shell-content flex min-w-0 flex-1 flex-col">
         <TopBar title={title} mode={mode} />
-        <main className="w-full max-w-[1060px] px-8 pb-12">
+        <main className="app-shell-main w-full max-w-[1060px] px-8 pb-12">
           <TitleContext.Provider value={setOverride}>
             <NavContext.Provider value={setNavOverride}>
               <Outlet />

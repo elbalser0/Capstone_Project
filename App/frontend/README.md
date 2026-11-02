@@ -20,7 +20,7 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 - `/faculty/evaluation`: faculty identity, evaluation status, deadlines, and observation history.
 - `/faculty/sign-up`: pick a course and the class meetings you'd like to be observed in.
 - `/faculty/assignments`: assigned observations with links to their record and form.
-- `/faculty/observe/:observationId`: read-only assigned observation record.
+- `/faculty/observe/:observationId`: read-only assigned observation record, with browser-native printing of its saved contents.
 - `/faculty/observe/:observationId/form`: observer-only local draft editor using the assigned observation's question ranges.
 - `/faculty/observe/:observationId/sign`: observer review and signed-form submission; the observee signs from the saved record.
 - `/committee/dashboard`: committee home with KPI results, a current-cycle summary, and lists of due or overdue faculty, unmatched faculty and outstanding observations.
@@ -80,6 +80,10 @@ Vite's proxy is development configuration; production API routing requires separ
 ## Observation form and status
 
 The form saves a bounded draft in this browser, scoped to the signed-in account and observation. Saving does not submit answers or sign the record. If local storage is corrupt or blocked, the page explains the fallback or failure; edits are retained in memory while moving between the form and review screens. Observer submission posts the reviewed answers and records the observer signature. The server enforces the on-or-after scheduled-date rule and returns a specific rejection when a submission is early; the frontend does not guess using its own clock. Required ratings are enforced at submission, and zero is a valid rating when the assigned scale includes it. A comment on an unrated optional question remains visible in review but is not part of the signed-form API payload until that question is rated. If a local draft is based on an older server revision, review shows the saved server responses and requires explicit acknowledgement that local edits will not be submitted. The observee signs the saved record using its exact last-saved revision; after a stale response, the page reloads the latest record and requires an explicit acknowledgement that the updated responses were reviewed before another signature attempt. Typed-name confirmation is not stored as a signature field. The server enforces access and remains authoritative; these UI checks are not authorization. The assigned observation's historical template fields determine ratings, including zero, and required flags. Connected Firebase/backend/database testing was not performed by the mock-backed page tests.
+
+## Printable observation record
+
+The read-only observation route's **Print record** button opens the browser's native print flow. The printed view uses the saved `GET /api/observations/{observationId}` record only—not a local unsaved draft—and includes course/section/date, participant names, template version, saved question wording/ratings/comments, other comments, any non-completion reason, status, and both signature states/dates. The current backend returns `observerSignedDate` and `observeeSignedDate` as calendar dates (the exact time-of-day is not exposed), so the print view does not invent signature times. Navigation, screen-only labels, print controls, and signing/retry controls are omitted from paper output. Page size is selected in the browser print dialog; no PDF service or dependency is added.
 
 The evaluation view distinguishes loading, failed requests, empty history, and current-cycle sign-up details. Signature labels use both the observation lifecycle and the available signature dates. When only a sign-up summary is available, the page does not guess whether the record is signed. Observation history is horizontally scrollable on narrower screens; its available record links open the read-only route.
 
