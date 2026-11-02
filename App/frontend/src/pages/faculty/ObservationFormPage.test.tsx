@@ -1,12 +1,12 @@
 import { http, HttpResponse } from 'msw';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect, it } from 'vitest';
+import { afterEach, expect, it } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
 import { faculty, observer, observation } from '../../test/fixtures';
 import { ObservationFormPage } from './ObservationFormPage';
-import { draftKey } from './observationDraft';
+import { clearDraft, draftKey } from './observationDraft';
 
 const detail = { ...observation, templateVersion: { versionId: 'historical', versionNo: 2 }, lastSavedDate: '2026-09-22T10:00:00Z', otherComments: '', reasonNotCompleted: null,
   answers: [{ questionId: 'q1', title: 'Clarity', wording: 'Was it clear?', ratingMin: 0, ratingMax: 2, minLabel: 'Low', maxLabel: 'High', isRequired: true, rating: null, comment: '' },
@@ -17,6 +17,7 @@ function serve(netid = observer.netid, record = detail) {
     http.get('*/api/observations/30', () => HttpResponse.json(record)));
 }
 function open() { return renderRoutes([{ path: '/faculty/observe/:observationId/form', element: <ObservationFormPage /> }], path); }
+afterEach(() => clearDraft(observer.netid, '30'));
 it('uses assigned-version questions, zero scale and required markers, saving a local draft without submitting', async () => {
   serve(); open(); const user = userEvent.setup();
   expect(await screen.findByText(/Observation Template v2/)).toBeVisible();

@@ -1,6 +1,7 @@
 import { http, HttpResponse } from 'msw';
+import userEvent from '@testing-library/user-event';
 import { screen } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
 import { course, cycle, faculty, observation, observer } from '../../test/fixtures';
@@ -8,6 +9,8 @@ import type { ObservationDetail } from '../../api/types';
 import { AuthProvider } from '../../auth/AuthProvider';
 import { AppShell } from '../../components/AppShell';
 import { ObservationRecordPage } from './ObservationRecordPage';
+
+afterEach(() => vi.restoreAllMocks());
 
 export const detail: ObservationDetail = {
   ...observation, templateVersion: { versionId: 'old', versionNo: 3 }, lastSavedDate: '2026-09-22T10:00:00Z',
@@ -59,7 +62,7 @@ it('shows the contextual header, status badge, read-only badge and signatures wi
   expect(screen.getByText('Observee: Dr. Maya Lin (you)')).toBeVisible();
   expect(screen.getByText('Not signed yet')).toBeVisible();
   expect(screen.queryByText(/\d{1,2}:\d{2} [AP]M.*signed|signed.*\d{1,2}:\d{2}/)).not.toBeInTheDocument();
-  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Sign' })).toBeEnabled();
 });
 it('leaves the time out of the header when the section meets twice that weekday', async () => {
   const twice = { ...course, meetings: [course.meetings[0], { ...course.meetings[0], startTime: '14:00', endTime: '15:15' }] };
@@ -91,4 +94,96 @@ it('highlights no sidebar item for a viewer who is neither participant', async (
   expect(screen.getByRole('link', { name: 'My assignments' })).not.toHaveClass('font-bold');
   expect(screen.getByRole('link', { name: 'My evaluation' })).not.toHaveClass('font-bold');
   sessionStorage.removeItem('assessment-helper.session');
+});
+
+it('lets only the observee sign after observer submission and sends the exact saved revision', async () => {
+  let current: ObservationDetail = { ...detail, observerSignedDate: '2026-09-22', observeeSignedDate: null, status: 'scheduled' };
+  let signBodies: unknown[] = [];
+  serveRecord(current, faculty.netid);
+  server.use(
+    http.get('*/api/observations/30', () => HttpResponse.json(current)),
+    http.post('*/api/observations/30/sign', async ({ request }) => {
+      signBodies.push(await request.json());
+      current = { ...current, observeeSignedDate: '2026-09-23', status: 'completed' };
+      return HttpResponse.json(current);
+    }),
+  );
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'Sign' }));
+  expect(await screen.findByText(/you signed the observation/i)).toBeVisible();
+  expect(signBodies).toEqual([{ lastSavedDate: detail.lastSavedDate }]);
+  expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();
+});
+
+it('refetches a stale observation and requires a separate observee signing action', async () => {
+  let current: ObservationDetail = { ...detail, observerSignedDate: '2026-09-22', observeeSignedDate: null, status: 'scheduled' };
+  let postCount = 0;
+  serveRecord(current, faculty.netid);
+  server.use(
+    http.get('*/api/observations/30', () => HttpResponse.json(current)),
+    http.post('*/api/observations/30/sign', () => {
+      postCount += 1;
+      if (postCount === 1) {
+        current = { ...current, lastSavedDate: '2026-09-23T11:00:00Z', answers: [{ ...detail.answers[0], rating: 2, comment: 'Updated by observer' }] };
+        return HttpResponse.json({ error: { code: 'STALE_FORM', message: 'The observer changed the form after you opened it. Reload it and review it before signing.' } }, { status: 409 });
+      }
+      current = { ...current, observeeSignedDate: '2026-09-24', status: 'completed' };
+      return HttpResponse.json(current);
+    }),
+  );
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'Sign' }));
+  expect(screen.getByText(/latest record has been reloaded/i)).toBeVisible();
+  expect(await screen.findByText('Updated by observer')).toBeVisible();
+  const reviewed = screen.getByRole('checkbox', { name: /reviewed the updated responses before signing/i });
+  expect(screen.getByRole('button', { name: 'Sign' })).toBeDisabled();
+  await user.click(reviewed);
+  expect(screen.getByRole('button', { name: 'Sign' })).toBeEnabled();
+  expect(postCount).toBe(1);
+  await user.click(screen.getByRole('button', { name: 'Sign' }));
+  expect(await screen.findByText(/you signed the observation/i)).toBeVisible();
+  expect(postCount).toBe(2);
+});
+
+it('reports a failed stale-record refresh and requires a successful retry before signing', async () => {
+  let current: ObservationDetail = { ...detail, observerSignedDate: '2026-09-22', observeeSignedDate: null, status: 'scheduled' };
+  let reads = 0;
+  let posts = 0;
+  serveRecord(current, faculty.netid);
+  server.use(
+    http.get('*/api/observations/30', () => {
+      reads += 1;
+      if (reads === 2) return HttpResponse.json({ error: { code: 'SERVICE_UNAVAILABLE', message: 'Could not load the latest observation.' } }, { status: 503 });
+      if (reads >= 3) current = { ...current, lastSavedDate: '2026-09-23T11:00:00Z', answers: [{ ...detail.answers[0], rating: 2, comment: 'Latest response' }] };
+      return HttpResponse.json(current);
+    }),
+    http.post('*/api/observations/30/sign', () => {
+      posts += 1;
+      return HttpResponse.json({ error: { code: 'STALE_FORM', message: 'The form changed after it was opened.' } }, { status: 409 });
+    }),
+  );
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'Sign' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(/could not reload the latest record/i);
+
+  expect(screen.queryByText(/latest record has been reloaded/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();
+  expect(posts).toBe(1);
+  await user.click(screen.getByRole('button', { name: /retry loading latest record/i }));
+  expect(await screen.findByText('Latest response')).toBeVisible();
+  expect(screen.getByText(/latest record has been reloaded/i)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Sign' })).toBeDisabled();
+  await user.click(screen.getByRole('checkbox', { name: /reviewed the updated responses before signing/i }));
+  expect(screen.getByRole('button', { name: 'Sign' })).toBeEnabled();
+  expect(posts).toBe(1);
+});
+
+it('does not offer observee signing to the observer', async () => {
+  serveRecord({ ...detail, observer, observerSignedDate: '2026-09-22' }, observer.netid);
+  openRecord();
+  await screen.findByText('Read only');
+  expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();
 });
