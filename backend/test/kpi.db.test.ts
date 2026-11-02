@@ -17,7 +17,8 @@ import express from 'express';
 import { skip, sql, useTestDatabase, getPool } from './db-test-helper.js';
 import type { AuthUser } from '../src/services/user.service.js';
 
-const { getCycleKpis, loadCycleFacts } = await import('../src/services/kpi.service.js');
+const { generateDueKpis, getCycleKpis, loadCycleFacts } = await import('../src/services/kpi.service.js');
+const { updateCycle } = await import('../src/services/cycle.service.js');
 const { cyclesRouter } = await import('../src/routes/cycles.routes.js');
 const { errorHandler } = await import('../src/middleware/error.middleware.js');
 
@@ -189,7 +190,22 @@ describe('KPI calculation against the database', { skip }, () => {
     assert.deepEqual([half.status, half.bothSigned], ['scheduled', false]);
   });
 
+  test('asking for KPIs does not calculate them', async () => {
+    const result = await getCycleKpis(1);
+    assert.deepEqual([result.cycle.phase, result.computedDate, result.kpis], ['closed', null, []]);
+    const stored = await sql(`SELECT count(*)::int AS count FROM kpi_result`);
+    assert.equal(stored.rows[0].count, 0);
+  });
+
+  test('generation covers cycles past their feedback deadline and skips open and already saved ones', async () => {
+    assert.deepEqual(await generateDueKpis(), [3, 1]);
+    const stored = await sql(`SELECT cycle_id, count(*)::int AS count FROM kpi_result GROUP BY cycle_id ORDER BY cycle_id`);
+    assert.deepEqual(stored.rows, [{ cycle_id: 1, count: 7 }, { cycle_id: 3, count: 7 }]);
+    assert.deepEqual(await generateDueKpis(), []);
+  });
+
   test('a closed cycle gets all seven KPIs', async () => {
+    await generateDueKpis();
     const result = await getCycleKpis(1);
     assert.equal(result.cycle.cycleId, '1');
     assert.equal(result.cycle.phase, 'closed');
@@ -197,7 +213,7 @@ describe('KPI calculation against the database', { skip }, () => {
       '1.1': [2, 6, 2 / 6],
       '1.2': [3, 7, 3],
       '2.1': [6, 7, 6 / 7],
-      '2.2': [2, 8, 0.25],
+      '2.2': [3, 8, 0.375],
       '3.1': [7, 8, 0.9],
       '4.1': [3, 6, 3],
       '4.2': [2, 8, 0.25],
@@ -208,17 +224,20 @@ describe('KPI calculation against the database', { skip }, () => {
   });
 
   test('KPIs are stored once and do not change afterwards', async () => {
+    await generateDueKpis();
     const first = await getCycleKpis(1);
     const stored = await sql(`SELECT count(*)::int AS count FROM kpi_result WHERE cycle_id = 1`);
     assert.equal(stored.rows[0].count, 7);
 
     await sql(`INSERT INTO eval_due (cycle_id, netid, due_status) VALUES (1, 'good', 'overdue')`);
+    await generateDueKpis();
     const second = await getCycleKpis(1);
     assert.deepEqual(second.kpis, first.kpis);
   });
 
   test('inactive professors do not count as due or overdue', async () => {
     await sql(`UPDATE professor SET is_active = false WHERE netid IN ('ee1', 'ee3')`);
+    await generateDueKpis();
     const kpis = summary((await getCycleKpis(1)).kpis);
     assert.deepEqual(kpis['1.2'], [2, 5, 2]);
     assert.deepEqual(kpis['2.1'], [4, 5, 0.8]);
@@ -227,33 +246,59 @@ describe('KPI calculation against the database', { skip }, () => {
   test('a professor reactivated before the KPIs are calculated counts again', async () => {
     await sql(`UPDATE professor SET is_active = false WHERE netid = 'ee1'`);
     await sql(`UPDATE professor SET is_active = true WHERE netid = 'ee1'`);
+    await generateDueKpis();
     assert.deepEqual(summary((await getCycleKpis(1)).kpis)['1.2'], [3, 7, 3]);
   });
 
   test('saved KPIs do not change when a professor is reactivated', async () => {
     await sql(`UPDATE professor SET is_active = false WHERE netid = 'ee1'`);
+    await generateDueKpis();
     const saved = await getCycleKpis(1);
     assert.deepEqual(summary(saved.kpis)['1.2'], [2, 6, 2]);
 
     await sql(`UPDATE professor SET is_active = true WHERE netid = 'ee1'`);
+    await generateDueKpis();
     assert.deepEqual((await getCycleKpis(1)).kpis, saved.kpis);
   });
 
-  test('two requests at once store one set of KPIs', async () => {
-    const [a, b] = await Promise.all([getCycleKpis(1), getCycleKpis(1)]);
-    assert.deepEqual(a.kpis, b.kpis);
+  test('two generation runs at once store one set of KPIs', async () => {
+    await Promise.all([generateDueKpis(), generateDueKpis()]);
     const stored = await sql(`SELECT count(*)::int AS count FROM kpi_result WHERE cycle_id = 1`);
     assert.equal(stored.rows[0].count, 7);
   });
 
   test('a cycle before its feedback deadline has no KPIs yet', async () => {
+    await generateDueKpis();
     const result = await getCycleKpis(2);
     assert.deepEqual([result.cycle.cycleId, result.computedDate, result.kpis], ['2', null, []]);
     const stored = await sql(`SELECT count(*)::int AS count FROM kpi_result WHERE cycle_id = 2`);
     assert.equal(stored.rows[0].count, 0);
   });
 
+  test('moving the feedback deadline later discards saved KPIs until the new deadline passes', async () => {
+    await generateDueKpis();
+    const dates = await sql(`SELECT (CURRENT_DATE + 7)::text AS later, (CURRENT_DATE - 1)::text AS past`);
+
+    await updateCycle(1, { feedbackDeadline: dates.rows[0].later });
+    const reopened = await getCycleKpis(1);
+    assert.deepEqual([reopened.cycle.phase, reopened.kpis], ['feedback', []]);
+    assert.deepEqual(await generateDueKpis(), [], 'still open, so nothing is generated');
+
+    await updateCycle(1, { feedbackDeadline: dates.rows[0].past });
+    assert.deepEqual(await generateDueKpis(), [1]);
+    assert.equal((await getCycleKpis(1)).kpis.length, 7);
+  });
+
+  test('changing a deadline without reopening the cycle keeps saved KPIs', async () => {
+    await generateDueKpis();
+    const before = await getCycleKpis(1);
+    const dates = await sql(`SELECT (CURRENT_DATE - 1)::text AS past`);
+    await updateCycle(1, { feedbackDeadline: dates.rows[0].past });
+    assert.deepEqual((await getCycleKpis(1)).kpis, before.kpis);
+  });
+
   test('a closed cycle with no activity stores N/A rates and zero counts', async () => {
+    await generateDueKpis();
     assert.deepEqual(summary((await getCycleKpis(3)).kpis), {
       '1.1': [0, 0, null],
       '1.2': [0, 0, 0],
@@ -282,6 +327,7 @@ describe('KPI calculation against the database', { skip }, () => {
   });
 
   test('GET /api/cycles/:cycleId/kpis serves the KPIs to the committee', async () => {
+    await generateDueKpis();
     const committee = { netid: 'ac1', role: 'AC' } as AuthUser;
     const routeApp = express();
     routeApp.use((req, _res, next) => { req.user = committee; next(); });
