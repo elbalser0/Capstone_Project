@@ -6,7 +6,7 @@ import express from 'express';
 import { skip, sql, useTestDatabase } from './db-test-helper.js';
 
 const { listSurveyResponses, submitSurvey } = await import('../src/services/survey.service.js');
-const { MAX_FORM_BYTES, surveyRouter } = await import('../src/routes/survey.routes.js');
+const { MAX_FILE_BYTES, MAX_FORM_BYTES, surveyRouter } = await import('../src/routes/survey.routes.js');
 const { errorHandler } = await import('../src/middleware/error.middleware.js');
 
 const answers = { processOk: true, difficulties: null, additionalFeedback: null };
@@ -15,7 +15,7 @@ const answers = { processOk: true, difficulties: null, additionalFeedback: null 
 async function post(netid: string, form: FormData | { stream: ReadableStream; type: string }, cycle = '1') {
   const app = express();
   app.use(express.json());
-  app.use((req, _res, next) => { req.user = { netid } as typeof req.user; next(); });
+  app.use((req, _res, next) => { req.user = { netid, role: netid === 'ac1' ? 'AC' : 'faculty' } as typeof req.user; next(); });
   app.use('/api/cycles/:cycleId/survey-responses', surveyRouter);
   app.use(errorHandler);
   const server = app.listen(0, '127.0.0.1');
@@ -27,6 +27,22 @@ async function post(netid: string, form: FormData | { stream: ReadableStream; ty
         // A streamed body is sent chunked, without a Content-Length header.
         : { method: 'POST', body: form.stream, headers: { 'Content-Type': form.type }, duplex: 'half' } as RequestInit);
     return { status: response.status, body: await response.json() };
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+// GET the trouble file as the given professor.
+async function download(netid: string, responseId: string) {
+  const app = express();
+  app.use((req, _res, next) => { req.user = { netid, role: netid === 'ac1' ? 'AC' : 'faculty' } as typeof req.user; next(); });
+  app.use('/api/cycles/:cycleId/survey-responses', surveyRouter);
+  app.use(errorHandler);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/cycles/1/survey-responses/${responseId}/trouble-file`);
+    return { status: response.status, headers: response.headers, body: Buffer.from(await response.arrayBuffer()) };
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -100,15 +116,52 @@ describe('survey against the database', { skip }, () => {
     assert.ok((await submitSurvey(1, 'ee', { respondentRole: 'observee', ...answers })).responseId);
   });
 
-  test('bad input, attachments, and unknown cycles are rejected without saving', async () => {
+  test('bad input and unknown cycles are rejected without saving', async () => {
     assert.equal((await post('ee', form({ respondentRole: 'observee' }))).body.error.code, 'INVALID_SURVEY');
-    const withFile = form({ respondentRole: 'observee', processOk: 'true' });
-    withFile.append('troubleFile', new Blob(['notes']), 'notes.txt');
-    assert.deepEqual(await post('ee', withFile).then((r) => [r.status, r.body.error.code]), [400, 'FILE_NOT_SUPPORTED']);
     assert.deepEqual(await post('ee', form({ respondentRole: 'observee', processOk: 'true' }), 'abc').then((r) => r.status), 400);
     await assert.rejects(submitSurvey(99, 'ee', { respondentRole: 'observee', ...answers }), { status: 404, code: 'NOT_FOUND' });
     await assert.rejects(listSurveyResponses(99), { status: 404, code: 'NOT_FOUND' });
     assert.equal((await sql('SELECT count(*)::int AS n FROM survey_response')).rows[0].n, 0);
+  });
+
+  test('a trouble file is stored with the response and only the AC can download it', async () => {
+    const withFile = form({ respondentRole: 'observee', processOk: 'false', difficulties: 'see file' });
+    withFile.append('troubleFile', new Blob(['scheduling notes'], { type: 'text/plain' }), 'notes é.txt');
+    const created = await post('ee', withFile);
+    assert.equal(created.status, 201);
+    const [listed] = await listSurveyResponses(1);
+    assert.match(listed.troubleFileKey!, /^\d+$/);
+    const { rows: [saved] } = await sql('SELECT file_name, file_type, file_size, uploaded_by FROM survey_attachment');
+    assert.deepEqual(saved, { file_name: 'notes é.txt', file_type: 'text/plain', file_size: '16', uploaded_by: 'ee' });
+
+    const file = await download('ac1', created.body.responseId);
+    assert.equal(file.status, 200);
+    assert.equal(file.body.toString(), 'scheduling notes');
+    assert.match(file.headers.get('content-type')!, /^text\/plain/);
+    assert.equal(file.headers.get('content-disposition'), "attachment; filename*=UTF-8''notes%20%C3%A9.txt");
+    assert.equal((await download('ee', created.body.responseId)).status, 403);
+    assert.equal((await download('ac1', '999')).status, 404);
+    assert.equal((await download('ac1', 'abc')).status, 400);
+
+    // A response without a file has no download.
+    const plain = await post('obs', form({ respondentRole: 'observer', processOk: 'true' }));
+    assert.equal((await download('ac1', plain.body.responseId)).status, 404);
+  });
+
+  test('a duplicate response with a file is rejected and leaves no stored file', async () => {
+    await submitSurvey(1, 'ee', { respondentRole: 'observee', ...answers });
+    const again = form({ respondentRole: 'observee', processOk: 'true' });
+    again.append('troubleFile', new Blob(['x']), 'x.txt');
+    assert.deepEqual(await post('ee', again).then((r) => [r.status, r.body.error.code]), [409, 'ALREADY_SUBMITTED']);
+    assert.equal((await sql('SELECT count(*)::int AS n FROM survey_attachment')).rows[0].n, 0);
+  });
+
+  test('a file over 10 MB is rejected and nothing is saved', async () => {
+    const big = form({ respondentRole: 'observee', processOk: 'true' });
+    big.append('troubleFile', new Blob([new Uint8Array(MAX_FILE_BYTES + 1)]), 'big.bin');
+    assert.deepEqual(await post('ee', big).then((r) => [r.status, r.body.error.code]), [400, 'FILE_TOO_LARGE']);
+    assert.equal((await sql('SELECT count(*)::int AS n FROM survey_response')).rows[0].n, 0);
+    assert.equal((await sql('SELECT count(*)::int AS n FROM survey_attachment')).rows[0].n, 0);
   });
 
   test('a form over the size limit is rejected even when sent chunked without Content-Length', async () => {

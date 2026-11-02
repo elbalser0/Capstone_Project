@@ -1,4 +1,5 @@
 import { getPool } from '../db/pool.js';
+import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { displayName, type Rank } from './user.service.js';
 
@@ -11,10 +12,17 @@ export interface SurveyInput {
   additionalFeedback: string | null;
 }
 
+// The optional trouble file, stored in survey_attachment. trouble_file_key holds its id.
+export interface TroubleFile {
+  name: string;
+  type: string;
+  data: Buffer;
+}
+
 // POST /api/cycles/{cycleId}/survey-responses: the end-of-process survey. Open the day after
 // the observation deadline through the feedback deadline. Observees must have signed up in
 // the cycle and observers must have an observation in it. One response per role.
-export async function submitSurvey(cycleId: number, netid: string, input: SurveyInput) {
+export async function submitSurvey(cycleId: number, netid: string, input: SurveyInput, file?: TroubleFile) {
   const db = getPool();
   const { rows: [cycle] } = await db.query<{
     open: boolean; opens: string; closes: string; observee: boolean; observer: boolean;
@@ -34,14 +42,26 @@ export async function submitSurvey(cycleId: number, netid: string, input: Survey
     throw new ApiError(403, 'NOT_A_PARTICIPANT', `You were not an ${input.respondentRole} in this cycle.`);
   }
 
-  const { rows } = await db.query<{ response_id: number }>(`
-    INSERT INTO survey_response (cycle_id, respondent_id, respondent_role, process_ok, difficulties, additional_feedback)
-    VALUES ($1, $2, $3, $4, $5, $6)
-    ON CONFLICT (cycle_id, respondent_id, respondent_role) DO NOTHING
-    RETURNING response_id
-  `, [cycleId, netid, input.respondentRole, input.processOk, input.difficulties, input.additionalFeedback]);
-  if (!rows.length) throw new ApiError(409, 'ALREADY_SUBMITTED', 'You already submitted the survey.');
-  return { responseId: String(rows[0].response_id) };
+  // The file and the response are saved together, so a duplicate response leaves no orphan file.
+  return inTransaction(async (client) => {
+    let fileKey: string | null = null;
+    if (file) {
+      const { rows: [saved] } = await client.query<{ attachment_id: string }>(`
+        INSERT INTO survey_attachment (file_name, file_type, file_size, file_data, uploaded_by)
+        VALUES ($1, $2, $3, $4, $5) RETURNING attachment_id::text
+      `, [file.name, file.type, file.data.length, file.data, netid]);
+      fileKey = saved.attachment_id;
+    }
+    const { rows } = await client.query<{ response_id: number }>(`
+      INSERT INTO survey_response
+        (cycle_id, respondent_id, respondent_role, process_ok, difficulties, additional_feedback, trouble_file_key)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (cycle_id, respondent_id, respondent_role) DO NOTHING
+      RETURNING response_id
+    `, [cycleId, netid, input.respondentRole, input.processOk, input.difficulties, input.additionalFeedback, fileKey]);
+    if (!rows.length) throw new ApiError(409, 'ALREADY_SUBMITTED', 'You already submitted the survey.');
+    return { responseId: String(rows[0].response_id) };
+  });
 }
 
 interface SurveyRow {
@@ -91,4 +111,17 @@ export async function listSurveyResponses(cycleId: number) {
     ORDER BY r.submitted_date DESC, r.response_id DESC
   `, [cycleId]);
   return rows.map(mapSurveyResponse);
+}
+
+// GET /api/cycles/{cycleId}/survey-responses/{responseId}/trouble-file (AC only): download the
+// file attached to a response.
+export async function getTroubleFile(cycleId: number, responseId: number) {
+  const { rows: [file] } = await getPool().query<{ file_name: string; file_type: string; file_data: Buffer }>(`
+    SELECT a.file_name, a.file_type, a.file_data
+    FROM survey_response AS r
+    JOIN survey_attachment AS a ON a.attachment_id::text = r.trouble_file_key
+    WHERE r.cycle_id = $1 AND r.response_id = $2
+  `, [cycleId, responseId]);
+  if (!file) throw new ApiError(404, 'NOT_FOUND', 'No file for this survey response.');
+  return file;
 }
