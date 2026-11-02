@@ -74,6 +74,12 @@ function expectTableStructure(region: HTMLElement) {
   }
 }
 
+/** A loading, empty or failed list shows its message in a plain box: no table and nothing that scrolls sideways. */
+function expectMessageOnly(region: HTMLElement) {
+  expect(within(region).queryByRole('table')).not.toBeInTheDocument();
+  expect(within(region).queryByRole('group')).not.toBeInTheDocument();
+}
+
 describe('Committee dashboard detail sections', () => {
   it('lists the faculty who are due or overdue for the current cycle, overdue first', async () => {
     serve();
@@ -174,12 +180,12 @@ describe('Committee dashboard detail sections', () => {
     );
     openPage();
     expect(await within(section(/Due or overdue/)).findByText('Nobody is due or overdue this cycle.')).toBeVisible();
-    expect(await within(section(/Unmatched faculty/)).findByText('Every sign-up has an observer or is still being matched.')).toBeVisible();
+    expect(await within(section(/Unmatched faculty/)).findByText('No unmatched faculty.')).toBeVisible();
     expect(await within(section(/Outstanding observations/)).findByText('Every sign-up has a completed observation.')).toBeVisible();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     for (const name of LISTS) {
       expect(within(section(name)).getByRole('heading')).not.toHaveTextContent(/\(\d+\)/);
-      expectTableStructure(section(name));
+      expectMessageOnly(section(name));
     }
   });
 
@@ -202,7 +208,7 @@ describe('Committee dashboard detail sections', () => {
     const due = section(/Due or overdue/);
     expect(await within(due).findByText('Loading faculty…')).toBeVisible();
     expect(within(due).queryByText('Nobody is due or overdue this cycle.')).not.toBeInTheDocument();
-    expectTableStructure(due);
+    expectMessageOnly(due);
     expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
   });
 
@@ -214,7 +220,7 @@ describe('Committee dashboard detail sections', () => {
     expect(await within(due).findByRole('alert')).toHaveTextContent('The requested endpoint does not exist.');
     expect(within(due).queryByText('Nobody is due or overdue this cycle.')).not.toBeInTheDocument();
     expect(within(due).getByRole('heading')).toHaveTextContent(/^Due or overdue for evaluation$/);
-    expectTableStructure(due);
+    expectMessageOnly(due);
     expect(await screen.findByText('Dr. Sarah Kim')).toBeVisible();
     expect(screen.getByText('Dr. Laura Gomez')).toBeVisible();
   });
@@ -228,7 +234,7 @@ describe('Committee dashboard detail sections', () => {
     openPage();
     expect(await within(section(/Unmatched faculty/)).findByRole('alert')).toHaveTextContent('Unmatched faculty could not be read.');
     expect(await within(section(/Outstanding observations/)).findByRole('alert')).toHaveTextContent('Sign-ups could not be read.');
-    expect(within(section(/Unmatched faculty/)).queryByText('Every sign-up has an observer or is still being matched.')).not.toBeInTheDocument();
+    expect(within(section(/Unmatched faculty/)).queryByText('No unmatched faculty.')).not.toBeInTheDocument();
     expect(within(section(/Outstanding observations/)).queryByText('Every sign-up has a completed observation.')).not.toBeInTheDocument();
     expect(await screen.findByText('Dr. Raj Mehta')).toBeVisible();
   });
@@ -243,21 +249,21 @@ describe('Committee dashboard detail sections', () => {
     expect(await screen.findByText('Dr. Sarah Kim')).toBeVisible();
   });
 
-  it('explains that no cycle has started instead of showing errors or zeros', async () => {
+  it('says once that no cycle has started, instead of errors, zeros or empty lists', async () => {
     server.use(
-      http.get('*/api/cycles/latest/kpis', () => HttpResponse.json(kpis)),
+      http.get('*/api/cycles/latest/kpis', () => failure('Cycle not found.', 404, 'NOT_FOUND')),
       http.get('*/api/cycles/current', () => HttpResponse.json(null)),
       http.get('*/api/dashboard/due-by-rank', noCycle),
       http.get('*/api/dashboard/outstanding-observations', noCycle),
       http.get('*/api/dashboard/unmatched', noCycle),
     );
     openPage();
-    for (const name of LISTS) {
-      expect(await within(section(name)).findByText('No evaluation cycle has started yet.')).toBeVisible();
-      expectTableStructure(section(name));
-    }
-    expect(await screen.findAllByText('No cycle has started')).toHaveLength(3);
+    expect(await screen.findByText('No evaluation cycle has started yet.')).toBeVisible();
+    expect(screen.getAllByText(/No evaluation cycle has started yet/)).toHaveLength(1);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('0')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Cycle not found/)).not.toBeInTheDocument();
   });
 });
 
@@ -284,7 +290,8 @@ describe('Committee dashboard executive summary', () => {
     expect(await within(summary()).findByText("Couldn't load")).toBeVisible();
     expect(await within(summary()).findByText('Dr. Sarah Kim, CS 2336.001')).toBeVisible();
     expect(count('Due for evaluation')).toHaveTextContent(/^Due for evaluation–Loading$/);
-    expect(count('Signed up but not observed')).toHaveTextContent(/^Signed up but not observed–Couldn't load$/);
+    expect(within(count('Signed up but not observed')).getByRole('alert')).toHaveTextContent("Signed up but not observed: Couldn't load");
+    expect(within(count('Signed up but not observed')).getByRole('button', { name: 'Try again' })).toBeVisible();
     expect(within(summary()).queryByText('0')).not.toBeInTheDocument();
   });
 });

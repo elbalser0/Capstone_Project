@@ -337,7 +337,8 @@ export interface OutstandingObservations {
   cycleId: string;
   total: number;
   byRank: CountByRank;
-  items: { signupId: string; observee: PersonRef; section: CourseSection; observationStatus: ObservationStatus | null }[];
+  /** The backend returns counts only; the dashboard lists sign-ups from GET /api/cycles/{cycleId}/signups instead. */
+  items?: { signupId: string; observee: PersonRef; section: CourseSection; observationStatus: ObservationStatus | null }[];
 }
 
 /** GET /api/dashboard/unmatched */
