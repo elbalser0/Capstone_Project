@@ -12,7 +12,6 @@ import { listCycleSignups } from '../services/cycle-signups.service.js';
 import { listDueProfessors } from '../services/due-professors.service.js';
 import { listMatching, runMatching } from '../services/matching.service.js';
 import { sendDueReminders, sendListsReady, sendSurveyOpen } from '../services/notification.service.js';
-import { getCycleKpis } from '../services/kpi.service.js';
 
 // Mounted at /api/cycles (after requireLogin)
 export const cyclesRouter = Router();
@@ -45,13 +44,6 @@ cyclesRouter.get('/:cycleId/signups', requireAC, async (req, res) => {
 cyclesRouter.get('/:cycleId/due-professors', requireAC, async (req, res) => {
   const cycleId = positiveId(req.params.cycleId, 'INVALID_CYCLE_ID', 'cycleId');
   res.status(200).json(await listDueProfessors(cycleId));
-});
-
-cyclesRouter.get('/:cycleId/kpis', requireAC, async (req, res) => {
-  const cycleId = req.params.cycleId === 'latest'
-    ? 'latest'
-    : positiveId(req.params.cycleId, 'INVALID_CYCLE_ID', 'cycleId');
-  res.status(200).json(await getCycleKpis(cycleId));
 });
 
 cyclesRouter.post('/', requireAC, async (req, res) => {
