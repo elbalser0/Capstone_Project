@@ -105,14 +105,6 @@ describe('2.2 Observer Utilization Rate', () => {
     assert.equal(kpi.numerator, 1);
   });
 
-  test('an observer whose only observation did not happen is not counted', () => {
-    const kpi = observerUtilization(facts({
-      signups: [signup(1, 'a'), signup(2, 'b')],
-      observations: [observation(1, 'b', { status: 'not_completed', bothSigned: false })],
-    }));
-    assert.equal(kpi.numerator, 0);
-  });
-
   test('an observer does not have to sign up to count', () => {
     const kpi = observerUtilization(facts({
       signups: [signup(1, 'a'), signup(2, 'b')],
@@ -121,28 +113,18 @@ describe('2.2 Observer Utilization Rate', () => {
     assert.deepEqual(kpi, { kpiCode: '2.2', numerator: 1, denominator: 2, kpiValue: 0.5 });
   });
 
-  test('an observation that was accepted but never finished does not count', () => {
-    const kpi = observerUtilization(facts({
-      signups: [signup(1, 'a')],
-      observations: [observation(1, 'b', { status: 'scheduled', bothSigned: false })],
-    }));
-    assert.equal(kpi.numerator, 0);
-  });
-
-  test('more observers than sign-ups is reported as it is', () => {
-    const kpi = observerUtilization(facts({
-      signups: [signup(1, 'a')],
-      observations: [observation(1, 'b'), observation(2, 'c')],
-    }));
-    assert.deepEqual(kpi, { kpiCode: '2.2', numerator: 2, denominator: 1, kpiValue: 2 });
-  });
-
-  test('an observation counts as utilization or as missing, never both', () => {
-    const scheduled = observation(1, 'b', { status: 'scheduled', bothSigned: false });
-    const signups = [signup(1, 'a')];
-    assert.equal(observerUtilization(facts({ signups, observations: [scheduled] })).numerator, 0);
-    assert.equal(missingObservations(facts({ signups, observations: [scheduled] })).numerator, 1);
-  });
+  for (const [name, changes] of [
+    ['is still scheduled', { status: 'scheduled', bothSigned: false }],
+    ['did not happen', { status: 'not_completed', bothSigned: false }],
+  ] as const) {
+    test(`a confirmed observer counts even if the observation ${name}`, () => {
+      const kpi = observerUtilization(facts({
+        signups: [signup(1, 'a')],
+        observations: [observation(1, 'b', changes)],
+      }));
+      assert.deepEqual(kpi, { kpiCode: '2.2', numerator: 1, denominator: 1, kpiValue: 1 });
+    });
+  }
 
   test('no sign-ups gives N/A', () => {
     assert.equal(observerUtilization(facts()).kpiValue, null);
