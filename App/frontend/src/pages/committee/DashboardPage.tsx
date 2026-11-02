@@ -6,9 +6,10 @@ import { DownloadIcon } from '../../components/icons';
 import { Button, Card, ErrorNote } from '../../components/ui';
 import { downloadCsv } from '../../lib/csv';
 import { formatDate, formatShort, percent, ranks } from '../../lib/format';
+import { DashboardSections } from './DashboardSections';
 
 // A1. KPIs are generated the day after a cycle's feedback deadline, so the cards show the
-// latest cycle that has results; the executive summary below is the current cycle so far.
+// latest cycle that has results; the executive summary and the lists below are the current cycle so far.
 
 interface KpiMeta {
   group: string;
@@ -74,15 +75,18 @@ function Summary() {
   const first = unmatched.data?.items[0];
   const more = (unmatched.data?.total ?? 0) - 1;
   return (
-    <Card className="grid grid-cols-3 divide-x divide-gray-200">
-      <SummaryCell label="Due for evaluation" total={due.data?.total ?? 0} detail={due.data && ranks(due.data.byRank)} />
-      <SummaryCell label="Signed up but not observed" total={outstanding.data?.total ?? 0} detail={outstanding.data && ranks(outstanding.data.byRank)} />
-      <SummaryCell
-        label="Unmatched faculty"
-        total={unmatched.data?.total ?? 0}
-        detail={first ? `${first.observee.displayName}, ${first.section.label}${more > 0 ? `, and ${more} more` : ''}` : 'None'}
-      />
-    </Card>
+    <section aria-labelledby="executive-summary">
+      <h2 id="executive-summary" className="mt-[30px] mb-3 text-base font-bold text-gray-900">Executive summary</h2>
+      <Card className="grid grid-cols-3 divide-x divide-gray-200">
+        <SummaryCell label="Due for evaluation" total={due.data?.total ?? 0} detail={due.data && ranks(due.data.byRank)} />
+        <SummaryCell label="Signed up but not observed" total={outstanding.data?.total ?? 0} detail={outstanding.data && ranks(outstanding.data.byRank)} />
+        <SummaryCell
+          label="Unmatched faculty"
+          total={unmatched.data?.total ?? 0}
+          detail={first ? `${first.observee.displayName}, ${first.section.label}${more > 0 ? `, and ${more} more` : ''}` : 'None'}
+        />
+      </Card>
+    </section>
   );
 }
 
@@ -109,8 +113,8 @@ export function DashboardPage() {
       <div className="mt-4 grid grid-cols-3 gap-4">
         {ROW_2.map((code) => <KpiCard key={code} code={code} kpi={byCode.get(code)} />)}
       </div>
-      <h2 className="mt-[30px] mb-3 text-base font-bold text-gray-900">Executive summary</h2>
       <Summary />
+      <DashboardSections />
     </div>
   );
 }
