@@ -67,6 +67,23 @@ CREATE TABLE public.ac_member (
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
+CREATE TABLE public.survey_attachment (
+    attachment_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    file_name TEXT NOT NULL,
+    file_type TEXT NOT NULL,
+    file_size BIGINT NOT NULL CHECK (file_size > 0),
+    file_data BYTEA NOT NULL,
+
+    uploaded_by TEXT NOT NULL
+        REFERENCES public.professor(netid),
+
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT survey_attachment_file_size_matches
+        CHECK (file_size = octet_length(file_data))
+);
+
 CREATE TABLE public.course (
     course_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     dept_id INTEGER NOT NULL
