@@ -9,6 +9,7 @@ import {
   type Deadlines,
 } from '../services/cycle.service.js';
 import { listCycleSignups } from '../services/cycle-signups.service.js';
+import { listDueProfessors } from '../services/due-professors.service.js';
 import { listMatching, runMatching } from '../services/matching.service.js';
 import { sendDueReminders, sendListsReady, sendSurveyOpen } from '../services/notification.service.js';
 import { getCycleKpis } from '../services/kpi.service.js';
@@ -39,6 +40,11 @@ cyclesRouter.get('/current', async (_req, res) => {
 cyclesRouter.get('/:cycleId/signups', requireAC, async (req, res) => {
   const cycleId = positiveId(req.params.cycleId, 'INVALID_CYCLE_ID', 'cycleId');
   res.status(200).json(await listCycleSignups(cycleId));
+});
+
+cyclesRouter.get('/:cycleId/due-professors', requireAC, async (req, res) => {
+  const cycleId = positiveId(req.params.cycleId, 'INVALID_CYCLE_ID', 'cycleId');
+  res.status(200).json(await listDueProfessors(cycleId));
 });
 
 cyclesRouter.get('/:cycleId/kpis', requireAC, async (req, res) => {

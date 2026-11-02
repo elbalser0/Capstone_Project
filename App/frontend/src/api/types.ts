@@ -141,6 +141,7 @@ export interface DueProfessor {
   professor: PersonRef;
   department: Department;
   dueStatus: Exclude<DueStatus, 'NOT_DUE'>;
+  /** Last signed observation before this term. */
   lastObservedTerm: Term | null;
 }
 
