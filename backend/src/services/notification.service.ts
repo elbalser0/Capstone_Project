@@ -79,8 +79,9 @@ async function sendToCycle(cycleId: number, sentBy: string, type: NotifType, rec
   return rows;
 }
 
-// POST /api/cycles/{cycleId}/notifications/due-reminders: remind DUE/OVERDUE professors who
-// have not signed up yet; all of them, or only the netids given. The subject names their
+// POST /api/cycles/{cycleId}/notifications/due-reminders: remind active DUE/OVERDUE professors
+// who have not signed up yet; all of them, or only the netids given. Inactive professors keep
+// their eval_due row but are skipped, so they are reminded again if reactivated. The subject names their
 // status and all three deadlines. Each one also gets an email (see email.service.ts).
 export async function sendDueReminders(cycleId: number, sentBy: string, netids?: string[]) {
   const rows = await sendToCycle(cycleId, sentBy, 'reminder', `
@@ -89,7 +90,9 @@ export async function sendDueReminders(cycleId: number, sentBy: string, netids?:
              || ' for a classroom observation. Sign up by ' || deadlines.signup
              || '. Observations are due by ' || deadlines.observation
              || ' and feedback by ' || deadlines.feedback || '.' AS subject
-    FROM eval_due AS due CROSS JOIN deadlines
+    FROM eval_due AS due
+    JOIN professor AS active ON active.netid = due.netid AND active.is_active
+    CROSS JOIN deadlines
     WHERE due.cycle_id = $1
       AND ($7::text[] IS NULL OR due.netid = ANY($7::text[]))
       AND NOT EXISTS (SELECT 1 FROM sign_up AS s WHERE s.cycle_id = $1 AND s.observee_netid = due.netid)

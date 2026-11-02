@@ -79,6 +79,23 @@ describe('sending notifications against the database', { skip }, () => {
     assert.deepEqual(await sendDueReminders(1, 'ac1', []), { sent: 1 }); // empty list means everyone
   });
 
+  test('inactive professors are skipped, keep their due row, and are reminded again once reactivated', async () => {
+    const mailer = fakeMailer();
+    setMailTransportForTests(mailer.transport);
+    await sql(`UPDATE professor SET is_active = false WHERE netid = 'due2'`);
+    assert.deepEqual(await sendDueReminders(1, 'ac1'), { sent: 0 });
+    assert.deepEqual(await sendDueReminders(1, 'ac1', ['due2']), { sent: 0 });
+    await waitForEmails();
+    assert.equal(mailer.sent.length, 0);
+    assert.equal((await sent('reminder')).length, 0);
+    assert.equal((await sql(`SELECT count(*)::int AS n FROM eval_due WHERE netid = 'due2'`)).rows[0].n, 1);
+
+    await sql(`UPDATE professor SET is_active = true WHERE netid = 'due2'`);
+    assert.deepEqual(await sendDueReminders(1, 'ac1'), { sent: 1 });
+    await waitForEmails();
+    assert.deepEqual(mailer.sent.map((m) => m.to), ['due2@example.edu']);
+  });
+
   test('each due reminder also goes out by email to the professor, with the same subject', async () => {
     const mailer = fakeMailer();
     setMailTransportForTests(mailer.transport);

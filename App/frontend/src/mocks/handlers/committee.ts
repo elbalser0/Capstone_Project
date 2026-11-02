@@ -148,7 +148,10 @@ export const committeeHandlers = [
     const me = committeeMember(request);
     const c = cycleOr404(params.cycleId);
     const { netids } = ((await request.json().catch(() => ({}))) ?? {}) as DueRemindersInput;
-    const due = db.eval_due.filter((d) => d.cycle_id === c.cycle_id && (!netids?.length || netids.includes(d.netid))).map((d) => d.netid);
+    const due = db.eval_due
+      .filter((d) => d.cycle_id === c.cycle_id && (!netids?.length || netids.includes(d.netid)))
+      .filter((d) => professor(d.netid).is_active)
+      .map((d) => d.netid);
     return HttpResponse.json({ sent: notify(due, 'reminder', `Reminder: sign up to be observed by ${c.signup_deadline}`, me.netid, c.cycle_id) });
   }),
 
