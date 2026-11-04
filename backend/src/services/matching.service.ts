@@ -123,6 +123,127 @@ export async function runMatching(cycleId: number) {
   return listMatching(cycleId);
 }
 
+
+/**
+ * POST /api/signups/{signupId}/candidates
+ * Let an AC member add one active professor to a sign-up with fewer than three usable matches.
+ * This deliberately overrides automatic department/course-history matching. Pairing and schedule
+ * conflicts are still checked when an observation request is confirmed.
+ */
+export async function addManualCandidate(signupId: number, observerNetid: string) {
+  let result: {
+    netid: string;
+    first_name: string;
+    last_name: string;
+    rank: Rank;
+    round_no: number;
+  } | undefined;
+
+  await inTransaction(async (client) => {
+    // Match confirmRequest's lock order: serialize this observer's cycle-capacity check, then
+    // lock the sign-up so concurrent AC additions cannot exceed its usable-candidate threshold.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('observer:' || $1))", [observerNetid]);
+
+    const { rows: [signup] } = await client.query<{
+      cycle_id: number;
+      observee_netid: string;
+      signup_open: boolean;
+      observation_closed: boolean;
+    }>(`
+      SELECT s.cycle_id, s.observee_netid,
+             CURRENT_DATE <= c.signup_deadline AS signup_open,
+             c.observation_deadline < CURRENT_DATE AS observation_closed
+      FROM sign_up AS s
+      JOIN eval_cycle AS c ON c.cycle_id = s.cycle_id
+      WHERE s.signup_id = $1
+      FOR UPDATE OF s
+    `, [signupId]);
+    if (!signup) throw new ApiError(404, 'NOT_FOUND', 'Sign-up not found.');
+    if (signup.signup_open) {
+      throw new ApiError(409, 'SIGNUP_OPEN', 'Manual candidates can be added after the sign-up deadline.');
+    }
+    if (signup.observation_closed) {
+      throw new ApiError(409, 'OBSERVATION_CLOSED', 'The observation deadline has passed.');
+    }
+    if (signup.observee_netid === observerNetid) {
+      throw new ApiError(400, 'INVALID_CANDIDATE', 'A faculty member cannot observe their own sign-up.');
+    }
+
+    const paired = await client.query('SELECT 1 FROM observation WHERE signup_id = $1', [signupId]);
+    if (paired.rowCount) {
+      throw new ApiError(409, 'ALREADY_PAIRED', 'This sign-up already has an assigned observer.');
+    }
+
+    const existing = await client.query(
+      'SELECT 1 FROM observer_match WHERE signup_id = $1 AND observer_netid = $2',
+      [signupId, observerNetid],
+    );
+    if (existing.rowCount) {
+      throw new ApiError(409, 'ALREADY_MATCHED', 'This professor is already on the sign-up’s candidate history.');
+    }
+
+    const professor = await client.query<{ netid: string; first_name: string; last_name: string; rank: Rank }>(`
+      SELECT netid, first_name, last_name, rank
+      FROM professor
+      WHERE netid = $1 AND is_active
+    `, [observerNetid]);
+    if (!professor.rows[0]) {
+      throw new ApiError(404, 'CANDIDATE_NOT_FOUND', 'Active professor not found.');
+    }
+
+    const { rows: [{ n: candidateCount }] } = await client.query<{ n: number }>(
+      `SELECT (${USABLE_COUNT}) AS n`,
+      [signupId],
+    );
+    if (candidateCount >= INSUFFICIENT_BELOW) {
+      throw new ApiError(409, 'ENOUGH_CANDIDATES', 'This sign-up already has enough usable candidates.');
+    }
+
+    const accepted = await client.query<{ n: number }>(`
+      SELECT count(*)::int AS n
+      FROM observation AS o
+      JOIN sign_up AS s ON s.signup_id = o.signup_id
+      WHERE o.observer_netid = $1 AND s.cycle_id = $2
+    `, [observerNetid, signup.cycle_id]);
+    if (accepted.rows[0].n >= MAX_ACCEPTED) {
+      throw new ApiError(409, 'LIMIT_REACHED', 'This professor has reached the observation limit for this cycle.');
+    }
+
+    // Automatic matching only rewrites round 1, so the manual override and its history survive reruns.
+    const round = await client.query<{ round_no: number }>(
+      'SELECT COALESCE(max(round_no), 1)::int + 1 AS round_no FROM observer_match WHERE signup_id = $1',
+      [signupId],
+    );
+    const roundNo = round.rows[0].round_no;
+    await client.query(`
+      INSERT INTO observer_match (signup_id, observer_netid, generated_date, round_no)
+      VALUES ($1, $2, now(), $3)
+    `, [signupId, observerNetid, roundNo]);
+
+    const newCount = candidateCount + 1;
+    // Resolve stale alerts as history, then raise the alert matching the new usable count.
+    await client.query(`
+      UPDATE alert SET resolved_date = now()
+      WHERE signup_id = $1 AND resolved_date IS NULL
+        AND alert_type IN ('no_observer', 'insufficient_observers')
+    `, [signupId]);
+    await resolveNoAcceptanceAlert(client, signupId);
+    const alert = alertFor(newCount);
+    if (alert) {
+      await client.query('INSERT INTO alert (signup_id, alert_type) VALUES ($1, $2)', [signupId, alert]);
+    }
+
+    result = { ...professor.rows[0], round_no: roundNo };
+  });
+
+  if (!result) throw new Error('Could not add the candidate.');
+  return {
+    signupId: String(signupId),
+    observer: person(result.netid, result.first_name, result.last_name, result.rank),
+    roundNo: result.round_no,
+  };
+}
+
 interface MatchingSignupRow {
   signup_id: number;
   section_id: number;
