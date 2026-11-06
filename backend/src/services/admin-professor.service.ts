@@ -1,6 +1,18 @@
 import type { PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
+import { inTransaction } from '../db/transaction.js';
+import { ApiError } from '../middleware/error.middleware.js';
+import { findNextTermId } from './term.service.js';
 import { displayName, type Rank } from './user.service.js';
+
+export interface NewProfessor {
+  netid: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  rank: Rank;
+  deptId: number;
+}
 
 export interface AdminProfessorRow {
   netid: string;
@@ -55,4 +67,41 @@ export async function getAdminProfessor(
 ): Promise<AdminProfessor | undefined> {
   const { rows } = await db.query<AdminProfessorRow>(`${SELECT_ADMIN_PROFESSOR} WHERE p.netid = $1`, [netid]);
   return rows[0] ? mapAdminProfessor(rows[0]) : undefined;
+}
+
+// POST /api/admin/professors. A new professor starts in the next term (the earliest one starting
+// after today) with no prior evaluation. The rank trigger sets eval_interval_years.
+export async function createProfessor(professor: NewProfessor): Promise<AdminProfessor> {
+  try {
+    return await inTransaction(async (client) => {
+      const department = await client.query('SELECT 1 FROM department WHERE dept_id = $1', [professor.deptId]);
+      if (!department.rowCount) {
+        throw new ApiError(400, 'INVALID_PROFESSOR', 'deptId does not match a department.');
+      }
+      const startTerm = await findNextTermId(client);
+      if (startTerm === null) {
+        throw new ApiError(409, 'NEXT_TERM_MISSING', 'Add the next term before adding professors.');
+      }
+      await client.query(`
+        INSERT INTO professor (netid, first_name, last_name, email, rank, dept_id,
+                               baseline_last_eval_term, start_term, is_active)
+        VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, true)
+      `, [professor.netid, professor.firstName, professor.lastName, professor.email,
+        professor.rank, professor.deptId, startTerm]);
+      return (await getAdminProfessor(professor.netid, client))!;
+    });
+  } catch (error) {
+    const { code, constraint } = error as { code?: string; constraint?: string };
+    if (code === '23505' && constraint === 'professor_pkey') {
+      throw new ApiError(409, 'NETID_TAKEN', `A professor with netid ${professor.netid} already exists.`);
+    }
+    if (code === '23505' && constraint === 'professor_email_lower_unique') {
+      throw new ApiError(409, 'EMAIL_TAKEN', 'A professor with that email already exists.');
+    }
+    // The department was deleted after the check above.
+    if (code === '23503') {
+      throw new ApiError(400, 'INVALID_PROFESSOR', 'deptId does not match a department.');
+    }
+    throw error;
+  }
 }

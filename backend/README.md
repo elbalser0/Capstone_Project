@@ -103,6 +103,16 @@ displayName, email, rank, department: { deptId, deptName }, isAc, isActive }`,
 where `isAc` means an active `ac_member` row. There are no query parameters; the
 admin table searches in the browser.
 
+`POST /api/admin/professors` adds a professor from `{ netid, firstName, lastName,
+email, rank, deptId }` and returns 201 with the same row as the list. `netid` is
+trimmed and lowercased and must be three letters and six digits; names and email
+are trimmed; `deptId` is a department ID string. The professor starts in the
+next term (the earliest term starting after today) with no prior evaluation,
+and the rank trigger sets `eval_interval_years`. Invalid fields or an unknown
+department return 400 `INVALID_PROFESSOR`. It returns 409 `NEXT_TERM_MISSING`
+when no term starts after today, 409 `NETID_TAKEN`, or 409 `EMAIL_TAKEN`
+(emails are compared case-insensitively).
+
 `GET /api/admin/departments` returns `[{ deptId, deptName }]` sorted by name,
 for the Add Professor dropdown.
 
