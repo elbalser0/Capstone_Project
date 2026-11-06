@@ -65,3 +65,45 @@ export async function findUserByEmail(email: string): Promise<AuthUser | undefin
   );
   return rows[0] ? toAuthUser(rows[0]) : undefined;
 }
+
+// An admin login (app_admin). Admins do not have to be professors.
+export interface AdminAccount {
+  adminId: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+}
+
+// Everything a verified login email maps to: an active professor, an active admin, or both.
+export interface Account {
+  email: string;
+  professor?: AuthUser;
+  admin?: AdminAccount;
+}
+
+interface AdminRow {
+  admin_id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
+// Looks up an active admin by login email (case-insensitive).
+export async function findAdminByEmail(email: string): Promise<AdminAccount | undefined> {
+  const { rows } = await getPool().query<AdminRow>(
+    `SELECT admin_id, email, first_name, last_name
+       FROM app_admin
+      WHERE lower(email) = lower($1)
+        AND is_active = true`,
+    [email],
+  );
+  const row = rows[0];
+  return row
+    ? { adminId: String(row.admin_id), email: row.email, firstName: row.first_name, lastName: row.last_name }
+    : undefined;
+}
+
+export async function findAccountByEmail(email: string): Promise<Account> {
+  const [professor, admin] = await Promise.all([findUserByEmail(email), findAdminByEmail(email)]);
+  return { email, ...(professor && { professor }), ...(admin && { admin }) };
+}
