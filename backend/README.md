@@ -97,6 +97,12 @@ email; anyone else gets 403 `FORBIDDEN`. Add the first admin with the example
 INSERT in `database/migrations/20261104_app_admin.sql`. Admin actions change one
 professor at a time. Professors and AC memberships are deactivated, never deleted.
 
+`GET /api/admin/professors` returns every professor, inactive ones included,
+sorted by last name then first name. Each row is `{ netid, firstName, lastName,
+displayName, email, rank, department: { deptId, deptName }, isAc, isActive }`,
+where `isAc` means an active `ac_member` row. There are no query parameters; the
+admin table searches in the browser.
+
 ## PostgreSQL connectivity
 
 The backend uses the pg driver and one lazily created shared pool in
