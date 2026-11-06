@@ -106,6 +106,16 @@ admin table searches in the browser.
 `GET /api/admin/departments` returns `[{ deptId, deptName }]` sorted by name,
 for the Add Professor dropdown.
 
+`POST /api/admin/terms` adds a term from `{ season, year, startDate, endDate }`
+(`season` is `fall` or `spring`; dates are `YYYY-MM-DD`; `startDate` must be in
+`year`) and returns 201 with `{ termId, season, year, label, startDate, endDate }`.
+Invalid fields return 400 `INVALID_TERM`. It returns 409 `TERM_EXISTS` for a
+season and year that already exist, 409 `TERM_OVERLAP` when the dates overlap
+another term (sharing a first or last day counts), and 409 `TERM_OUT_OF_ORDER`
+when sorting terms by start date would break season order. Gaps are allowed and
+can be filled later; past terms are allowed. Admins add the next term this way
+before adding a professor who starts in it.
+
 ## PostgreSQL connectivity
 
 The backend uses the pg driver and one lazily created shared pool in
