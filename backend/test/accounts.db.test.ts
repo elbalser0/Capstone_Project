@@ -152,9 +152,11 @@ describe('login accounts against the database', { skip }, () => {
 
     test('a professor who is not an admin gets 403 FORBIDDEN from admin routes', async () => {
       for (const email of ['paula.prof@example.edu', 'ann.committee@example.edu']) {
-        const { status, body } = await get('/api/admin/anything', email);
-        assert.equal(status, 403, email);
-        assert.equal(body.error.code, 'FORBIDDEN', email);
+        for (const path of ['/api/admin/anything', '/api/admin/professors']) {
+          const { status, body } = await get(path, email);
+          assert.equal(status, 403, `${email} ${path}`);
+          assert.equal(body.error.code, 'FORBIDDEN', `${email} ${path}`);
+        }
       }
     });
 
