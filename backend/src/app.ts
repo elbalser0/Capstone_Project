@@ -6,7 +6,8 @@ import { healthRouter } from './routes/health.routes.js';
 import { facultyMeRouter, signupsRouter } from './routes/faculty-scaffold.routes.js';
 import { errorHandler } from './middleware/error.middleware.js';
 import { myNotificationsRouter } from './routes/notifications.routes.js';
-import { requireLogin } from './middleware/auth.middleware.js';
+import { authenticate, requireAdmin, requireLogin, requireProfessor } from './middleware/auth.middleware.js';
+import { adminRouter } from './routes/admin.routes.js';
 import { myAssignmentsRouter, myObservationsRouter, observationsRouter } from './routes/observations.routes.js';
 import { meRouter } from './routes/me.routes.js';
 import { myRequestsRouter, signupRequestsRouter } from './routes/requests.routes.js';
@@ -24,10 +25,12 @@ app.use('/api/me/notifications', requireLogin, myNotificationsRouter);
 app.use('/api/me/assignments', requireLogin, myAssignmentsRouter);
 app.use('/api/me/observations', requireLogin, myObservationsRouter);
 app.use('/api/signups/:signupId/requests', requireLogin, signupRequestsRouter);
-app.use('/api/me', requireLogin, meRouter, facultyMeRouter);
+// GET /api/me also works for admins who are not professors; the rest of /api/me needs a professor.
+app.use('/api/me', authenticate, meRouter, requireProfessor, facultyMeRouter);
 app.use('/api/signups', requireLogin, signupsRouter);
 app.use('/api/observations', requireLogin, observationsRouter);
 app.use('/api/templates', requireLogin, templatesRouter);
+app.use('/api/admin', authenticate, requireAdmin, adminRouter);
 app.use((_req, res) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'The requested endpoint does not exist.' } });
 });

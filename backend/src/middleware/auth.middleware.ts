@@ -1,18 +1,21 @@
 import type { NextFunction, Request, Response } from 'express';
 import { firebaseAuth } from '../config/firebase.js';
-import { findUserByEmail, type AuthUser } from '../services/user.service.js';
+import { findAccountByEmail, type Account, type AuthUser } from '../services/user.service.js';
 import { ApiError } from './error.middleware.js';
 
 declare global {
   namespace Express {
     interface Request {
+      // The signed-in account: professor, admin, or both. Set by authenticate.
+      account?: Account;
+      // The signed-in professor. Missing for an admin who is not a professor.
       user?: AuthUser;
     }
   }
 }
 
-// Guard 1: is this a real, logged-in professor?
-export async function requireLogin(req: Request, _res: Response, next: NextFunction) {
+// Verifies the Firebase token and finds the active professor and/or admin for its email.
+export async function authenticate(req: Request, _res: Response, next: NextFunction) {
   const header = req.headers.authorization ?? '';
   if (!header.startsWith('Bearer ')) {
     next(new ApiError(401, 'UNAUTHENTICATED', 'Missing login token.'));
@@ -32,13 +35,35 @@ export async function requireLogin(req: Request, _res: Response, next: NextFunct
     return;
   }
 
-  const user = email ? await findUserByEmail(email) : undefined;
-  if (!user) {
+  const account = await findAccountByEmail(email);
+  if (!account.professor && !account.admin) {
     next(new ApiError(403, 'NOT_A_PROFESSOR', 'This account is not linked to a professor.'));
     return;
   }
 
-  req.user = user;
+  req.account = account;
+  req.user = account.professor;
+  next();
+}
+
+// Use after authenticate: only professors may continue.
+export function requireProfessor(req: Request, _res: Response, next: NextFunction) {
+  if (!req.user) {
+    next(new ApiError(403, 'NOT_A_PROFESSOR', 'This account is not linked to a professor.'));
+    return;
+  }
+  next();
+}
+
+// Guard 1: is this a real, logged-in professor?
+export const requireLogin = [authenticate, requireProfessor];
+
+// Use after authenticate: only active admins may continue.
+export function requireAdmin(req: Request, _res: Response, next: NextFunction) {
+  if (!req.account?.admin) {
+    next(new ApiError(403, 'FORBIDDEN', 'Only admins can do this.'));
+    return;
+  }
   next();
 }
 

@@ -67,6 +67,18 @@ CREATE TABLE public.ac_member (
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
+-- Admins are standalone login accounts matched by email; they do not have to be professors.
+CREATE TABLE public.app_admin (
+    admin_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email TEXT NOT NULL,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE UNIQUE INDEX app_admin_email_lower_unique
+ON public.app_admin (LOWER(email));
+
 CREATE TABLE public.survey_attachment (
     attachment_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 

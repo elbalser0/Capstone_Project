@@ -38,7 +38,11 @@ failures return a generic 500. ApiError supports explicit application errors.
 
 Authenticated routes verify a Firebase ID token with a verified email and look
 up the active professor in PostgreSQL. The professor's `ac_member` row determines
-Assessment Committee access. Set `GOOGLE_APPLICATION_CREDENTIALS` in `.env` to
+Assessment Committee access. The same email is also looked up in `app_admin`:
+an active admin row gives admin access, and an admin does not have to be a
+professor. An email that matches neither gets 403 `NOT_A_PROFESSOR`.
+`requireLogin` (`authenticate` then `requireProfessor`) guards the professor
+routes, and `/api/admin` uses `authenticate` then `requireAdmin`. Set `GOOGLE_APPLICATION_CREDENTIALS` in `.env` to
 your local service-account JSON file and send `Authorization: Bearer <idToken>`.
 React will call this API rather than PostgreSQL. Configure a frontend development
 proxy or agreed CORS origin when the frontend connects.
@@ -46,7 +50,10 @@ proxy or agreed CORS origin when the frontend connects.
 ## Faculty endpoints
 
 `GET /api/me` returns the signed-in professor's identity, department, rank, and
-role. `GET /api/me/courses?termId=...` returns that professor's sections and
+role, plus `isAdmin`. An admin who is not a professor can call it too and gets
+`netid`, `rank` and `department` as `null`, `role: "admin"`, `isAdmin: true`,
+and a `displayName` of "First Last". The other `/api/me/*` routes still require
+a professor. `GET /api/me/courses?termId=...` returns that professor's sections and
 meeting times for a positive integer term ID. It returns `[]` when none match.
 The schema has no department short code or section enrollment, so course labels
 use the department name and `enrollment` is `null`.
@@ -82,6 +89,13 @@ Technical debt: add a department short code and section enrollment if the UI
 needs them. Expand the frontend meeting-day type if weekend sections are used.
 Future term rows are still needed before scheduling evaluation cycles in those
 semesters.
+
+## Admin endpoints
+
+Every `/api/admin` route requires an active `app_admin` row for the signed-in
+email; anyone else gets 403 `FORBIDDEN`. Add the first admin with the example
+INSERT in `database/migrations/20261104_app_admin.sql`. Admin actions change one
+professor at a time. Professors and AC memberships are deactivated, never deleted.
 
 ## PostgreSQL connectivity
 
