@@ -7,6 +7,8 @@ import { DownloadIcon } from '../../components/icons';
 import { Banner, Button, Card, ErrorNote } from '../../components/ui';
 import { downloadCsv } from '../../lib/csv';
 import { formatDate, formatShort, percent, ranks } from '../../lib/format';
+import { NotificationControls } from './NotificationControls';
+import { NotificationInbox } from './NotificationInbox';
 import { DashboardSections, NO_CYCLE_TEXT, TryAgain, errorText, failureKey, headingFocus, isNoCycle, type Retryable } from './DashboardSections';
 
 // A1. KPIs are generated the day after a cycle's feedback deadline, so the cards show the
@@ -214,6 +216,9 @@ export function DashboardPage() {
       </section>
       <Summary />
       <DashboardSections />
+      {/* Not on the A1 frame: the sends sit below the approved layout, the sender's own inbox last. */}
+      <NotificationControls />
+      <NotificationInbox />
     </div>
   );
 }
