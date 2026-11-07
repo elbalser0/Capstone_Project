@@ -9,6 +9,8 @@ import { MyAssignmentsPage } from './pages/faculty/MyAssignmentsPage';
 import { ObservationRecordPage } from './pages/faculty/ObservationRecordPage';
 import { ObservationFormPage } from './pages/faculty/ObservationFormPage';
 import { ObservationSignPage } from './pages/faculty/ObservationSignPage';
+import { SurveyPage } from './pages/faculty/SurveyPage';
+import { SurveyResponsesPage } from './pages/committee/SurveyResponsesPage';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -31,6 +33,8 @@ export const router = createBrowserRouter([
         element: <DashboardPage />,
         handle: { title: 'Cycle results (KPIs)' } satisfies RouteHandle,
       },
+      { path: '/faculty/survey', element: <SurveyPage />, handle: { title: 'End-of-process survey' } satisfies RouteHandle },
+      { path: '/committee/survey-responses', element: <SurveyResponsesPage />, handle: { title: 'Survey responses' } satisfies RouteHandle },
       {
         path: '/faculty/requests',
         element: <RequestsPage />,

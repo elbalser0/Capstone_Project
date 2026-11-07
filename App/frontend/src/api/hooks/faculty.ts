@@ -143,7 +143,7 @@ export function useSubmitSurvey(cycleId: string) {
     mutationFn: ({ troubleFile, ...fields }: SurveyInput) => {
       const form = new FormData();
       for (const [key, value] of Object.entries(fields)) form.append(key, String(value));
-      if (troubleFile) form.append('troubleFile', troubleFile);
+      if (troubleFile) form.append('troubleFile', troubleFile, troubleFile.name);
       return api<{ responseId: string }>(`/cycles/${cycleId}/survey-responses`, { method: 'POST', body: form });
     },
   });
