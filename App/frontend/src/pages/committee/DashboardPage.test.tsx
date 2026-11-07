@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
 import { course, cycle, faculty, observer, otherCourse, signup, term } from '../../test/fixtures';
-import type { CycleKpis, DueByRank, DueProfessor, KpiResult, PersonRef, Signup, UnmatchedFaculty } from '../../api/types';
+import type { CycleKpis, DueByRank, DueProfessor, KpiResult, Me, PersonRef, Signup, UnmatchedFaculty } from '../../api/types';
 import { downloadCsv } from '../../lib/csv';
 import { DashboardPage } from './DashboardPage';
 
@@ -47,8 +47,16 @@ const never = () => new Promise<never>(() => {});
 const failure = (message: string, status = 500, code = 'FAILED') => HttpResponse.json({ error: { code, message } }, { status });
 const noCycle = () => failure('No cycle has started yet.', 404, 'NO_CYCLE');
 
+const committeeMember: Me = {
+  netid: 'ic1', firstName: 'Isabel', lastName: 'Nakamura', displayName: 'Dr. Isabel Nakamura', email: 'ic1@example.edu',
+  rank: 'full', department: { deptId: '1', deptName: 'Computer Science' }, role: 'AC',
+};
+
 function serve() {
   server.use(
+    // The notification sends and inbox under the lists (tested in NotificationControls.test.tsx).
+    http.get('*/api/me', () => HttpResponse.json(committeeMember)),
+    http.get('*/api/me/notifications', () => HttpResponse.json([])),
     http.get('*/api/cycles/latest/kpis', () => HttpResponse.json(kpis)),
     http.get('*/api/cycles/current', () => HttpResponse.json(cycle)),
     http.get('*/api/dashboard/due-by-rank', () => HttpResponse.json(dueByRank)),
@@ -84,6 +92,19 @@ function expectMessageOnly(region: HTMLElement) {
 }
 
 describe('Committee dashboard detail sections', () => {
+  it('adds the notification sends and the inbox after the three lists, leaving the lists in place', async () => {
+    serve();
+    openPage();
+    const sends = await screen.findByRole('region', { name: 'Send notifications' });
+    const inbox = await screen.findByRole('region', { name: 'Your notifications' });
+    const lists = LISTS.map((name) => section(name));
+    for (const list of lists) {
+      expect(list.compareDocumentPosition(sends) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(sends.compareDocumentPosition(inbox) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(await screen.findByText('Dr. Raj Mehta')).toBeVisible();
+  });
+
   it('lists the faculty who are due or overdue for the current cycle, overdue first', async () => {
     serve();
     openPage();
