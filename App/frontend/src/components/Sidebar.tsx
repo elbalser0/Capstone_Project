@@ -17,10 +17,12 @@ const FACULTY_NAV: NavItem[] = [
   { to: '/faculty/evaluation', label: 'My evaluation', icon: ClipboardIcon },
   { to: '/faculty/requests', label: 'My requests', icon: SendIcon },
   { to: '/faculty/assignments', label: 'My assignments', icon: ClipboardIcon },
+  { to: '/faculty/survey', label: 'Survey', icon: ClipboardIcon },
 ];
 
 const COMMITTEE_NAV: NavItem[] = [
   { to: '/committee/dashboard', label: 'Dashboard', icon: GridIcon },
+  { to: '/committee/survey-responses', label: 'Survey responses', icon: ClipboardIcon },
 ];
 
 export const LANDING: Record<Mode, string> = { faculty: '/faculty/evaluation', committee: '/committee/dashboard' };

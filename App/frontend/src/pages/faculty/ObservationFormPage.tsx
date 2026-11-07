@@ -12,13 +12,16 @@ import { useObservationRecord } from './useObservationRecord';
 const ROW = 'lg:grid-cols-[minmax(0,1fr)_13rem_minmax(0,1.3fr)]';
 
 function Editor({ o, user }: { o: ObservationDetail; user: string }) {
-  const [initial] = useState(() => readDraft(user, o));
+  // Keep local edits tied to the revision that initialized this editor, not a later refetch.
+  const [base] = useState(o);
+  const stale = base.lastSavedDate !== o.lastSavedDate;
+  const [initial] = useState(() => readDraft(user, base));
   const [draft, setDraft] = useState<Draft>(initial.draft);
   const [message, setMessage] = useState(initial.warning);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const updateDraft = (next: Draft) => {
-    rememberDraft(user, o, next);
+    rememberDraft(user, base, next);
     setDraft(next);
     setDirty(true);
   };
@@ -30,6 +33,7 @@ function Editor({ o, user }: { o: ObservationDetail; user: string }) {
     <h2 className="text-base font-bold">Observation: {o.observee.displayName}, {o.section.label}, {whenShort(o)}</h2>
     <Banner tone="info">This is your copy of Observation Template v{o.templateVersion.versionNo}. Questions and rating ranges are set by the Assessment Committee.</Banner>
     <p className="text-sm text-gray-700">This form is a local draft on this device. It has not been submitted or signed.</p>
+    {stale && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">The server record has changed while this form was open. Your edits are preserved as a draft of the earlier revision. Go to signatures to review the saved server responses before submitting; these older local edits will not be included.</p>}
     {o.answers.length === 0 && <p role="status">No questions are available for this observation.</p>}
     {o.answers.length > 0 && <Card className="min-w-0">
       <div className={`hidden gap-6 border-b border-gray-200 bg-gray-50 px-5 py-3 text-xs font-bold text-gray-500 lg:grid ${ROW}`}>
@@ -65,8 +69,8 @@ function Editor({ o, user }: { o: ObservationDetail; user: string }) {
         {dirty && <p role="status">Unsaved changes on this page.</p>}
       </div>
       <Button variant="secondary" onClick={() => {
-        rememberDraft(user, o, draft);
-        const ok = saveDraft(user, o, draft);
+        rememberDraft(user, base, draft);
+        const ok = saveDraft(user, base, draft);
         setMessage(ok ? 'Draft saved on this device only. Not submitted or signed.' : 'Draft could not be saved on this device. Edits remain only while this page stays open.');
         if (ok) { setDirty(false); setSavedAt(formatClock(nowMs())); }
       }}>Save draft on this device</Button>

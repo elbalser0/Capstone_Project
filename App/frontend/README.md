@@ -23,6 +23,8 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 - `/faculty/observe/:observationId`: read-only assigned observation record, with browser-native printing of its saved contents.
 - `/faculty/observe/:observationId/form`: observer-only local draft editor using the assigned observation's question ranges.
 - `/faculty/observe/:observationId/sign`: observer review and signed-form submission; the observee signs from the saved record.
+- `/faculty/survey`: current-cycle survey submission as an observer or observee, with an optional trouble file.
+- `/committee/survey-responses`: AC-only current-cycle responses and authenticated trouble-file downloads.
 - `/committee/dashboard`: committee home with KPI results, a current-cycle summary, and lists of due or overdue faculty, unmatched faculty and outstanding observations.
 
 Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Faculty who are due can open sign-up from My evaluation. Current and past observations link to the read-only record. Other later-sprint pages are not included.
@@ -53,7 +55,7 @@ npm test
 
 Set `VITE_USE_MOCKS=false` in `.env` and restart Vite to send requests through the existing `/api` development proxy to `http://localhost:3000`. The Express package is at the repository root under `backend/`, not inside `App/`.
 
-The evaluation-status and sign-up write routes still return 501 on `main`, and several read routes are missing, so those pages show errors against the real backend.
+The evaluation-status, sign-up, candidate, outgoing-request, observation, survey and notification routes are implemented in the backend source. Check the running backend revision and configuration before diagnosing a missing route; source availability alone does not verify populated end-to-end behavior.
 
 The current screens request:
 
@@ -70,6 +72,9 @@ The current screens request:
 - `GET /api/dashboard/unmatched`
 - `GET /api/cycles/{cycleId}/due-professors`
 - `GET /api/cycles/{cycleId}/signups`
+- `POST /api/cycles/{cycleId}/survey-responses`
+- `GET /api/cycles/{cycleId}/survey-responses`
+- `GET /api/cycles/{cycleId}/survey-responses/{responseId}/trouble-file`
 
 Response types are in `src/api/types.ts`. Roles are `faculty` and `AC`; committee membership adds access without removing faculty access. Backend routes must enforce their own permissions. Client-side route guards are not server authorization.
 
@@ -84,6 +89,28 @@ The form saves a bounded draft in this browser, scoped to the signed-in account 
 ## Printable observation record
 
 The read-only observation route's **Print record** button opens the browser's native print flow. The printed view uses the saved `GET /api/observations/{observationId}` record only—not a local unsaved draft—and includes course/section/date, participant names, template version, saved question wording/ratings/comments, other comments, any non-completion reason, status, and both signature states/dates. The current backend returns `observerSignedDate` and `observeeSignedDate` as calendar dates (the exact time-of-day is not exposed), so the print view does not invent signature times. Navigation, screen-only labels, print controls, and signing/retry controls are omitted from paper output. Page size is selected in the browser print dialog; no PDF service or dependency is added.
+
+Source-checked field semantics (`backend/src/services/observation.service.ts`, base `e9eb96c`):
+
+| Field | Source behavior |
+| --- | --- |
+| `scheduledDate` | Saved observation date; a displayed time is inferred only from an unambiguous regular section meeting, not an actual attendance timestamp. |
+| `answers`, `otherComments` | Saved responses and the observation's assigned historical template questions, not the current live template or local draft. |
+| `observerSignedDate` | Set when the observer submits or resubmits; exposed as a calendar date. Typed-name confirmation is not stored. |
+| `observeeSignedDate` | Set when the observee signs the exact saved revision; completes and locks the record. Exposed as a calendar date. |
+| `lastSavedDate` | Revision token updated by observer submission and observee signing. Not a standalone signature timestamp. |
+
+Short and long controlled saved records were rendered in Chromium on Letter and A4: short output was one page on each; long output was six Letter pages and five A4 pages. Text checks covered saved content, signature states, absence of local drafts and hidden navigation/actions, and no blank trailing page. Representative first/middle/final pages were visually inspected. This verifies browser printing with controlled responses, not physical printers or live persistence. Backend-team confirmation and the approved populated observer-submit → observee-sign → refetch/print run remain required for #198/#162.
+
+On a mounted form refetch, local edits stay tied to the revision that initialized the editor. A visible warning explains that the server changed; saving does not relabel old answers as current. The signing screen uses the newer saved server responses and requires explicit acknowledgement before submitting them. Older draft edits are not automatically merged.
+
+## Survey and attachments
+
+The survey uses the current cycle's `feedback` phase for availability and displays the server-provided opening/closing dates. Participants explicitly choose observer or observee and Yes or No. The API remains authoritative for the survey window, participation and one-response-per-role constraint. Text fields allow 5,000 characters each. The optional trouble file is sent as multipart field `troubleFile`, at most 10 MiB. Pending submission disables the form; errors preserve its inputs, while successful submission clears the attachment and marks that role submitted for this mounted form. A reload may submit again, in which case the server returns `ALREADY_SUBMITTED` rather than saving a duplicate.
+
+The AC response page confirms the user's role before fetching responses and provides loading, empty, error and retry states. File downloads use the cycle/response-scoped endpoint with the current bearer token, not a public storage URL or the opaque `troubleFileKey`. Download errors remain visible without discarding the response list. Response text preserves line breaks. These screens use the existing UI language; exact Figma fidelity remains unverified pending access to the survey/response frames.
+
+Survey tests and isolated Chromium checks cover submission with and without files and authenticated binary download. They do not prove Firebase authorization, server storage or PostgreSQL persistence. Existing demo fixtures are not a substitute for an approved feedback-phase cycle. Coordinate the populated connected run with the backend team before closing integration work. Notification send controls are a separate frontend workstream; due reminders already queue email in the existing backend, but `{ sent }` counts notifications, not confirmed email deliveries. Admin/import screens are outside this workstream.
 
 The evaluation view distinguishes loading, failed requests, empty history, and current-cycle sign-up details. Signature labels use both the observation lifecycle and the available signature dates. When only a sign-up summary is available, the page does not guess whether the record is signed. Observation history is horizontally scrollable on narrower screens; its available record links open the read-only route.
 
@@ -145,4 +172,4 @@ It sends `POST /api/signups/{signupId}/requests` with the selected `observerNeti
 Not settled with the backend yet:
 
 - The candidates response cannot tell "matching has not run" from "matching found no eligible observers", so after the deadline both show the same neutral message.
-- `POST /api/signups/{signupId}/requests` is implemented in the backend. This page still needs the backend candidate and outgoing-request reads before it can use the live API end to end.
+- Candidate and outgoing-request reads and the request write are implemented in the backend source. Populated connected-flow acceptance still needs the intended backend revision, approved fictional accounts and test data.
