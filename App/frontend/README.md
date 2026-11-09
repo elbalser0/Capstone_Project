@@ -132,16 +132,21 @@ A list, a count or the KPI cards that fail to load offer Try again, which repeat
 
 The KPI cards, the summary counts and the Export CSV row follow the width of the content column (not the window, since the sidebar takes part of it): four KPI cards per row, then two, then one. Each list keeps the Figma column order, status last. A table that is too wide for the column scrolls sideways inside its section, with a fade at the edge while columns are out of view, and its status moves next to the name so it stays in view. Loading, empty and failed lists show their message in a plain box instead. Lists show 7 rows a page, as in the A3 and A4 tables; the pager keeps at most seven page slots (the first, the last and the nearby pages), so its arrows stay put.
 
-Not settled with the backend yet:
-
-- The sign-ups response has no signature dates, so the outstanding list cannot tell "waiting for the observee to sign" apart from Scheduled.
-- The due list and the "Due for evaluation" count come from the due roster captured when the cycle started (`eval_due`), and nothing updates it during the cycle. Question for the backend team: should a professor whose observation is completed and signed this cycle stay listed as due or overdue? The frontend shows the roster as the API returns it.
-
 The mock API differs from the backend in a few places the dashboard reads (the mock itself is unchanged here):
 
 - Unmatched: the mock never returns `insufficient_observers` and ignores resolved alerts.
 - Latest KPIs: before any cycle has started, the mock still returns a cycle that has results; the backend answers 404.
 - Observations: the mock marks an observation completed when the observer submits it; the backend does so only when the observee signs. In demo mode the "Signed up but not observed" count and the outstanding list can therefore disagree after a submission.
+
+### Open dashboard rule questions (#199)
+
+The backend team has not answered these yet, so the lists follow the API as it is today and nothing is guessed:
+
+1. Does "Unmatched faculty" mean only sign-ups with an open alert, or every sign-up that has no observer yet? Today the list shows only sign-ups with no observation that have an open `no_observer` or `insufficient_observers` alert, or (`no_acceptance`) requests sent and no usable observer left, as `GET /api/dashboard/unmatched` returns them. A sign-up with pending requests and no alert is not on it; it is on the outstanding list as "No observer yet".
+2. Does a professor whose observation is completed and signed this cycle stay on the due roster? Today the due list and the "Due for evaluation" count show the roster captured when the cycle started (`eval_due`), which nothing updates during the cycle, so that professor stays listed as due or overdue.
+3. Can the sign-ups summary (`GET /api/cycles/{cycleId}/signups`) include `observerSignedDate` and `observeeSignedDate`? Without them the outstanding list cannot tell "waiting for the observee to sign" apart from Scheduled, so it shows Scheduled for both.
+
+When an answer arrives, the list's filter, its description in `src/lib/statusTerms.ts` and its tests change together.
 
 ## Mock data
 
