@@ -112,14 +112,18 @@ describe('manual candidates against the database', { skip }, () => {
   test('rejects an observer who already has three observations in the cycle', async () => {
     await sql("INSERT INTO template_version (version_no, status, created_by, published_date) VALUES (1, 'live', 'ac', now())");
     for (const [index, observee] of ['other1', 'other2', 'other3'].entries()) {
-      await sql('INSERT INTO sign_up (cycle_id, observee_netid, section_id) VALUES (1, $1, 1)', [observee]);
-      const id = index + 2;
+      const section = await sql(`INSERT INTO section (course_id, term_id, section_num, instructor_id, class_mode)
+                                 VALUES (1, 1, $1, $2, 'in-person') RETURNING section_id`,
+      [String(index + 2).padStart(3, '0'), observee]);
+      const signup = await sql(`INSERT INTO sign_up (cycle_id, observee_netid, section_id)
+                                 VALUES (1, $1, $2) RETURNING signup_id`, [observee, section.rows[0].section_id]);
+      const id = signup.rows[0].signup_id;
       await sql('INSERT INTO observer_match (signup_id, observer_netid) VALUES ($1, $2)', [id, 'observer']);
       await sql(`INSERT INTO observation_request (signup_id, observer_netid, status, responded_date)
                  VALUES ($1, 'observer', 'accepted', now())`, [id]);
-      await sql('INSERT INTO proposed_date (signup_id, date) VALUES ($1, CURRENT_DATE + $2)', [id, index + 3]);
+      await sql('INSERT INTO proposed_date (signup_id, date) VALUES ($1, CURRENT_DATE + $2::int)', [id, index + 3]);
       await sql(`INSERT INTO observation (signup_id, observer_netid, version_id, scheduled_date)
-                 SELECT $1, 'observer', version_id, CURRENT_DATE + $2 FROM template_version`, [id, index + 3]);
+                 SELECT $1, 'observer', version_id, CURRENT_DATE + $2::int FROM template_version`, [id, index + 3]);
     }
     await assert.rejects(addManualCandidate(signupId, 'observer'), { status: 409, code: 'LIMIT_REACHED' });
   });
