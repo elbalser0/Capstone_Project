@@ -30,5 +30,6 @@ describe('import CSV reading', () => {
     assert.throws(() => readTable('meeting_time', 'section_id,day_of_week,start_time,end_time,room\n1,monday,10:00\n'),
       { message: 'meeting_time.csv line 2: expected 5 values, found 3.' });
     assert.throws(() => readTable('section', ''), { message: 'section.csv: the file is empty.' });
+    assert.throws(() => readTable('term', 'term_id,season,year,start_date,end_date,Season\n'), { message: 'term.csv: column season is listed twice.' });
   });
 });

@@ -66,6 +66,8 @@ export function readTable(table: ImportTable, text: string): Row[] {
   const [header, ...rows] = parseCsv(text);
   if (!header) throw badFile(table, 'the file is empty.');
   const names = header.cells.map((name) => name.trim().toLowerCase());
+  const repeated = names.filter((name, i) => names.indexOf(name) !== i);
+  if (repeated.length) throw badFile(table, `column ${[...new Set(repeated)].join(', ')} is listed twice.`);
   const missing = COLUMNS[table].filter((name) => !names.includes(name));
   if (missing.length) throw badFile(table, `missing column ${missing.join(', ')}.`);
   const extra = names.filter((name) => !COLUMNS[table].includes(name));
