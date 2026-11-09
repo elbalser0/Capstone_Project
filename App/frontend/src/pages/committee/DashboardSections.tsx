@@ -7,6 +7,7 @@ import type { AlertType, CourseSection, DueProfessor, ObservationStatus, Signup,
 import { AlertIcon } from '../../components/icons';
 import { Banner, Button, Cell, DueTag, EmptyRow, ErrorNote, Pagination, Row, Table, Tag, linkClass, usePages, type TagTone } from '../../components/ui';
 import { RANK_SHORT, dayLetters, formatDate, formatTime } from '../../lib/format';
+import { DUE_OR_OVERDUE_TEXT, OUTSTANDING_TEXT, UNMATCHED_TEXT } from '../../lib/statusTerms';
 
 // A1 detail lists under the executive summary, in the table style of A3, A4 and A6.
 // Each list has its own request, so one failing or loading does not hold back the others.
@@ -96,6 +97,8 @@ interface Column<T> {
 
 interface ListProps<T> {
   title: string;
+  /** One line under the heading that says who is on the list. Shown in every state. */
+  description: string;
   /** In Figma order, status last. */
   columns: Column<T>[];
   /** The columns' minimums plus the row padding; below it the table scrolls sideways. */
@@ -113,8 +116,9 @@ interface ListProps<T> {
   rowKey: (row: T) => string;
 }
 
-function DetailList<T>({ title, columns, minWidth, rows, error, requests, noCycle = false, loading, empty, rowKey }: ListProps<T>) {
+function DetailList<T>({ title, description, columns, minWidth, rows, error, requests, noCycle = false, loading, empty, rowKey }: ListProps<T>) {
   const headingId = useId();
+  const descriptionId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const [scroller, side] = useSideScroll();
   const pager = usePages(rows ?? [], PAGE_SIZE);
@@ -137,10 +141,11 @@ function DetailList<T>({ title, columns, minWidth, rows, error, requests, noCycl
   const stale = !noCycle && Boolean(error) && rows !== undefined;
 
   return (
-    <section aria-labelledby={headingId}>
+    <section aria-labelledby={headingId} aria-describedby={descriptionId}>
       <h2 id={headingId} ref={heading} tabIndex={-1} className={`mt-[30px] mb-3 w-fit text-base font-bold text-gray-900 ${headingFocus}`}>
         {title}{rows && !message ? ` (${rows.length})` : ''}
       </h2>
+      <p id={descriptionId} className="-mt-1.5 mb-3 text-sm text-gray-500">{description}</p>
       {stale && (
         <div key={failureKey(requests)} className="mb-3">
           <Banner tone="danger" action={<TryAgain queries={requests} focus={heading} />}>Couldn't refresh this list: {errorText(error)}</Banner>
@@ -190,6 +195,7 @@ function DueFaculty() {
   return (
     <DetailList<DueProfessor>
       title="Due or overdue for evaluation"
+      description={DUE_OR_OVERDUE_TEXT}
       columns={[
         { head: 'Name', width: 'minmax(130px,2fr)', cell: (r) => <Cell className="font-bold">{r.professor.displayName}</Cell> },
         { head: 'Rank', width: 'minmax(80px,1fr)', cell: (r) => <Cell>{RANK_SHORT[r.professor.rank]}</Cell> },
@@ -221,6 +227,7 @@ function Unmatched() {
   return (
     <DetailList<UnmatchedFaculty['items'][number]>
       title="Unmatched faculty"
+      description={UNMATCHED_TEXT}
       columns={[
         { head: 'Observee', width: 'minmax(130px,2fr)', cell: (r) => <Cell className="font-bold">{r.observee.displayName}</Cell> },
         { head: 'Rank', width: 'minmax(80px,1fr)', cell: (r) => <Cell>{RANK_SHORT[r.observee.rank]}</Cell> },
@@ -256,6 +263,7 @@ function Outstanding() {
   return (
     <DetailList<Signup>
       title="Outstanding observations"
+      description={OUTSTANDING_TEXT}
       columns={[
         { head: 'Observee', width: 'minmax(120px,2fr)', cell: (s) => <Cell className="font-bold">{s.observee.displayName}</Cell> },
         { head: 'Rank', width: 'minmax(80px,1fr)', cell: (s) => <Cell>{RANK_SHORT[s.observee.rank]}</Cell> },
