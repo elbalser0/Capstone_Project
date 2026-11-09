@@ -26,6 +26,7 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 - `/faculty/survey`: current-cycle survey submission as an observer or observee, with an optional trouble file.
 - `/committee/survey-responses`: AC-only current-cycle responses and authenticated trouble-file downloads.
 - `/committee/dashboard`: committee home with KPI results, a current-cycle summary, and lists of due or overdue faculty, unmatched faculty and outstanding observations.
+- `/guide`: Process guide, linked from the sidebar in both views: the current cycle's deadlines, the steps of a semester, and who is due.
 
 Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Faculty who are due can open sign-up from My evaluation. Current and past observations link to the read-only record. Other later-sprint pages are not included.
 

@@ -2,7 +2,7 @@ import type { ComponentType, SVGProps } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useMe } from '../api/hooks/shared';
 import { useAuth } from '../auth/AuthProvider';
-import { ClipboardIcon, GridIcon, LogoutIcon, SendIcon } from './icons';
+import { ClipboardIcon, GridIcon, HelpIcon, LogoutIcon, SendIcon } from './icons';
 import { RoleToggle, type Mode } from './RoleToggle';
 import { Logo } from './ui';
 
@@ -79,6 +79,13 @@ export function Sidebar({ mode, activeNav }: { mode: Mode; activeNav?: string })
       </nav>
 
       <div className="mx-4 mt-auto border-t border-gray-200 pt-[15px] pb-[17px]">
+        <NavLink
+          to="/guide"
+          className={({ isActive }) => `mb-[19px] flex items-center gap-[11px] pl-[13px] hover:text-gray-900 focus-visible:outline-2 focus-visible:outline-brand ${isActive ? 'font-bold text-gray-900' : 'text-gray-700'}`}
+        >
+          <span className="flex w-4 justify-center text-gray-600"><HelpIcon /></span>
+          Process guide
+        </NavLink>
         <button
           type="button"
           onClick={async () => {

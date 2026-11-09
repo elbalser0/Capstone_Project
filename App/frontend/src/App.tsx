@@ -11,6 +11,7 @@ import { ObservationFormPage } from './pages/faculty/ObservationFormPage';
 import { ObservationSignPage } from './pages/faculty/ObservationSignPage';
 import { SurveyPage } from './pages/faculty/SurveyPage';
 import { SurveyResponsesPage } from './pages/committee/SurveyResponsesPage';
+import { ProcessGuidePage } from './pages/ProcessGuidePage';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -44,6 +45,7 @@ export const router = createBrowserRouter([
       { path: '/faculty/observe/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/faculty/assignments' } satisfies RouteHandle },
       { path: '/faculty/observe/:observationId/form', element: <ObservationFormPage />, handle: { title: 'Observation form', nav: '/faculty/assignments' } satisfies RouteHandle },
       { path: '/faculty/observe/:observationId/sign', element: <ObservationSignPage />, handle: { title: 'Review and sign observation', nav: '/faculty/assignments' } satisfies RouteHandle },
+      { path: '/guide', element: <ProcessGuidePage />, handle: { title: 'Process guide' } satisfies RouteHandle },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
