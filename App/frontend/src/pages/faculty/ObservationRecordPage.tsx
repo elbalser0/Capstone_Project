@@ -36,7 +36,7 @@ export function ObservationRecordPage() {
   const observer = Boolean(o && o.observer.netid === viewer);
   const observee = Boolean(o && o.observee.netid === viewer);
   // The sidebar item that led here: assignments for the observer, My evaluation for the observee, neither for others.
-  useActiveNav(viewer && o ? (observer ? '/faculty/assignments' : observee ? '/faculty/evaluation' : '') : null);
+  useActiveNav(viewer && o ? (observer ? '/faculty/observe' : observee ? '/faculty/evaluation' : '') : null);
   if (profile.error) return <PageError error={profile.error} />;
   if (record.error && (!record.data || staleRefresh !== 'failed')) return <PageError error={record.error} />;
   if (!profile.data || !o) return <p role="status" className="pt-8">Loading observation record…</p>;
@@ -60,7 +60,7 @@ export function ObservationRecordPage() {
   };
   return (
     <div className="observation-record-page min-w-0 space-y-5 pt-8 text-gray-900 [overflow-wrap:anywhere]">
-      <Link to={observer ? '/faculty/assignments' : '/faculty/evaluation'} className={`${linkClass} screen-only`}>Back to {observer ? 'assignments' : 'evaluation'}</Link>
+      <Link to={observer ? '/faculty/observe/confirmations' : '/faculty/evaluation'} className={`${linkClass} screen-only`}>Back to {observer ? 'confirmations' : 'evaluation'}</Link>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <h2 className="text-base font-bold">{o.section.label} {o.section.title}, {whenLong(o)}</h2>

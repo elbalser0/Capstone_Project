@@ -92,27 +92,27 @@ it('leaves the time out of the header when the section meets twice that weekday'
 });
 it.each([
   ['the observee', faculty.netid, 'My evaluation'],
-  ['the observer', observer.netid, 'My assignments'],
+  ['the observer', observer.netid, 'Observe'],
 ])('highlights the sidebar item that led to the record for %s', async (_who, netid, item) => {
   sessionStorage.setItem('assessment-helper.session', JSON.stringify({ email: 'test@example.edu', token: 'demo:test' }));
   serveRecord({ ...detail, observer }, netid);
-  server.use(http.get('*/api/cycles/current', () => HttpResponse.json(cycle)));
+  server.use(http.get('*/api/cycles/current', () => HttpResponse.json(cycle)), http.get('*/api/me/requests/incoming', () => HttpResponse.json([])));
   renderRoutes([{ element: <AuthProvider mode="demo"><AppShell /></AuthProvider>, children: [
-    { path: '/faculty/observe/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/faculty/assignments' } }] }], '/faculty/observe/30');
+    { path: '/faculty/observe/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/faculty/observe' } }] }], '/faculty/observe/30');
   await screen.findByText('Read only');
   expect(screen.getByRole('link', { name: item })).toHaveClass('font-bold');
-  const other = item === 'My evaluation' ? 'My assignments' : 'My evaluation';
+  const other = item === 'My evaluation' ? 'Observe' : 'My evaluation';
   expect(screen.getByRole('link', { name: other })).not.toHaveClass('font-bold');
   sessionStorage.removeItem('assessment-helper.session');
 });
 it('highlights no sidebar item for a viewer who is neither participant', async () => {
   sessionStorage.setItem('assessment-helper.session', JSON.stringify({ email: 'test@example.edu', token: 'demo:test' }));
   serveRecord(detail, 'zz999');
-  server.use(http.get('*/api/cycles/current', () => HttpResponse.json(cycle)));
+  server.use(http.get('*/api/cycles/current', () => HttpResponse.json(cycle)), http.get('*/api/me/requests/incoming', () => HttpResponse.json([])));
   renderRoutes([{ element: <AuthProvider mode="demo"><AppShell /></AuthProvider>, children: [
-    { path: '/faculty/observe/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/faculty/assignments' } }] }], '/faculty/observe/30');
+    { path: '/faculty/observe/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/faculty/observe' } }] }], '/faculty/observe/30');
   await screen.findByText('Read only');
-  expect(screen.getByRole('link', { name: 'My assignments' })).not.toHaveClass('font-bold');
+  expect(screen.getByRole('link', { name: 'Observe' })).not.toHaveClass('font-bold');
   expect(screen.getByRole('link', { name: 'My evaluation' })).not.toHaveClass('font-bold');
   sessionStorage.removeItem('assessment-helper.session');
 });
