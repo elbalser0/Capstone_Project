@@ -1,7 +1,7 @@
-import { Readable, Transform } from 'node:stream';
 import { Router, type Request } from 'express';
 import { requireAC } from '../middleware/auth.middleware.js';
 import { ApiError } from '../middleware/error.middleware.js';
+import { readMultipart } from './multipart.js';
 import { getTroubleFile, listSurveyResponses, submitSurvey, type SurveyInput, type TroubleFile } from '../services/survey.service.js';
 
 // Mounted at /api/cycles/:cycleId/survey-responses (after requireLogin)
@@ -44,38 +44,9 @@ async function readBody(req: Request): Promise<{ fields: Record<string, unknown>
     }
     return { fields: req.body as Record<string, unknown> };
   }
-  const tooLarge = () => new ApiError(413, 'TOO_LARGE', 'The survey is too large.');
-  if (Number(req.headers['content-length'] ?? 0) > MAX_FORM_BYTES) throw tooLarge();
-  const headers = new Headers();
-  for (const [name, value] of Object.entries(req.headers)) {
-    if (typeof value === 'string') headers.set(name, value);
-  }
-  // Count bytes as they arrive too: a chunked request has no Content-Length.
-  let received = 0;
-  let overLimit = false;
-  const limited = new Transform({
-    transform(chunk: Buffer, _encoding, done) {
-      received += chunk.length;
-      if (received > MAX_FORM_BYTES) {
-        overLimit = true;
-        req.unpipe(limited);
-        req.resume(); // drain the rest so the client can finish sending and read the 413
-        done(tooLarge());
-        return;
-      }
-      done(null, chunk);
-    },
-  });
-  req.on('error', (error) => limited.destroy(error));
-  req.pipe(limited);
-  let form: FormData;
-  try {
-    form = await new Request('http://survey.local/', {
-      method: 'POST', headers, body: Readable.toWeb(limited) as ReadableStream, duplex: 'half',
-    } as RequestInit).formData();
-  } catch {
-    throw overLimit ? tooLarge() : invalid('The form data could not be read.');
-  }
+  const form = await readMultipart(req, MAX_FORM_BYTES,
+    () => new ApiError(413, 'TOO_LARGE', 'The survey is too large.'),
+    () => invalid('The form data could not be read.'));
   const fields = Object.fromEntries([...form.entries()].filter(([, value]) => typeof value === 'string'));
   const upload = form.get('troubleFile');
   if (!(upload instanceof Blob) || upload.size === 0) return { fields };
