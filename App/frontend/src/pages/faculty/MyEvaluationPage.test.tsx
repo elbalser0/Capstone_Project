@@ -1,5 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
@@ -175,5 +176,46 @@ describe('My evaluation page', () => {
     const row = within(table).getByRole('row', { name: /Dr\. Elena Ruiz/ });
     expect(within(row).getAllByRole('cell')).toHaveLength(5);
     expect(within(row).getByText('Dr. Elena Ruiz')).toBeInTheDocument();
+  });
+  it.each([
+    ['DUE', 'Due: a peer observation is needed this semester.'],
+    ['OVERDUE', 'Overdue: the observation was due in an earlier semester and is still not done.'],
+    ['NOT_DUE', 'Not due: no observation is needed this semester.'],
+  ] as const)('explains the %s status in words', async (dueStatus, text) => {
+    serve({ status: { ...evaluationStatus, status: dueStatus, canSignUp: false }, observations: [], currentSignup: null });
+    openPage();
+    expect(await screen.findByText(text)).toBeVisible();
+  });
+
+  describe('notifications', () => {
+    const notice = (id: string, subject: string) => ({ notificationId: id, notifType: 'matches_ready', subject, sentDate: '2026-09-18T14:14:00Z', sentBy: null });
+
+    it('shows loading, then the empty state', async () => {
+      serve();
+      openPage();
+      expect(await screen.findByText('Loading your notifications…')).toBeVisible();
+      expect(await screen.findByText('No notifications yet.')).toBeVisible();
+    });
+    it('lists the notifications sent to the professor', async () => {
+      serve();
+      server.use(http.get('*/api/me/notifications', () => HttpResponse.json([notice('1', 'Your observer list is ready'), notice('2', 'Survey is open')])));
+      openPage();
+      expect(await screen.findByText('Your observer list is ready')).toBeVisible();
+      expect(screen.getByText('Survey is open')).toBeVisible();
+      expect(screen.getByRole('heading', { name: 'Your notifications' })).toBeVisible();
+    });
+    it('shows an error with Try again without hiding the rest of the page', async () => {
+      serve();
+      let attempts = 0;
+      server.use(http.get('*/api/me/notifications', () => (++attempts === 1
+        ? HttpResponse.json({ error: { code: 'DOWN', message: 'Inbox unavailable' } }, { status: 503 })
+        : HttpResponse.json([notice('1', 'Back again')]))));
+      const user = userEvent.setup();
+      openPage();
+      expect(await screen.findByText(/Inbox unavailable/)).toHaveAttribute('role', 'alert');
+      expect(screen.getByRole('heading', { name: 'My observations' })).toBeVisible();
+      await user.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(await screen.findByText('Back again')).toBeVisible();
+    });
   });
 });

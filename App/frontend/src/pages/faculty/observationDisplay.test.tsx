@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { course, faculty, observer } from '../../test/fixtures';
-import { meetingTime, recordStatus, signedOn, whenLong, whenShort } from './observationDisplay';
+import { OBSERVEE_LOCK_NOTE, meetingTime, observeeWaitsForObserver, recordStatus, signedOn, whenLong, whenShort } from './observationDisplay';
 
 const party = { status: 'completed' as const, observer, observee: faculty, observerSignedDate: null, observeeSignedDate: null };
 
@@ -27,4 +27,12 @@ it('words the status from the lifecycle and the returned signature dates', () =>
 it('describes signatures by date only', () => {
   expect(signedOn('2026-09-22')).toBe('signed Sep 22, 2026');
   expect(signedOn(null)).toBe('Not signed yet');
+});
+it('locks the observee only until the observer signs, and only while the observation can still happen', () => {
+  expect(OBSERVEE_LOCK_NOTE).toBe('Locked until your observer submits and signs the form. You can review and sign after that.');
+  expect(observeeWaitsForObserver(party, faculty.netid)).toBe(true);
+  expect(observeeWaitsForObserver(party, observer.netid)).toBe(false);
+  expect(observeeWaitsForObserver({ ...party, observerSignedDate: '2026-09-22' }, faculty.netid)).toBe(false);
+  expect(observeeWaitsForObserver({ ...party, status: 'not_completed' }, faculty.netid)).toBe(false);
+  expect(observeeWaitsForObserver({ ...party, observerSignedDate: '2026-09-22', observeeSignedDate: '2026-09-23' }, faculty.netid)).toBe(false);
 });

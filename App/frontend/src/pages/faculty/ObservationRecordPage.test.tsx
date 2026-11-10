@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import userEvent from '@testing-library/user-event';
-import { screen } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
@@ -209,4 +209,260 @@ it('does not offer observee signing to the observer', async () => {
   openRecord();
   await screen.findByText('Read only');
   expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();
+});
+
+const lockNote = /Locked until your observer submits and signs the form/;
+const reportLink = () => screen.queryByRole('button', { name: 'The observation could not be done' });
+const uploadButton = () => screen.queryByRole('button', { name: 'Upload a file about the observation' });
+const fileInput = () => screen.getByLabelText('File about the observation');
+const apiError = (status: number, code: string, message: string) => HttpResponse.json({ error: { code, message } }, { status });
+
+it('tells the observee why the record is locked and offers the report, with no Sign button', async () => {
+  serveRecord(); openRecord();
+  expect(await screen.findByText(lockNote)).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Something went wrong?' })).toBeVisible();
+  expect(reportLink()).toBeVisible();
+  expect(uploadButton()).toBeVisible();
+});
+it('removes the lock note and the report once the observer has signed, and shows Sign', async () => {
+  serveRecord({ ...detail, observerSignedDate: '2026-09-22' }); openRecord();
+  expect(await screen.findByRole('button', { name: 'Sign' })).toBeVisible();
+  expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
+  expect(reportLink()).not.toBeInTheDocument();
+  expect(uploadButton()).toBeVisible();
+});
+it('shows the observer no lock note and no report, only the upload', async () => {
+  serveRecord({ ...detail, observer }, observer.netid); openRecord();
+  await screen.findByText('Read only');
+  expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
+  expect(reportLink()).not.toBeInTheDocument();
+  expect(uploadButton()).toBeVisible();
+});
+it('shows no problem card and no lock note on a locked record', async () => {
+  serveRecord({ ...detail, status: 'completed', observerSignedDate: '2026-09-22', observeeSignedDate: '2026-09-23' }); openRecord();
+  await screen.findByText('Read only');
+  expect(screen.queryByRole('heading', { name: 'Something went wrong?' })).not.toBeInTheDocument();
+  expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
+});
+it('shows no lock note and no report when the observation did not happen, but still allows a file', async () => {
+  serveRecord({ ...detail, status: 'not_completed', reasonNotCompleted: 'Class cancelled' }); openRecord();
+  await screen.findByText('Read only');
+  expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
+  expect(reportLink()).not.toBeInTheDocument();
+  expect(uploadButton()).toBeVisible();
+});
+it('shows nothing to a viewer who is neither participant', async () => {
+  serveRecord(detail, 'zz999'); openRecord();
+  await screen.findByText('Read only');
+  expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Something went wrong?' })).not.toBeInTheDocument();
+});
+
+it('uploads a file as multipart field "file" and shows its name from the returned record', async () => {
+  const bodies: string[] = [];
+  serveRecord();
+  server.use(http.post('*/api/observations/30/issue-file', async ({ request }) => {
+    expect(request.headers.get('content-type')).toContain('multipart/form-data');
+    bodies.push(await request.text());
+    return HttpResponse.json({ ...detail, issueFileName: 'notes.txt' });
+  }));
+  const user = userEvent.setup();
+  openRecord();
+  await screen.findByText(lockNote);
+  await user.upload(fileInput(), new File(['what happened'], 'notes.txt', { type: 'text/plain' }));
+  expect(await screen.findByText('Uploaded: notes.txt')).toBeVisible();
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).toContain('name="file"');
+  expect(bodies[0]).toContain('what happened');
+});
+it('sends nothing for a file over 10 MB and says so', async () => {
+  const upload = vi.fn();
+  serveRecord();
+  server.use(http.post('*/api/observations/30/issue-file', () => { upload(); return HttpResponse.json(detail); }));
+  const user = userEvent.setup();
+  openRecord();
+  await screen.findByText(lockNote);
+  await user.upload(fileInput(), new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'big.bin'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Files can be up to 10 MB.');
+  expect(upload).not.toHaveBeenCalled();
+});
+it('accepts a file of exactly 10 MB', async () => {
+  const upload = vi.fn();
+  serveRecord();
+  server.use(http.post('*/api/observations/30/issue-file', () => { upload(); return HttpResponse.json({ ...detail, issueFileName: 'edge.bin' }); }));
+  const user = userEvent.setup();
+  openRecord();
+  await screen.findByText(lockNote);
+  await user.upload(fileInput(), new File([new Uint8Array(10 * 1024 * 1024)], 'edge.bin'));
+  expect(await screen.findByText('Uploaded: edge.bin')).toBeVisible();
+  expect(upload).toHaveBeenCalledOnce();
+});
+it('shows the server message when the upload is refused', async () => {
+  serveRecord();
+  server.use(http.post('*/api/observations/30/issue-file', () => apiError(400, 'FILE_REQUIRED', 'Choose a file to upload.')));
+  const user = userEvent.setup();
+  openRecord();
+  await screen.findByText(lockNote);
+  await user.upload(fileInput(), new File(['x'], 'a.txt'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Choose a file to upload.');
+  expect(screen.queryByText(/not available yet/)).not.toBeInTheDocument();
+});
+it('says uploading is not available yet when the backend has no such route', async () => {
+  serveRecord();
+  server.use(http.post('*/api/observations/30/issue-file', () => apiError(404, 'NOT_FOUND', 'The requested endpoint does not exist.')));
+  const user = userEvent.setup();
+  openRecord();
+  await screen.findByText(lockNote);
+  await user.upload(fileInput(), new File(['x'], 'a.txt'));
+  expect(await screen.findByText('Uploading a file is not available yet. Nothing was uploaded.')).toBeVisible();
+  expect(screen.queryByText('The requested endpoint does not exist.')).not.toBeInTheDocument();
+  expect(screen.getByText('Read only')).toBeVisible();
+});
+it('shows another 404 from the upload as an ordinary error', async () => {
+  serveRecord();
+  server.use(http.post('*/api/observations/30/issue-file', () => apiError(404, 'NOT_FOUND', 'Observation not found.')));
+  const user = userEvent.setup();
+  openRecord();
+  await screen.findByText(lockNote);
+  await user.upload(fileInput(), new File(['x'], 'a.txt'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Observation not found.');
+  expect(screen.queryByText(/not available yet/)).not.toBeInTheDocument();
+});
+it('disables the upload link while a file is being sent', async () => {
+  const upload = vi.fn();
+  let finish!: (response: Response) => void;
+  serveRecord();
+  server.use(http.post('*/api/observations/30/issue-file', () => { upload(); return new Promise<Response>((done) => { finish = done; }); }));
+  const user = userEvent.setup();
+  openRecord();
+  await screen.findByText(lockNote);
+  await user.upload(fileInput(), new File(['x'], 'a.txt'));
+  await waitFor(() => expect(uploadButton()).toBeDisabled());
+  await user.upload(fileInput(), new File(['y'], 'b.txt'));
+  expect(upload).toHaveBeenCalledOnce();
+  finish(HttpResponse.json({ ...detail, issueFileName: 'a.txt' }));
+  expect(await screen.findByText('Uploaded: a.txt')).toBeVisible();
+});
+
+it('blocks an empty reason, then reports with exactly { reason } and shows the record as not done', async () => {
+  let current: ObservationDetail = detail;
+  const bodies: unknown[] = [];
+  serveRecord();
+  server.use(
+    http.get('*/api/observations/30', () => HttpResponse.json(current)),
+    http.post('*/api/observations/30/report-missed', async ({ request }) => {
+      bodies.push(await request.json());
+      current = { ...detail, status: 'not_completed', reasonNotCompleted: 'The class was cancelled' };
+      return HttpResponse.json(current);
+    }),
+  );
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'The observation could not be done' }));
+  const dialog = await screen.findByRole('dialog', { name: 'The observation could not be done' });
+  expect(within(dialog).getByRole('button', { name: 'Report' })).toBeDisabled();
+  await user.type(within(dialog).getByLabelText('What happened?'), '   ');
+  expect(within(dialog).getByRole('button', { name: 'Report' })).toBeDisabled();
+  await user.type(within(dialog).getByLabelText('What happened?'), 'The class was cancelled');
+  await user.click(within(dialog).getByRole('button', { name: 'Report' }));
+  expect(await screen.findByText('Observation did not happen')).toBeVisible();
+  expect(bodies).toEqual([{ reason: 'The class was cancelled' }]);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(reportLink()).not.toBeInTheDocument();
+  expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
+});
+it.each([
+  [403, 'FORBIDDEN', 'Only the observee can report this.'],
+  [409, 'NOT_SCHEDULED', 'This observation is not scheduled.'],
+  [409, 'FORM_SUBMITTED', 'The observer already submitted the form.'],
+  [400, 'REASON_REQUIRED', 'Enter a reason.'],
+])('shows the %s %s reply and keeps the typed reason', async (status, code, message) => {
+  serveRecord();
+  server.use(http.post('*/api/observations/30/report-missed', () => apiError(status, code, message)));
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'The observation could not be done' }));
+  const dialog = await screen.findByRole('dialog');
+  await user.type(within(dialog).getByLabelText('What happened?'), 'Room was locked');
+  await user.click(within(dialog).getByRole('button', { name: 'Report' }));
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent(message);
+  expect(within(dialog).getByLabelText('What happened?')).toHaveValue('Room was locked');
+});
+it('sends the report once under repeated clicks', async () => {
+  const report = vi.fn();
+  serveRecord();
+  server.use(http.post('*/api/observations/30/report-missed', () => { report(); return new Promise<never>(() => {}); }));
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'The observation could not be done' }));
+  const dialog = await screen.findByRole('dialog');
+  await user.type(within(dialog).getByLabelText('What happened?'), 'No show');
+  const send = within(dialog).getByRole('button', { name: 'Report' });
+  await user.dblClick(send);
+  await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Reporting…' })).toBeDisabled());
+  expect(report).toHaveBeenCalledOnce();
+});
+it('closes the report dialog without sending anything on Cancel', async () => {
+  const report = vi.fn();
+  serveRecord();
+  server.use(http.post('*/api/observations/30/report-missed', () => { report(); return HttpResponse.json(detail); }));
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'The observation could not be done' }));
+  await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(report).not.toHaveBeenCalled();
+});
+
+it('clears the size message once a valid file is chosen', async () => {
+  serveRecord();
+  server.use(http.post('*/api/observations/30/issue-file', () => HttpResponse.json({ ...detail, issueFileName: 'ok.txt' })));
+  const user = userEvent.setup();
+  openRecord();
+  await screen.findByText(lockNote);
+  await user.upload(fileInput(), new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'big.bin'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Files can be up to 10 MB.');
+  await user.upload(fileInput(), new File(['x'], 'ok.txt'));
+  expect(await screen.findByText('Uploaded: ok.txt')).toBeVisible();
+  expect(screen.queryByText('Files can be up to 10 MB.')).not.toBeInTheDocument();
+});
+it('closes the report dialog on Escape without sending anything', async () => {
+  const report = vi.fn();
+  serveRecord();
+  server.use(http.post('*/api/observations/30/report-missed', () => { report(); return HttpResponse.json(detail); }));
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'The observation could not be done' }));
+  await screen.findByRole('dialog');
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(report).not.toHaveBeenCalled();
+});
+it('offers no report on a completed record the observer has signed', async () => {
+  serveRecord({ ...detail, status: 'completed', observerSignedDate: '2026-09-22' });
+  openRecord();
+  await screen.findByText('Read only');
+  expect(uploadButton()).toBeVisible();
+  expect(reportLink()).not.toBeInTheDocument();
+});
+it('reloads the record when the report is refused because the observer signed meanwhile', async () => {
+  let current: ObservationDetail = detail;
+  serveRecord();
+  server.use(
+    http.get('*/api/observations/30', () => HttpResponse.json(current)),
+    http.post('*/api/observations/30/report-missed', () => {
+      current = { ...detail, observerSignedDate: '2026-09-22' };
+      return apiError(409, 'FORM_SUBMITTED', 'The observer already submitted the form.');
+    }),
+  );
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'The observation could not be done' }));
+  const dialog = await screen.findByRole('dialog');
+  await user.type(within(dialog).getByLabelText('What happened?'), 'No show');
+  await user.click(within(dialog).getByRole('button', { name: 'Report' }));
+  expect(await screen.findByRole('button', { name: 'Sign' })).toBeVisible();
+  expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
+  expect(reportLink()).not.toBeInTheDocument();
 });
