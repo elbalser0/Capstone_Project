@@ -17,6 +17,7 @@ function serve({ status = evaluationStatus, observations = [observation], curren
       return HttpResponse.json(observations);
     }),
     http.get('*/api/me/signup', () => HttpResponse.json(currentSignup)),
+    http.get('*/api/me/notifications', () => HttpResponse.json([])),
   );
 }
 

@@ -178,6 +178,7 @@ test('returns to the real evaluation screen with refreshed signup/course data', 
     http.get('*/api/me/evaluation-status', () => HttpResponse.json({ ...evaluationStatus, canSignUp: !submitted, signupId: submitted ? '20' : null })),
     http.get('*/api/me/signup', () => HttpResponse.json(submitted ? signup : null)),
     http.get('*/api/me/observations', () => HttpResponse.json([])),
+    http.get('*/api/me/notifications', () => HttpResponse.json([])),
     http.get('*/api/me/courses', () => HttpResponse.json([course])),
     http.post('*/api/signups', () => { submitted = true; return HttpResponse.json(signup, { status: 201 }); }),
   );
