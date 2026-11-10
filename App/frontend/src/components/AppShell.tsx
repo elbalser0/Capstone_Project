@@ -1,11 +1,11 @@
-import { createContext, useContext, useLayoutEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation, useMatches } from 'react-router';
 import { useAccount, useCurrentCycle, useMe } from '../api/hooks/shared';
 import { useAuth } from '../auth/AuthProvider';
 import { RANK_LABEL, initials } from '../lib/format';
-import { CalendarIcon } from './icons';
+import { CalendarIcon, MenuIcon, XIcon } from './icons';
 import type { Mode } from './RoleToggle';
-import { LANDING, Sidebar } from './Sidebar';
+import { LANDING, SIDEBAR_ID, Sidebar } from './Sidebar';
 
 export interface RouteHandle {
   title: string;
@@ -75,6 +75,35 @@ export function AppShell() {
   const me = useAccount({ enabled: Boolean(session) });
   const [override, setOverride] = useState<string | null>(null);
   const [navOverride, setNavOverride] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+
+  // The phone menu closes when a link in it opens another page, and on Escape.
+  useEffect(() => setMenuOpen(false), [pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
+  // Growing the window past the phone width puts the sidebar back beside the page, so the menu closes.
+  useEffect(() => {
+    if (!menuOpen || typeof window.matchMedia !== 'function') return;
+    const wide = window.matchMedia('(min-width: 48rem)');
+    const onChange = () => { if (wide.matches) setMenuOpen(false); };
+    wide.addEventListener('change', onChange);
+    return () => wide.removeEventListener('change', onChange);
+  }, [menuOpen]);
+  // Opening moves focus into the menu; closing hands it back to the menu button, also after a link in the menu was used.
+  useEffect(() => {
+    if (menuOpen) closeButton.current?.focus();
+    else if (wasOpen.current && (document.activeElement === document.body || document.getElementById(SIDEBAR_ID)?.contains(document.activeElement))) menuButton.current?.focus();
+    wasOpen.current = menuOpen;
+  }, [menuOpen]);
 
   if (!ready) return <p role="status" className="p-8 text-sm text-gray-500">Checking your sign-in…</p>;
   if (!session) return <Navigate to="/login" replace state={{ from: pathname }} />;
@@ -88,10 +117,39 @@ export function AppShell() {
   const nav = navOverride ?? handles.map((h) => h?.nav).find(Boolean);
   return (
     <div className="app-shell flex min-h-screen">
-      <Sidebar mode={mode} activeNav={nav} />
-      <div className="app-shell-content flex min-w-0 flex-1 flex-col">
-        <TopBar title={title} mode={mode} />
-        <main className="app-shell-main w-full max-w-[1060px] px-8 pb-12">
+      <Sidebar mode={mode} activeNav={nav} open={menuOpen} />
+      {menuOpen && (
+        <div className="fixed inset-0 z-30 bg-gray-900/40 md:hidden print:hidden" onClick={() => setMenuOpen(false)}>
+          <button
+            type="button"
+            ref={closeButton}
+            onClick={() => setMenuOpen(false)}
+            aria-label="Close menu"
+            className="absolute top-3 left-[232px] flex size-9 items-center justify-center rounded-full bg-white text-gray-700 shadow hover:text-gray-900 focus-visible:outline-2 focus-visible:outline-brand"
+          >
+            <XIcon width={10} height={10} />
+          </button>
+        </div>
+      )}
+      {/* While the phone menu is open, the page behind it is out of reach for the keyboard and screen readers. */}
+      <div className="app-shell-content flex min-w-0 flex-1 flex-col" inert={menuOpen || undefined}>
+        <div className="flex min-w-0">
+          <button
+            ref={menuButton}
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            aria-controls={SIDEBAR_ID}
+            className="flex w-12 shrink-0 items-center justify-center border-b border-gray-200 bg-white text-gray-700 hover:text-gray-900 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand md:hidden print:hidden"
+          >
+            <MenuIcon />
+          </button>
+          <div className="min-w-0 flex-1">
+            <TopBar title={title} mode={mode} />
+          </div>
+        </div>
+        <main className="app-shell-main w-full max-w-[1060px] px-4 pb-12 md:px-8">
           <TitleContext.Provider value={setOverride}>
             <NavContext.Provider value={setNavOverride}>
               <Outlet />

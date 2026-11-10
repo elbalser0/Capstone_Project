@@ -43,12 +43,12 @@ export function LoginPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="flex h-14 items-center border-b border-gray-200 bg-white px-8">
+      <header className="flex h-14 items-center border-b border-gray-200 bg-white px-4 md:px-8">
         <Logo />
       </header>
 
-      <main className="mx-auto w-[420px] pt-12">
-        <section className="rounded-lg border border-gray-200 bg-white px-10 pt-[34px] pb-10">
+      <main className="mx-auto w-full max-w-[452px] px-4 pt-12 pb-12">
+        <section className="rounded-lg border border-gray-200 bg-white px-6 pt-[34px] pb-10 sm:px-10">
           <h1 className="text-[22px] font-bold text-gray-900">Assessment Helper</h1>
           <p className="mt-1 text-sm text-gray-500">Faculty teaching observations, UT Dallas</p>
 
