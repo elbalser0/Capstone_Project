@@ -40,15 +40,39 @@ function attentionText(rows: MatchingRow[]) {
   return `${n} sign-up${n === 1 ? ' needs' : 's need'} attention: ${parts}.`;
 }
 
-function ObserversFound({ row, ran }: { row: MatchingRow; ran: boolean }) {
+function ObserversFound({ row, ran, pairedWith }: { row: MatchingRow; ran: boolean; pairedWith?: string }) {
   const n = row.candidates.length;
   const type = row.alert?.alertType;
   return (
     <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
       {ran ? <span className="font-bold">{n === 0 ? '0' : `${n} of ${LIST_SIZE}`}</span> : <span className="text-gray-500">Not run yet</span>}
-      {type && <Tag tone={ALERT_TAG[type][0]} icon={<AlertIcon width={10.5} height={9.5} />}>{ALERT_TAG[type][1]}</Tag>}
+      {pairedWith ? (
+        <Tag tone="signed" icon={<CheckIcon width={10} height={8} />}>Paired with {pairedWith}</Tag>
+      ) : (
+        type && <Tag tone={ALERT_TAG[type][0]} icon={<AlertIcon width={10.5} height={9.5} />}>{ALERT_TAG[type][1]}</Tag>
+      )}
     </span>
   );
+}
+
+/**
+ * When observer selection last ran. Each row's ranAt is the newest time anything was added to its list,
+ * so an observer added by hand moves that one row's time even though selection did not run again.
+ * A run writes the same time on every list it makes (one transaction), while each hand-added observer
+ * gets a time of its own, so the newest time shared by two or more lists is the run. With no shared time,
+ * the earliest one is the run and the later ones are hand adds.
+ * Known limits until the backend sends the run time itself: a re-run that gives a new list to only one
+ * sign-up shows the earlier run, and with a single sign-up a hand add moves the time.
+ */
+function selectionRanAt(rows: MatchingRow[]): string | null {
+  const times = rows.map((r) => r.ranAt).filter((t): t is string => Boolean(t));
+  if (times.length === 0) return null;
+  const seen = new Map<string, number>();
+  for (const t of times) seen.set(t, (seen.get(t) ?? 0) + 1);
+  const shared = [...seen].filter(([, n]) => n > 1).map(([t]) => t);
+  const byTime = (a: string, b: string) => Date.parse(a) - Date.parse(b);
+  if (shared.length > 0) return shared.sort(byTime)[shared.length - 1];
+  return [...times].sort(byTime)[0];
 }
 
 /**
@@ -222,17 +246,22 @@ export function SignupsPage() {
   const passed = c ? todayIso() > c.signupDeadline : false;
   usePageTitle(c ? `Sign-up requests (deadline ${passed ? 'passed ' : ''}${formatShort(c.signupDeadline)})` : null);
 
-  const all = matching.data ?? [];
+  // A sign-up that already has its observation is paired. The backend leaves the alert it raised before
+  // the pairing open, so it is ignored here, the same way Dashboard > Unmatched leaves paired sign-ups out.
+  const pairedWith = new Map(signups.data?.flatMap((s) => (s.observation ? [[s.signupId, s.observation.observer.displayName] as const] : [])));
+  // Until the sign-ups have loaded, paired sign-ups can't be told apart, so the banner waits instead of flashing a stale count.
+  const signupsSettled = !signups.isPending;
+  const all = (matching.data ?? []).map((r) => (pairedWith.has(r.signupId) && r.alert ? { ...r, alert: null } : r));
   const attention = all.filter((r) => r.alert);
   // Once nothing needs attention any more (for example after an observer is added), the full list is shown.
   const filtered = onlyAttention && attention.length > 0;
   const rows = filtered ? attention : all;
   const pager = usePages(rows, PAGE_SIZE);
   const email = new Map(signups.data?.map((s) => [s.signupId, s.observee.email]));
-  const ranOn = all.reduce<string | null>((latest, r) => (r.ranAt && (!latest || r.ranAt > latest) ? r.ranAt : latest), null);
+  const ranOn = selectionRanAt(all);
   const full = all.filter((r) => r.candidates.length >= LIST_SIZE).length;
   // A run that found no observer for anyone leaves every ranAt empty, but it does raise alerts.
-  const ran = ranOn !== null || all.some((r) => r.alert);
+  const ran = ranOn !== null || (matching.data ?? []).some((r) => r.alert);
 
   // The sign-ups read only fills the Email column, so its failure leaves that column empty.
   const failed = [cycle, matching].filter((q) => q.error);
@@ -258,7 +287,7 @@ export function SignupsPage() {
 
   return (
     <div className="flex flex-col pt-8">
-      {attention.length > 0 && (
+      {signupsSettled && attention.length > 0 && (
         <div className="mb-5">
           <Banner
             tone="danger"
@@ -322,7 +351,7 @@ export function SignupsPage() {
                 <Cell className="truncate text-gray-500">{email.get(r.signupId)}</Cell>
                 <Cell>
                   <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <ObserversFound row={r} ran={ran} />
+                    <ObserversFound row={r} ran={ran} pairedWith={pairedWith.get(r.signupId)} />
                     {r.alert && (
                       <button type="button" className={`${linkClass} text-[13px]`} aria-label={`Add an observer for ${r.observee.displayName}`} onClick={() => setAdding(r)}>
                         <PlusIcon width={10} height={10} /> Add observer
