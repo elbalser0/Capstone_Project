@@ -4,6 +4,7 @@ import { useAccount, useCurrentCycle, useMe } from '../api/hooks/shared';
 import { useAuth } from '../auth/AuthProvider';
 import { RANK_LABEL, initials } from '../lib/format';
 import { CalendarIcon, MenuIcon, XIcon } from './icons';
+import { Button, ErrorNote } from './ui';
 import type { Mode } from './RoleToggle';
 import { LANDING, SIDEBAR_ID, Sidebar } from './Sidebar';
 
@@ -69,7 +70,7 @@ function TopBar({ title, mode }: { title: string; mode: Mode }) {
  * to their Faculty pages. An admin who is not a professor has no pages here and is sent to /admin.
  */
 export function AppShell() {
-  const { session, ready } = useAuth();
+  const { session, ready, signOut } = useAuth();
   const { pathname } = useLocation();
   const matches = useMatches();
   const me = useAccount({ enabled: Boolean(session) });
@@ -110,7 +111,22 @@ export function AppShell() {
   if (me.data?.role === 'admin') return <Navigate to="/admin" replace />;
   const mode: Mode = pathname.startsWith('/committee') ? 'committee' : 'faculty';
   if (mode === 'committee' && me.data && me.data.role !== 'AC') return <Navigate to={LANDING.faculty} replace />;
-  if (mode === 'committee' && !me.data) return null;
+  if (mode === 'committee' && !me.data) {
+    if (!me.error) return <p role="status" className="p-8 text-sm text-gray-500">Loading…</p>;
+    // Committee pages need to know the role first, so a failed /api/me would otherwise leave the page blank.
+    return (
+      <main className="flex max-w-xl flex-col items-start gap-3 p-8">
+        <h1 className="text-[22px] font-bold text-gray-900">This page could not load</h1>
+        <ErrorNote error={new Error(`We could not check your account. ${me.error instanceof Error ? me.error.message : ''}`.trim())} className="self-stretch" />
+        <div className="flex flex-wrap gap-3">
+          <Button type="button" variant="secondary" size="sm" aria-disabled={me.isFetching || undefined} onClick={() => { if (!me.isFetching) void me.refetch(); }}>
+            {me.isFetching ? 'Trying again…' : 'Try again'}
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => void signOut()}>Sign out</Button>
+        </div>
+      </main>
+    );
+  }
 
   const handles = [...matches].reverse().map((m) => m.handle as RouteHandle | undefined);
   const title = override ?? handles.map((h) => h?.title).find(Boolean) ?? '';

@@ -293,6 +293,26 @@ test('demo mode needs no Firebase setup and keeps its demo token', async () => {
   expect(onAuthStateChanged).not.toHaveBeenCalled();
 });
 
+test.each([
+  ['the real backend refusing a demo token', 401, 'INVALID_TOKEN', 'Demo sign-in does not work with the real server. Start the app with VITE_AUTH_MODE=firebase, or with VITE_USE_MOCKS=true for the demo data.'],
+  ['the mock API not knowing the email', 401, 'UNAUTHENTICATED', 'No account matches that email.'],
+  ['the real backend not knowing the email', 403, 'NOT_A_PROFESSOR', 'No account matches that email.'],
+])('demo sign-in explains %s', async (_name, status, code, text) => {
+  meReply = () => HttpResponse.json({ error: { code, message: 'raw' } }, { status });
+  renderApp('demo', '/login');
+  await login('maya.lin@demo.edu', 'anything');
+  expect(await screen.findByRole('alert')).toHaveTextContent(text);
+  expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
+  expect(sessionStorage.getItem('assessment-helper.session')).toBeNull();
+});
+
+test('demo sign-in says the server is unreachable when the proxy answers 500 with no API body', async () => {
+  meReply = () => new HttpResponse(null, { status: 500 });
+  renderApp('demo', '/login');
+  await login('maya.lin@demo.edu', 'anything');
+  expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server. Check that it is running and try again.');
+});
+
 test('ApiError is still what the client throws for backend rejections', async () => {
   server.use(http.get('/api/boom', () => HttpResponse.json({ error: { code: 'X', message: 'm' } }, { status: 403 })));
   await expect(api('/boom')).rejects.toBeInstanceOf(ApiError);
