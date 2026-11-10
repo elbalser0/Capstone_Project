@@ -26,6 +26,8 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 - `/faculty/survey`: current-cycle survey submission as an observer or observee, with an optional trouble file.
 - `/committee/survey-responses`: AC-only current-cycle responses and authenticated trouble-file downloads.
 - `/committee/dashboard`: committee home with KPI results, a current-cycle summary, and lists of due or overdue faculty, unmatched faculty and outstanding observations.
+- `/committee/cycle`: start the evaluation cycle for a term with its three deadlines (with a draft saved on this device), or change the deadlines while the cycle is open, beside who is due.
+- `/committee/faculty`: every professor's status this cycle with filters, name search, CSV export, and due reminders to the selected due or overdue professors.
 - `/committee/signups`: AC-only sign-up requests: run observer selection after the sign-up deadline, see the sign-ups that need attention, add an observer by hand, and notify observees that their lists are ready.
 - `/guide`: Process guide, linked from the sidebar in both views: the current cycle's deadlines, the steps of a semester, and who is due.
 
@@ -77,6 +79,9 @@ The current screens request:
 - `POST /api/cycles/{cycleId}/survey-responses`
 - `GET /api/cycles/{cycleId}/survey-responses`
 - `GET /api/cycles/{cycleId}/survey-responses/{responseId}/trouble-file`
+- `POST /api/cycles` and `PATCH /api/cycles/{cycleId}`
+- `GET /api/terms`, `GET /api/terms/{termId}/due-preview` and `GET /api/cycles/{cycleId}/faculty` (not in the backend yet: the cycle and faculty pages show a "not available yet" note for each, and the faculty page falls back to the due-professors list)
+- `POST /api/cycles/{cycleId}/notifications/due-reminders` with `{ netids }`
 
 Response types are in `src/api/types.ts`. Roles are `faculty` and `AC`; committee membership adds access without removing faculty access. Backend routes must enforce their own permissions. Client-side route guards are not server authorization.
 
