@@ -15,3 +15,6 @@ export const hoursUntil = (isoDateTime: string) => Math.max(0, Math.ceil((new Da
 
 /** Today's date as "2026-09-15" by the app clock. */
 export const todayIso = () => new Date(nowMs()).toISOString().slice(0, 10);
+
+/** Today's date on campus (America/Chicago) as "2026-09-15" by the app clock; the UTC date runs ahead every evening. */
+export const campusTodayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(nowMs());

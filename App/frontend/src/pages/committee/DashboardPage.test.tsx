@@ -1,11 +1,12 @@
 import { http, HttpResponse } from 'msw';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
-import { course, cycle, faculty, observer, otherCourse, signup, term } from '../../test/fixtures';
-import type { CycleKpis, DueByRank, DueProfessor, KpiResult, Me, PersonRef, Signup, UnmatchedFaculty } from '../../api/types';
+import { course, cycle, faculty, observation, observer, otherCourse, signup, term } from '../../test/fixtures';
+import type { CycleKpis, DueByRank, DueProfessor, KpiResult, Me, ObservationDetail, PersonRef, Signup, UnmatchedFaculty } from '../../api/types';
+import { setClock } from '../../lib/clock';
 import { downloadCsv } from '../../lib/csv';
 import { DUE_OR_OVERDUE_TEXT, OUTSTANDING_TEXT, UNMATCHED_TEXT } from '../../lib/statusTerms';
 import { DashboardPage } from './DashboardPage';
@@ -70,6 +71,8 @@ function serve() {
 }
 
 // The overview keeps the KPIs and the executive summary; each list and the sends have their own page.
+afterEach(() => setClock(() => Date.now()));
+
 const OVERVIEW = '/committee/dashboard';
 const DUE_PAGE = '/committee/dashboard/due';
 const UNMATCHED_PAGE = '/committee/dashboard/unmatched';
@@ -196,6 +199,10 @@ describe('Committee dashboard detail sections', () => {
   });
 
   it('lists sign-ups without a completed observation as outstanding', async () => {
+    // Before Laura's Oct 29 observation, so her record is not read and she stays Scheduled.
+    setClock(() => new Date('2026-10-20T15:00:00Z').getTime());
+    const reads: string[] = [];
+    server.use(http.get('*/api/observations/:id', ({ params }) => { reads.push(String(params.id)); return HttpResponse.json({}); }));
     serve();
     openPage(OUTSTANDING_PAGE);
     expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
@@ -211,6 +218,75 @@ describe('Committee dashboard detail sections', () => {
     expect(within(scheduled).getByText('Scheduled')).toBeVisible();
     expect(within(missed).getByText('Reported as not done')).toBeVisible();
     expect(within(region).queryByText('Dr. Dana Price')).not.toBeInTheDocument();
+    expect(reads).toEqual([]);
+  });
+
+  it.each([
+    ['Form overdue when the observer has not signed', null, null, 'Form overdue'],
+    ['Waiting for the observee once the observer has signed', '2026-10-29', null, 'Waiting for the observee to sign'],
+  ])('shows %s after the observation date', async (_name, observerSignedDate, observeeSignedDate, text) => {
+    setClock(() => new Date('2026-11-02T15:00:00Z').getTime());
+    const detail: ObservationDetail = {
+      ...observation, observationId: 'o22', templateVersion: { versionId: '1', versionNo: 1 }, lastSavedDate: '2026-10-29T10:00:00Z', answers: [],
+      otherComments: '', reasonNotCompleted: null, observerSignedDate, observeeSignedDate,
+    };
+    server.use(http.get('*/api/observations/o22', () => HttpResponse.json(detail)));
+    serve();
+    openPage(OUTSTANDING_PAGE);
+    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
+    const [, scheduled] = dataRows(section(/Outstanding observations/));
+    expect(await within(scheduled).findByText(text)).toBeVisible();
+    expect(within(scheduled).queryByText('Scheduled')).not.toBeInTheDocument();
+  });
+
+  it('says Form not signed yet, not overdue, after the date while the observation deadline is still ahead', async () => {
+    setClock(() => new Date('2026-11-02T15:00:00Z').getTime());
+    const detail: ObservationDetail = {
+      ...observation, observationId: 'o22', templateVersion: { versionId: '1', versionNo: 1 }, lastSavedDate: '2026-10-29T10:00:00Z', answers: [],
+      otherComments: '', reasonNotCompleted: null, observerSignedDate: null, observeeSignedDate: null,
+    };
+    serve();
+    server.use(
+      http.get('*/api/cycles/current', () => HttpResponse.json({ ...cycle, observationDeadline: '2026-11-20' })),
+      http.get('*/api/observations/o22', () => HttpResponse.json(detail)),
+    );
+    openPage(OUTSTANDING_PAGE);
+    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
+    const [, scheduled] = dataRows(section(/Outstanding observations/));
+    expect(await within(scheduled).findByText('Form not signed yet')).toBeVisible();
+    expect(within(scheduled).queryByText('Form overdue')).not.toBeInTheDocument();
+  });
+
+  it('reads the record on the observation day, so a form signed that day waits for the observee', async () => {
+    // Evening of Oct 29 on campus (already Oct 30 in UTC).
+    setClock(() => new Date('2026-10-30T02:00:00Z').getTime());
+    const detail: ObservationDetail = {
+      ...observation, observationId: 'o22', templateVersion: { versionId: '1', versionNo: 1 }, lastSavedDate: '2026-10-29T18:00:00Z', answers: [],
+      otherComments: '', reasonNotCompleted: null, observerSignedDate: '2026-10-29', observeeSignedDate: null,
+    };
+    server.use(http.get('*/api/observations/o22', () => HttpResponse.json(detail)));
+    serve();
+    openPage(OUTSTANDING_PAGE);
+    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
+    const [, scheduled] = dataRows(section(/Outstanding observations/));
+    expect(await within(scheduled).findByText('Waiting for the observee to sign')).toBeVisible();
+  });
+
+  it('keeps an unsigned form Scheduled on the observation day itself', async () => {
+    setClock(() => new Date('2026-10-29T20:00:00Z').getTime());
+    const reads: string[] = [];
+    const detail: ObservationDetail = {
+      ...observation, observationId: 'o22', templateVersion: { versionId: '1', versionNo: 1 }, lastSavedDate: '2026-10-29T10:00:00Z', answers: [],
+      otherComments: '', reasonNotCompleted: null, observerSignedDate: null, observeeSignedDate: null,
+    };
+    server.use(http.get('*/api/observations/o22', () => { reads.push('o22'); return HttpResponse.json(detail); }));
+    serve();
+    openPage(OUTSTANDING_PAGE);
+    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
+    const [, scheduled] = dataRows(section(/Outstanding observations/));
+    await waitFor(() => expect(reads).toEqual(['o22']));
+    expect(within(scheduled).getByText('Scheduled')).toBeVisible();
+    expect(within(scheduled).queryByText('Form overdue')).not.toBeInTheDocument();
   });
 
   it('pages a long list seven rows at a time, as on A3', async () => {

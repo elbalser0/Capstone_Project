@@ -1,10 +1,11 @@
 import { http, HttpResponse } from 'msw';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Cycle, MatchingRow, Me, ObservationDetail, OutstandingObservations, Signup } from '../../api/types';
 import { AuthProvider } from '../../auth/AuthProvider';
 import { AppShell } from '../../components/AppShell';
+import { setClock } from '../../lib/clock';
 import { OUTSTANDING_TEXT } from '../../lib/statusTerms';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
@@ -67,7 +68,9 @@ const open = () => renderRoutes([{ path: '/committee/observations', element: <Ob
 const user = () => userEvent.setup();
 const rowOf = (name: string) => screen.getAllByRole('row').find((r) => r.textContent?.includes(name))!;
 
-afterEach(() => { sessionStorage.removeItem(SESSION_KEY); });
+// Before the scheduled observation dates (Sep 21 and 22), unless a test moves the clock past them.
+beforeEach(() => setClock(() => new Date('2026-09-20T15:00:00Z').getTime()));
+afterEach(() => { sessionStorage.removeItem(SESSION_KEY); setClock(() => Date.now()); });
 
 describe('outstanding tab (A6)', () => {
   it('counts both tabs and explains outstanding', async () => {
@@ -100,6 +103,43 @@ describe('outstanding tab (A6)', () => {
     await screen.findByRole('table', { name: 'Outstanding observations' });
     await waitFor(() => expect(within(rowOf('Dr. Di Waiting')).getByText('Scheduled')).toBeVisible());
     expect(screen.queryByText('Waiting for the observee to sign')).not.toBeInTheDocument();
+  });
+  it('shows Form overdue once the date has passed and the observer has not signed', async () => {
+    setClock(() => new Date('2026-09-22T15:00:00Z').getTime());
+    serve({ records: { o4: () => HttpResponse.json(record({ observationId: 'o4', observerSignedDate: null })) } });
+    open();
+    await screen.findByRole('table', { name: 'Outstanding observations' });
+    // Sep 21 has passed; Sep 22 is today, so it is not overdue yet.
+    expect(await within(rowOf('Dr. Cy Scheduled')).findByText('Form overdue')).toBeVisible();
+    await waitFor(() => expect(within(rowOf('Dr. Di Waiting')).getByText('Scheduled')).toBeVisible());
+    expect(within(rowOf('Dr. Di Waiting')).queryByText('Form overdue')).not.toBeInTheDocument();
+  });
+  it('shows Waiting for the observee, not Form overdue, after the date once the observer has signed', async () => {
+    setClock(() => new Date('2026-09-25T15:00:00Z').getTime());
+    serve({ records: { o3: () => HttpResponse.json(record({ observationId: 'o3', observerSignedDate: '2026-09-21' })) } });
+    open();
+    await screen.findByRole('table', { name: 'Outstanding observations' });
+    expect(await within(rowOf('Dr. Cy Scheduled')).findByText('Waiting for the observee to sign')).toBeVisible();
+    expect(await within(rowOf('Dr. Di Waiting')).findByText('Form overdue')).toBeVisible();
+  });
+  it('counts the day by campus time: still Scheduled on the evening of the observation day', async () => {
+    // 8 PM in Dallas on Sep 21 is already Sep 22 in UTC.
+    setClock(() => new Date('2026-09-22T01:00:00Z').getTime());
+    const log = serve();
+    open();
+    await screen.findByRole('table', { name: 'Outstanding observations' });
+    await waitFor(() => expect(log.recordReads).toContain('o3'));
+    expect(within(rowOf('Dr. Cy Scheduled')).getByText('Scheduled')).toBeVisible();
+    expect(screen.queryByText('Form overdue')).not.toBeInTheDocument();
+  });
+  it('keeps Scheduled after the date when the record cannot be read', async () => {
+    setClock(() => new Date('2026-09-25T15:00:00Z').getTime());
+    const log = serve({ records: { o3: () => failure(500, 'FAILED', 'Record unavailable') } });
+    open();
+    await screen.findByRole('table', { name: 'Outstanding observations' });
+    await waitFor(() => expect(log.recordReads).toContain('o3'));
+    expect(within(rowOf('Dr. Cy Scheduled')).getByText('Scheduled')).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
   it('keeps Scheduled and shows no page error when a record cannot be read', async () => {
     const log = serve({ records: { o4: () => failure(500, 'FAILED', 'Record unavailable') } });

@@ -13,6 +13,9 @@ const DEMO_ACCOUNTS = [
   { label: 'Admin only (not a professor)', emails: ['admin.only@demo.edu'] },
 ];
 
+/** Something@something.something, with no spaces: enough to catch a typo before asking the server. */
+const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function LoginPage() {
   const { session, ready, signIn } = useAuth();
   const location = useLocation();
@@ -20,6 +23,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [badEmail, setBadEmail] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // Signing in sets the session, and this redirect then returns to the page that asked for it.
@@ -30,6 +34,14 @@ export function LoginPage() {
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    const typed = email.trim();
+    // An empty field is reported by signIn; a malformed address never reaches the server.
+    if (typed && !EMAIL_FORMAT.test(typed)) {
+      setBadEmail(true);
+      setError('Enter a valid email address, like name@utdallas.edu.');
+      return;
+    }
+    setBadEmail(false);
     setBusy(true);
     try {
       await signIn(email, password);
@@ -55,7 +67,16 @@ export function LoginPage() {
           <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-4" noValidate>
             <div>
               <label htmlFor="email" className={labelClass}>Email</label>
-              <input id="email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} className={input} />
+              <input
+                id="email"
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setBadEmail(false); }}
+                aria-invalid={badEmail || undefined}
+                aria-describedby={badEmail ? 'login-error' : undefined}
+                className={input}
+              />
             </div>
             <div>
               <label htmlFor="password" className={labelClass}>Password</label>
@@ -78,7 +99,7 @@ export function LoginPage() {
                 </button>
               </div>
             </div>
-            {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+            {error && <p id="login-error" role="alert" className="text-sm text-red-700">{error}</p>}
             <Button type="submit" disabled={busy} className="w-full">{busy ? 'Signing in…' : 'Sign in'}</Button>
           </form>
 

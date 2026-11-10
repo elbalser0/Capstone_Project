@@ -2,10 +2,12 @@ import { Fragment, useEffect, useId, useRef, useState, type ReactNode, type RefO
 
 import { ApiError } from '../../api/client';
 import { useCycleSignups, useDueProfessors, useUnmatchedFaculty } from '../../api/hooks/committee';
+import { useObservation } from '../../api/hooks/faculty';
 import { useCurrentCycle } from '../../api/hooks/shared';
 import type { AlertType, CourseSection, DueProfessor, ObservationStatus, Signup, UnmatchedFaculty } from '../../api/types';
 import { AlertIcon } from '../../components/icons';
 import { Banner, Button, Cell, DueTag, EmptyRow, ErrorNote, Pagination, Row, Table, Tag, linkClass, usePages, type TagTone } from '../../components/ui';
+import { campusTodayIso, todayIso } from '../../lib/dates';
 import { RANK_SHORT, dayLetters, formatDate, formatTime } from '../../lib/format';
 import { DUE_OR_OVERDUE_TEXT, OUTSTANDING_TEXT, UNMATCHED_TEXT } from '../../lib/statusTerms';
 
@@ -254,6 +256,42 @@ const OBSERVATION_TAG: Record<ObservationStatus | 'none', [TagTone, string]> = {
   completed: ['signed', 'Completed'],
 };
 
+/**
+ * Status of a scheduled observation. The sign-up list has no signature dates, so the record is read for
+ * them: once the observer has signed it waits for the observee. Once the observation date has passed on campus
+ * without the observer's signature, the form is not signed yet, and after the cycle's observation deadline it is
+ * overdue (the server still accepts it late). The record is read from the observation date on, by campus or UTC
+ * date, whichever comes first (the observer may sign that same day), or earlier when `readEarly` asks for it;
+ * while it loads, or if it cannot be read, the row says Scheduled.
+ */
+export function ScheduledObservationTag({ observationId, scheduledDate, scheduledTone, readEarly = false }: {
+  observationId: string;
+  scheduledDate?: string;
+  scheduledTone: TagTone;
+  readEarly?: boolean;
+}) {
+  const today = campusTodayIso();
+  // The server's date may be UTC, which runs ahead of campus every evening.
+  const latest = today > todayIso() ? today : todayIso();
+  const reached = Boolean(scheduledDate && scheduledDate <= latest);
+  const passed = Boolean(scheduledDate && scheduledDate < today);
+  const deadline = useCurrentCycle().data?.observationDeadline;
+  const record = useObservation(reached || readEarly ? observationId : undefined);
+  const r = record.data;
+  if (r?.observerSignedDate && !r.observeeSignedDate) return <Tag tone="due">Waiting for the observee to sign</Tag>;
+  if (passed && r && !r.observerSignedDate) {
+    return deadline && today > deadline ? <Tag tone="overdue">Form overdue</Tag> : <Tag tone="due">Form not signed yet</Tag>;
+  }
+  return <Tag tone={scheduledTone}>Scheduled</Tag>;
+}
+
+function OutstandingTag({ signup }: { signup: Signup }) {
+  const o = signup.observation;
+  if (o?.status === 'scheduled') return <ScheduledObservationTag observationId={o.observationId} scheduledDate={o.scheduledDate} scheduledTone={OBSERVATION_TAG.scheduled[0]} />;
+  const [tone, label] = OBSERVATION_TAG[o?.status ?? 'none'];
+  return <Tag tone={tone}>{label}</Tag>;
+}
+
 export function Outstanding() {
   const cycle = useCurrentCycle();
   const signups = useCycleSignups(cycle.data?.cycleId);
@@ -270,7 +308,7 @@ export function Outstanding() {
         { head: 'Observer', width: 'minmax(115px,2fr)', cell: (s) => <Cell className={s.observation ? '' : 'text-gray-500'}>{s.observation?.observer.displayName ?? 'None yet'}</Cell> },
         { head: 'Course', width: 'minmax(110px,1.3fr)', cell: (s) => <Cell>{s.section.label}</Cell> },
         { head: 'Date', width: 'minmax(105px,1.3fr)', cell: (s) => <Cell className="whitespace-nowrap">{s.observation?.scheduledDate ? formatDate(s.observation.scheduledDate) : ''}</Cell> },
-        { head: 'Status', width: 'minmax(168px,1.8fr)', cell: (s) => <Cell><Tag tone={OBSERVATION_TAG[s.observation?.status ?? 'none'][0]}>{OBSERVATION_TAG[s.observation?.status ?? 'none'][1]}</Tag></Cell> },
+        { head: 'Status', width: 'minmax(168px,1.8fr)', cell: (s) => <Cell><OutstandingTag signup={s} /></Cell> },
       ]}
       minWidth="min-w-[730px]"
       rows={rows}
