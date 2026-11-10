@@ -7,7 +7,7 @@ import { useActiveNav } from '../../components/AppShell';
 import { CheckIcon, ClockIcon, PenIcon } from '../../components/icons';
 import { isLocked } from '../../lib/format';
 import type { PersonRef } from '../../api/types';
-import { recordStatus, signedOn, whenLong } from './observationDisplay';
+import { OBSERVEE_LOCK_NOTE, observeeWaitsForObserver, recordStatus, signedOn, whenLong } from './observationDisplay';
 import { useObservationRecord } from './useObservationRecord';
 import './observation-print.css';
 
@@ -71,6 +71,7 @@ export function ObservationRecordPage() {
           {hasForm && <Button className="screen-only" onClick={() => window.print()}>Print record</Button>}
         </div>
       </div>
+      {observeeWaitsForObserver(o, profile.data.netid) && <p className="text-sm text-gray-700">{OBSERVEE_LOCK_NOTE}</p>}
       <div className="observation-record-grid grid gap-5 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
         {!hasForm ? <p role="alert">The assigned observation form is unavailable.</p> : (
           <Card className="min-w-0">
