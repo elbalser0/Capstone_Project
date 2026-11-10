@@ -7,6 +7,7 @@ import { server } from '../../test/setup';
 import { course, cycle, faculty, observer, otherCourse, signup, term } from '../../test/fixtures';
 import type { CycleKpis, DueByRank, DueProfessor, KpiResult, Me, PersonRef, Signup, UnmatchedFaculty } from '../../api/types';
 import { downloadCsv } from '../../lib/csv';
+import { DUE_OR_OVERDUE_TEXT, OUTSTANDING_TEXT, UNMATCHED_TEXT } from '../../lib/statusTerms';
 import { DashboardPage } from './DashboardPage';
 
 vi.mock('../../lib/csv', () => ({ downloadCsv: vi.fn() }));
@@ -811,5 +812,84 @@ describe('Committee dashboard pager', () => {
     expect(within(nav).getByText('8 to 10 of 10')).toBeVisible();
     expect(next).toHaveFocus();
     expect(within(nav).getByRole('button', { name: 'Previous page' })).not.toHaveAttribute('aria-disabled');
+  });
+});
+
+describe('Committee dashboard list descriptions', () => {
+  const DESCRIBED: [RegExp, string][] = [
+    [/Due or overdue for evaluation/, DUE_OR_OVERDUE_TEXT],
+    [/Unmatched faculty/, UNMATCHED_TEXT],
+    [/Outstanding observations/, OUTSTANDING_TEXT],
+  ];
+
+  /** The description sits right under the list's heading and the list is described by it. */
+  function expectDescribed(name: RegExp, text: string) {
+    const region = section(name);
+    expect(region).toHaveAccessibleDescription(text);
+    const line = within(region).getByText(text);
+    expect(line.tagName).toBe('P');
+    expect(within(region).getByRole('heading').nextElementSibling).toBe(line);
+  }
+
+  it('describes each list under its heading once the lists load', async () => {
+    serve();
+    openPage();
+    expect(await screen.findByText('Dr. Raj Mehta')).toBeVisible();
+    expect(await screen.findByText('Dr. Sarah Kim')).toBeVisible();
+    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
+    for (const [name, text] of DESCRIBED) expectDescribed(name, text);
+  });
+
+  it('describes each list while it loads', async () => {
+    serve();
+    server.use(
+      http.get('*/api/cycles/1/due-professors', never),
+      http.get('*/api/dashboard/unmatched', never),
+      http.get('*/api/cycles/1/signups', never),
+    );
+    openPage();
+    expect(await screen.findByText('Loading faculty…')).toBeVisible();
+    expect(screen.getByText('Loading unmatched faculty…')).toBeVisible();
+    expect(screen.getByText('Loading observations…')).toBeVisible();
+    for (const [name, text] of DESCRIBED) expectDescribed(name, text);
+  });
+
+  it('describes each list when it is empty', async () => {
+    serve();
+    server.use(
+      http.get('*/api/cycles/1/due-professors', () => HttpResponse.json([])),
+      http.get('*/api/dashboard/unmatched', () => HttpResponse.json({ ...unmatched, total: 0, items: [] })),
+      http.get('*/api/cycles/1/signups', () => HttpResponse.json([])),
+    );
+    openPage();
+    expect(await screen.findByText('Nobody is due or overdue this cycle.')).toBeVisible();
+    expect(await screen.findByText('No unmatched faculty.')).toBeVisible();
+    expect(await screen.findByText('No one has signed up yet this cycle.')).toBeVisible();
+    for (const [name, text] of DESCRIBED) expectDescribed(name, text);
+  });
+
+  it('describes each list when it fails to load', async () => {
+    serve();
+    server.use(
+      http.get('*/api/cycles/1/due-professors', () => failure('Due faculty could not be read.')),
+      http.get('*/api/dashboard/unmatched', () => failure('Unmatched faculty could not be read.')),
+      http.get('*/api/cycles/1/signups', () => failure('Sign-ups could not be read.')),
+    );
+    openPage();
+    expect(await screen.findByText(/Due faculty could not be read/)).toBeVisible();
+    expect(await screen.findByText(/Unmatched faculty could not be read/)).toBeVisible();
+    expect(await screen.findByText(/Sign-ups could not be read/)).toBeVisible();
+    for (const [name, text] of DESCRIBED) expectDescribed(name, text);
+  });
+
+  it('describes each list before the first cycle starts', async () => {
+    serve();
+    server.use(
+      http.get('*/api/cycles/current', () => HttpResponse.json(null)),
+      http.get('*/api/dashboard/unmatched', noCycle),
+    );
+    openPage();
+    await waitFor(() => expect(screen.getAllByText('No evaluation cycle has started yet.').length).toBeGreaterThanOrEqual(3));
+    for (const [name, text] of DESCRIBED) expectDescribed(name, text);
   });
 });
