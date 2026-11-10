@@ -26,7 +26,7 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 - `/faculty/observe/:observationId/sign`: observer review and signed-form submission; the observee signs from the saved record.
 - `/faculty/survey`: current-cycle survey submission as an observer or observee, with an optional trouble file.
 - `/committee/survey-responses`: AC-only current-cycle responses and authenticated trouble-file downloads.
-- `/committee/dashboard`: committee home with KPI results, a current-cycle summary, and lists of due or overdue faculty, unmatched faculty and outstanding observations.
+- `/committee/dashboard`: committee home with KPI results and a current-cycle summary. Its lists of due or overdue faculty, unmatched faculty and outstanding observations, and the notification sends, each have a short page under Dashboard in the sidebar (`/committee/dashboard/due`, `/committee/dashboard/unmatched`, `/committee/dashboard/outstanding` and `/committee/dashboard/notifications`).
 - `/committee/cycle`: start the evaluation cycle for a term with its three deadlines (with a draft saved on this device), or change the deadlines while the cycle is open, beside who is due.
 - `/committee/faculty`: every professor's status this cycle with filters, name search, CSV export, and due reminders to the selected due or overdue professors.
 - `/committee/signups`: AC-only sign-up requests: run observer selection after the sign-up deadline, see the sign-ups that need attention, add an observer by hand, and notify observees that their lists are ready.
@@ -126,7 +126,17 @@ Run `npm test` for page-level regression tests using controlled HTTP responses. 
 
 ## Committee dashboard (`/committee/dashboard`)
 
-Below the KPI cards and executive summary, three lists show the current cycle:
+The dashboard is split into short pages so each one stays readable. In Committee mode the sidebar lists them as a list nested under Dashboard, and exactly one row is highlighted on each page:
+
+| Sidebar row | Page | Shows |
+| --- | --- | --- |
+| Dashboard | `/committee/dashboard` | The KPI cards with Export CSV, and the executive summary; each count links to its list's page |
+| Due or overdue | `/committee/dashboard/due` | The due or overdue list |
+| Unmatched | `/committee/dashboard/unmatched` | The unmatched faculty list |
+| Outstanding | `/committee/dashboard/outstanding` | The outstanding observations list |
+| Notifications | `/committee/dashboard/notifications` | The notification sends, then your own notifications |
+
+Faculty-only accounts are sent from every one of these pages to My evaluation, as before. The three lists show the current cycle:
 
 | List | Request | Rows |
 | --- | --- | --- |
@@ -134,9 +144,9 @@ Below the KPI cards and executive summary, three lists show the current cycle:
 | Unmatched faculty | `GET /api/dashboard/unmatched` | Sign-ups with no observation that have no observer, too few observers, or no one who accepted |
 | Outstanding observations | `GET /api/cycles/{cycleId}/signups` | Sign-ups with no observation yet, or one that is not completed (completed means the observee has signed) |
 
-Each list has a one-line description under its heading (from `src/lib/statusTerms.ts`) that says who is on it and what due, overdue and outstanding mean; it shows while the list loads, is empty or fails, and the list's section is described by it for screen readers. Each list says when it is loading, empty or failed, and one failing does not hide the others. A summary count that is loading or failed shows a dash, never 0. Before the first cycle starts, `GET /api/cycles/current` returns `null`, so the page shows one message that no cycle has started in place of the cards and lists. The dashboard endpoints also answer `404 NO_CYCLE` then.
+Each list has a one-line description under its heading (from `src/lib/statusTerms.ts`) that says who is on it and what due, overdue and outstanding mean; it shows while the list loads, is empty or fails, and the list's section is described by it for screen readers. Each list says when it is loading, empty or failed. A summary count that is loading or failed shows a dash, never 0. Before the first cycle starts, `GET /api/cycles/current` returns `null`, so the overview shows one message that no cycle has started in place of the cards, each list page says it once in place of its list, and the Notifications page keeps its sends turned off with a note that there is no one to notify yet. The dashboard endpoints also answer `404 NO_CYCLE` then.
 
-A list, a count or the KPI cards that fail to load offer Try again, which repeats only the requests that failed and moves keyboard focus to that part of the page. A failed refresh keeps the last data on screen with a "Couldn't refresh" note, and a failed count is announced. The KPI cards show a dash with Loading or Couldn't load until the KPIs arrive, and N/A only when the cycle has no value for a KPI (no result yet, or nothing to divide by).
+A list, a count or the KPI cards that fail to load offer Try again, which repeats only the requests that failed and moves keyboard focus to that part of the page. A failed refresh keeps the last data on screen with a "Couldn't refresh" note, and a failed count is announced. The unmatched count and the unmatched list read the same request but are on different pages now, so each offers its own Try again. The KPI cards show a dash with Loading or Couldn't load until the KPIs arrive, and N/A only when the cycle has no value for a KPI (no result yet, or nothing to divide by).
 
 The KPI cards, the summary counts and the Export CSV row follow the width of the content column (not the window, since the sidebar takes part of it): four KPI cards per row, then two, then one. Each list keeps the Figma column order, status last. A table that is too wide for the column scrolls sideways inside its section, with a fade at the edge while columns are out of view, and its status moves next to the name so it stays in view. Loading, empty and failed lists show their message in a plain box instead. Lists show 7 rows a page, as in the A3 and A4 tables; the pager keeps at most seven page slots (the first, the last and the nearby pages), so its arrows stay put.
 

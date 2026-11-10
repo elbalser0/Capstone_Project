@@ -374,11 +374,15 @@ describe('Committee dashboard executive summary', () => {
       { path: '/committee/signups', element: <p>Sign-up requests page</p> },
     ], '/committee/dashboard');
     const detail = await within(summary()).findByText('Dr. Sarah Kim, CS 2336.001');
+    expect(await within(summary()).findByText('Assistant 1, Associate 1, Full 0')).toBeVisible();
+    expect(await within(summary()).findByText('Assistant 2, Associate 1, Full 0')).toBeVisible();
     const link = within(summary()).getByRole('link', { name: 'Open in Sign-ups' });
-    expect(within(summary()).getAllByRole('link')).toEqual([link]);
+    // Once every count has loaded, the summary holds the three View links and this one, and nothing else.
+    expect(within(summary()).getAllByRole('link').map((a) => a.textContent)).toEqual(['View due or overdue faculty', 'View outstanding observations', 'View unmatched faculty', 'Open in Sign-ups']);
     expect(link).toHaveAttribute('href', '/committee/signups');
     const cell = within(summary()).getByText('Unmatched faculty').parentElement!;
     expect(cell).toContainElement(link);
+    expect(within(cell).getAllByRole('link').map((a) => a.textContent)).toEqual(['View unmatched faculty', 'Open in Sign-ups']);
     expect(detail.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await userEvent.click(link);
     expect(await screen.findByText('Sign-up requests page')).toBeVisible();
@@ -394,10 +398,57 @@ describe('Committee dashboard executive summary', () => {
     openPage();
     expect(await within(summary()).findByText("Couldn't load")).toBeVisible();
     expect(await within(summary()).findByText('Dr. Sarah Kim, CS 2336.001')).toBeVisible();
-    expect(count('Due for evaluation')).toHaveTextContent(/^Due for evaluation–Loading$/);
+    expect(count('Due for evaluation')).toHaveTextContent(/^Due for evaluation–LoadingView due or overdue faculty$/);
     expect(within(count('Signed up but not observed')).getByRole('alert')).toHaveTextContent("Signed up but not observed: Couldn't load");
     expect(within(count('Signed up but not observed')).getByRole('button', { name: 'Try again' })).toBeVisible();
     expect(within(summary()).queryByText('0')).not.toBeInTheDocument();
+  });
+
+  it("links each count to its list's own page", async () => {
+    serve();
+    const user = userEvent.setup();
+    const LINKS: [string, string, (typeof LISTS)[number]][] = [
+      ['Due for evaluation', 'View due or overdue faculty', DUE_LIST],
+      ['Signed up but not observed', 'View outstanding observations', OUTSTANDING_LIST],
+      ['Unmatched faculty', 'View unmatched faculty', UNMATCHED_LIST],
+    ];
+    for (const [label, link, list] of LINKS) {
+      const view = openPage();
+      expect(await within(summary()).findByText('Dr. Sarah Kim, CS 2336.001')).toBeVisible();
+      const anchor = within(count(label)).getByRole('link', { name: link });
+      expect(anchor).toHaveAttribute('href', list.path);
+      await user.click(anchor);
+      expect(view.router.state.location.pathname).toBe(list.path);
+      expect(await within(section(list.name)).findByText(list.row)).toBeVisible();
+      expect(screen.queryByRole('region', { name: 'Executive summary' })).not.toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it('keeps the links while the counts load, fail or wait for the first cycle', async () => {
+    const names = () => within(summary()).getAllByRole('link').map((a) => a.textContent);
+    const all = ['View due or overdue faculty', 'View outstanding observations', 'View unmatched faculty', 'Open in Sign-ups'];
+    serve();
+    server.use(
+      http.get('*/api/dashboard/due-by-rank', never),
+      http.get('*/api/dashboard/outstanding-observations', () => failure('Server error.')),
+    );
+    const loading = openPage();
+    expect(await within(summary()).findByText("Couldn't load")).toBeVisible();
+    expect(names()).toEqual(all);
+    loading.unmount();
+
+    serve();
+    server.use(
+      http.get('*/api/cycles/current', () => HttpResponse.json(null)),
+      http.get('*/api/dashboard/due-by-rank', noCycle),
+      http.get('*/api/dashboard/outstanding-observations', noCycle),
+      http.get('*/api/dashboard/unmatched', noCycle),
+    );
+    openPage();
+    // The KPIs of an older cycle still arrive, so the summary stays and each count says no cycle.
+    expect(await within(count('Due for evaluation')).findByText('No evaluation cycle has started yet.')).toBeVisible();
+    expect(names()).toEqual(all);
   });
 });
 
@@ -778,6 +829,32 @@ describe('Committee dashboard counts and cycle edge cases', () => {
     expect(within(summaryCount('Unmatched faculty')).getByText('Dr. Sarah Kim, CS 2336.001')).toBeVisible();
     expect(within(summaryCount('Unmatched faculty')).getByRole('button', { name: 'Try again' })).toBeVisible();
     expect(screen.queryByRole('region', { name: /Unmatched faculty/ })).not.toBeInTheDocument();
+  });
+
+  it('loads a failed unmatched count again with its own Try again on the overview, repeating only that request', async () => {
+    serve();
+    server.use(http.get('*/api/dashboard/unmatched', sequence(() => failure('Server error.'), () => HttpResponse.json(unmatched))));
+    const reads = countReads();
+    try {
+      const user = userEvent.setup();
+      openPage();
+      const cell = () => summaryCount('Unmatched faculty');
+      expect(await within(cell()).findByRole('alert')).toHaveTextContent("Unmatched faculty: Couldn't load");
+      expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1);
+      // Let the other counts and the KPIs settle, so only Try again's own request is counted below.
+      expect(await within(summaryCount('Due for evaluation')).findByText('Assistant 1, Associate 1, Full 0')).toBeVisible();
+      expect(await within(summaryCount('Signed up but not observed')).findByText('Assistant 2, Associate 1, Full 0')).toBeVisible();
+      expect(await screen.findAllByText('N/A')).toHaveLength(7);
+      const before = { ...reads };
+      await user.click(within(cell()).getByRole('button', { name: 'Try again' }));
+      expect(screen.getByRole('heading', { name: 'Executive summary' })).toHaveFocus();
+      expect(await within(cell()).findByText('Dr. Sarah Kim, CS 2336.001')).toBeVisible();
+      expect(within(cell()).queryByRole('alert')).not.toBeInTheDocument();
+      expect(within(cell()).queryByRole('button')).not.toBeInTheDocument();
+      expect(Object.keys(reads).filter((path) => reads[path] !== before[path])).toEqual(['/api/dashboard/unmatched']);
+    } finally {
+      server.events.removeAllListeners();
+    }
   });
 
   it('announces a failed count, and announces it again when Try again fails again', async () => {

@@ -12,7 +12,8 @@ import { NO_CYCLE_TEXT, TryAgain, errorText, failureKey, headingFocus, isNoCycle
 
 // A1. KPIs are generated the day after a cycle's feedback deadline, so the cards show the
 // latest cycle that has results; the executive summary is the current cycle so far. Its lists and the
-// notification sends have their own pages under Dashboard in the sidebar (DashboardParts.tsx).
+// notification sends have their own pages under Dashboard in the sidebar (DashboardParts.tsx), and each
+// count links to its list.
 
 interface KpiMeta {
   group: string;
@@ -80,6 +81,11 @@ function SummaryCell({ label, total, detail, failed = false, failedAt, children 
   );
 }
 
+/** Under a count, the link to its list's own page under Dashboard in the sidebar. */
+function ListLink({ to, children }: { to: string; children: string }) {
+  return <Link to={to} className={`${linkClass} mt-2 w-fit`}>{children}</Link>;
+}
+
 /** Shown in place of a count that has not arrived, so a pending or failed request never reads as 0. */
 const notLoaded = ({ error }: { error: unknown }) => (isNoCycle(error) ? NO_CYCLE_TEXT : error ? "Couldn't load" : 'Loading');
 
@@ -115,6 +121,7 @@ function Summary() {
       <Card className="grid grid-cols-1 divide-y divide-gray-200 @2xl:grid-cols-3 @2xl:divide-x @2xl:divide-y-0">
         <SummaryCell label="Due for evaluation" total={due.data?.total} detail={due.data ? ranks(due.data.byRank) : notLoaded(due)} failed={loadFailed(due)} failedAt={due.errorUpdatedAt}>
           <CountNote label="Due for evaluation" query={due} focus={heading} />
+          <ListLink to="/committee/dashboard/due">View due or overdue faculty</ListLink>
         </SummaryCell>
         <SummaryCell
           label="Signed up but not observed"
@@ -124,6 +131,7 @@ function Summary() {
           failedAt={outstanding.errorUpdatedAt}
         >
           <CountNote label="Signed up but not observed" query={outstanding} focus={heading} />
+          <ListLink to="/committee/dashboard/outstanding">View outstanding observations</ListLink>
         </SummaryCell>
         <SummaryCell
           label="Unmatched faculty"
@@ -133,6 +141,7 @@ function Summary() {
           failedAt={unmatched.errorUpdatedAt}
         >
           <CountNote label="Unmatched faculty" query={unmatched} focus={heading} />
+          <ListLink to="/committee/dashboard/unmatched">View unmatched faculty</ListLink>
           <Link to="/committee/signups" className={`${linkClass} mt-2 w-fit`}>Open in Sign-ups</Link>
         </SummaryCell>
       </Card>
