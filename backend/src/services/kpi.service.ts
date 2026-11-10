@@ -142,6 +142,14 @@ async function storedKpis(cycleId: number) {
 // Returns whether this call stored the KPIs.
 async function calculateAndStore(cycleId: number) {
   return inTransaction(async (client) => {
+    // The feedback deadline may have been extended since this cycle was picked. Locking the
+    // cycle row makes a deadline change (updateCycle) wait for this transaction, or this
+    // transaction see the change, so KPIs are never stored for a reopened cycle.
+    const { rows } = await client.query<{ closed: boolean }>(
+      'SELECT feedback_deadline < CURRENT_DATE AS closed FROM eval_cycle WHERE cycle_id = $1 FOR UPDATE',
+      [cycleId]);
+    if (!rows[0]?.closed) return false;
+
     const kpis = computeKpis(await loadCycleFacts(client, cycleId));
     // Another run may be storing the same KPIs; the first one wins.
     const { rowCount } = await client.query(`

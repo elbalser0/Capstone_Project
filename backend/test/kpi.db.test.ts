@@ -147,6 +147,26 @@ async function seed() {
   await sql(`INSERT INTO eval_due (cycle_id, netid, due_status) VALUES (2, 'ee2', 'overdue')`);
 }
 
+// Tracks whether a promise has settled, so a wait can stop early instead of timing out.
+function track<T>(promise: Promise<T>) {
+  const tracked = { done: false, promise: promise.finally(() => { tracked.done = true; }) };
+  return tracked;
+}
+
+// Waits until `count` queries are waiting on a row or table lock, or one of `running` has
+// finished (it was never going to block, so the test's assertions report the failure).
+// Advisory locks are left out: other test files wait on TEST_DB_LOCK the whole time.
+async function untilBlocked(count: number, ...running: { done: boolean }[]) {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const { rows } = await sql(`SELECT count(DISTINCT pid)::int AS count FROM pg_locks
+                                WHERE NOT granted AND locktype <> 'advisory'`);
+    if (rows[0].count >= count || running.some((r) => r.done)) return;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${count} blocked queries`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 const summary = (kpis: { kpiCode: string; numerator: number; denominator: number; kpiValue: number | null }[]) =>
   Object.fromEntries(kpis.map((k) => [k.kpiCode, [k.numerator, k.denominator, k.kpiValue]]));
 
@@ -287,6 +307,55 @@ describe('KPI calculation against the database', { skip }, () => {
     await updateCycle(1, { feedbackDeadline: dates.rows[0].past });
     assert.deepEqual(await generateDueKpis(), [1]);
     assert.equal((await getCycleKpis(1)).kpis.length, 7);
+  });
+
+  test('a deadline extension committed while generation is running stops the KPIs being stored', async () => {
+    // Do updateCycle's statements by hand so its transaction can stay open.
+    const extension = await getPool().connect();
+    try {
+      await extension.query('BEGIN');
+      await extension.query(`UPDATE eval_cycle SET feedback_deadline = CURRENT_DATE + 7 WHERE cycle_id = 1`);
+
+      // The job still sees the old deadline, picks cycle 1, then waits for the cycle row.
+      const job = track(generateDueKpis());
+      await untilBlocked(1, job);
+      await extension.query(`DELETE FROM kpi_result WHERE cycle_id = 1`);
+      await extension.query('COMMIT');
+
+      assert.deepEqual(await job.promise, [3], 'cycle 1 was reopened, so only cycle 3 is generated');
+    } finally {
+      await extension.query('ROLLBACK').catch(() => {});
+      extension.release();
+    }
+    const stored = await sql(`SELECT count(*)::int AS count FROM kpi_result WHERE cycle_id = 1`);
+    assert.equal(stored.rows[0].count, 0);
+  });
+
+  test('a deadline extension made while generation is storing KPIs removes them afterwards', async () => {
+    await sql(`UPDATE eval_cycle SET feedback_deadline = CURRENT_DATE + 45 WHERE cycle_id = 3`);
+    const later = (await sql(`SELECT (CURRENT_DATE + 7)::text AS later`)).rows[0].later;
+
+    // Holding kpi_result makes the job stop at its INSERT, after it has locked the cycle row.
+    const blocker = await getPool().connect();
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query('LOCK TABLE kpi_result IN EXCLUSIVE MODE');
+      const job = track(generateDueKpis());
+      await untilBlocked(1, job);
+
+      // The extension has to wait for the job, then deletes what the job stored.
+      const extension = track(updateCycle(1, { feedbackDeadline: later }));
+      await untilBlocked(2, job, extension);
+      await blocker.query('COMMIT');
+
+      assert.deepEqual(await job.promise, [1]);
+      await extension.promise;
+    } finally {
+      await blocker.query('ROLLBACK').catch(() => {});
+      blocker.release();
+    }
+    const result = await getCycleKpis(1);
+    assert.deepEqual([result.cycle.phase, result.kpis], ['feedback', []]);
   });
 
   test('changing a deadline without reopening the cycle keeps saved KPIs', async () => {

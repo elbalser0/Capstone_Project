@@ -171,7 +171,8 @@ export async function updateCycle(cycleId: number, changes: Partial<Deadlines>) 
       WHERE cycle_id = $1
     `, [cycleId, deadlines.signupDeadline, deadlines.observationDeadline, deadlines.feedbackDeadline]);
     // A cycle reopened by a later feedback deadline loses its saved KPIs; the KPI job
-    // generates them again once the new deadline has passed.
+    // generates them again once the new deadline has passed. The UPDATE above locks the cycle
+    // row, which the KPI job also locks, so the job cannot store KPIs after this delete.
     await client.query('DELETE FROM kpi_result WHERE cycle_id = $1 AND $2::date >= CURRENT_DATE',
       [cycleId, deadlines.feedbackDeadline]);
   });
