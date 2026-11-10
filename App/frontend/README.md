@@ -19,7 +19,8 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 - `/login`: email/password form, password visibility toggle, and sign-in errors.
 - `/faculty/evaluation`: faculty identity, evaluation status, deadlines, and observation history.
 - `/faculty/sign-up`: pick a course and the class meetings you'd like to be observed in.
-- `/faculty/assignments`: assigned observations with links to their record and form.
+- `/faculty/observe`: incoming observation requests, proposed times, accept or decline controls, and a count toward the semester limit.
+- `/faculty/observe/confirmations`: accepted assignments, cancelled requests, and links to forms or records. Legacy `/faculty/assignments` URLs redirect here.
 - `/faculty/observe/:observationId`: read-only assigned observation record, with browser-native printing of its saved contents.
 - `/faculty/observe/:observationId/form`: observer-only local draft editor using the assigned observation's question ranges.
 - `/faculty/observe/:observationId/sign`: observer review and signed-form submission; the observee signs from the saved record.

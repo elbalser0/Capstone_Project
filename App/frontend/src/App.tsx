@@ -7,7 +7,7 @@ import { FacultyPage } from './pages/committee/FacultyPage';
 import { RequestsPage } from './pages/faculty/RequestsPage';
 import { MyEvaluationPage } from './pages/faculty/MyEvaluationPage';
 import { SignUpPage } from './pages/faculty/SignUpPage';
-import { MyAssignmentsPage } from './pages/faculty/MyAssignmentsPage';
+import { ObserveRequestsPage, ConfirmationsPage } from './pages/faculty/ObservePage';
 import { ObservationRecordPage } from './pages/faculty/ObservationRecordPage';
 import { ObservationFormPage } from './pages/faculty/ObservationFormPage';
 import { ObservationSignPage } from './pages/faculty/ObservationSignPage';
@@ -47,10 +47,12 @@ export const router = createBrowserRouter([
         element: <RequestsPage />,
         handle: { title: 'My requests' } satisfies RouteHandle,
       },
-      { path: '/faculty/assignments', element: <MyAssignmentsPage />, handle: { title: 'My assignments' } satisfies RouteHandle },
-      { path: '/faculty/observe/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/faculty/assignments' } satisfies RouteHandle },
-      { path: '/faculty/observe/:observationId/form', element: <ObservationFormPage />, handle: { title: 'Observation form', nav: '/faculty/assignments' } satisfies RouteHandle },
-      { path: '/faculty/observe/:observationId/sign', element: <ObservationSignPage />, handle: { title: 'Review and sign observation', nav: '/faculty/assignments' } satisfies RouteHandle },
+      { path: '/faculty/observe', element: <ObserveRequestsPage />, handle: { title: 'Observation requests' } satisfies RouteHandle },
+      { path: '/faculty/observe/confirmations', element: <ConfirmationsPage />, handle: { title: 'My confirmations', nav: '/faculty/observe' } satisfies RouteHandle },
+      { path: '/faculty/assignments', element: <Navigate to="/faculty/observe/confirmations" replace /> },
+      { path: '/faculty/observe/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/faculty/observe' } satisfies RouteHandle },
+      { path: '/faculty/observe/:observationId/form', element: <ObservationFormPage />, handle: { title: 'Observation form', nav: '/faculty/observe' } satisfies RouteHandle },
+      { path: '/faculty/observe/:observationId/sign', element: <ObservationSignPage />, handle: { title: 'Review and sign observation', nav: '/faculty/observe' } satisfies RouteHandle },
       { path: '/guide', element: <ProcessGuidePage />, handle: { title: 'Process guide' } satisfies RouteHandle },
     ],
   },
