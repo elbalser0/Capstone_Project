@@ -26,6 +26,7 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 - `/faculty/survey`: current-cycle survey submission as an observer or observee, with an optional trouble file.
 - `/committee/survey-responses`: AC-only current-cycle responses and authenticated trouble-file downloads.
 - `/committee/dashboard`: committee home with KPI results, a current-cycle summary, and lists of due or overdue faculty, unmatched faculty and outstanding observations.
+- `/committee/signups`: AC-only sign-up requests: run observer selection after the sign-up deadline, see the sign-ups that need attention, add an observer by hand, and notify observees that their lists are ready.
 - `/guide`: Process guide, linked from the sidebar in both views: the current cycle's deadlines, the steps of a semester, and who is due.
 
 Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Faculty who are due can open sign-up from My evaluation. Current and past observations link to the read-only record. Other later-sprint pages are not included.
@@ -148,6 +149,30 @@ The backend team has not answered these yet, so the lists follow the API as it i
 3. Can the sign-ups summary (`GET /api/cycles/{cycleId}/signups`) include `observerSignedDate` and `observeeSignedDate`? Without them the outstanding list cannot tell "waiting for the observee to sign" apart from Scheduled, so it shows Scheduled for both.
 
 When an answer arrives, the list's filter, its description in `src/lib/statusTerms.ts` and its tests change together.
+
+## Sign-up requests (`/committee/signups`)
+
+After the sign-up deadline the committee runs observer selection, checks the sign-ups that need attention, adds an observer by hand where the list came up short, and tells observees their lists are ready. The dashboard's Unmatched faculty summary links here ("Open in Sign-ups").
+
+| Action or read | Request |
+| --- | --- |
+| Table and attention banner | `GET /api/cycles/{cycleId}/matching` (each sign-up with its observer list and newest open alert) |
+| Observee email column | `GET /api/cycles/{cycleId}/signups` |
+| Run observer selection | `POST /api/cycles/{cycleId}/matching`, no body; the backend refuses it with `409 SIGNUP_OPEN` until the day after the sign-up deadline, so the button stays off until then |
+| Notify observees: lists are ready | `POST /api/cycles/{cycleId}/notifications/lists-ready`, no body, answered with `{ sent }` |
+| Add observer (rows with an alert) | `POST /api/signups/{signupId}/candidates` with exactly `{ observerNetid }`, trimmed |
+
+The lists-ready send follows the dashboard's rules: it asks first, ignores repeat clicks while it runs, is never retried automatically, and says when nobody was notified or when only committee members may send. Run observer selection and Add observer also send once under repeated clicks. Every error message from the backend is shown as sent, and the NetID stays in the box after a failed add.
+
+Checked against the real backend (same revision as this branch) on a private local PostgreSQL database built from `database/schema.sql`, the migrations and the seed data, with 14 sign-ups made through the API: the page listed them as not run yet before the deadline; after it, observer selection filled the lists (9 with 5 observers, 5 with fewer than 3) and the banner, Show only these and the table matched; lists-ready reported 14 notifications; an add with the observee's own NetID and one with an unknown NetID showed the backend's messages, and a valid add brought that sign-up to 3 observers and cleared its alert.
+
+On the shared database (read only, signed in with Firebase as an AC member, 2026-11-10): the page showed the cycle's one sign-up as not run yet after the deadline, with Run on, Notify off and no attention banner, which matches the dashboard's empty Unmatched faculty list; every read returned 200. Running selection, notifying and adding an observer were not done there.
+
+Still depends on the backend:
+
+- "Ran" shows the newest `ranAt` across the sign-ups. The backend fills it from the newest observer match, so a later manual add moves it too.
+- The mock answers `POST /api/signups/{signupId}/candidates` with a matching row and its own eligibility rules; the backend returns `{ signupId, observer, roundNo }` and accepts any active professor while fewer than 3 observers are usable. The page reads neither body, so both work.
+- The insufficient threshold (3) and the list size (5) are the backend's `INSUFFICIENT_BELOW` and `MAX_CANDIDATES`; the backend notes the team still has to confirm 3.
 
 ## Mock data
 

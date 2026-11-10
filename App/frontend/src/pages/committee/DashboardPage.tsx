@@ -1,10 +1,11 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { Link } from 'react-router';
 
 import { useCycleKpis, useDueByRank, useOutstandingObservations, useUnmatchedFaculty } from '../../api/hooks/committee';
 import { useCurrentCycle } from '../../api/hooks/shared';
 import type { CycleKpis, KpiCode, KpiResult } from '../../api/types';
 import { DownloadIcon } from '../../components/icons';
-import { Banner, Button, Card, ErrorNote } from '../../components/ui';
+import { Banner, Button, Card, ErrorNote, linkClass } from '../../components/ui';
 import { downloadCsv } from '../../lib/csv';
 import { formatDate, formatShort, percent, ranks } from '../../lib/format';
 import { NotificationControls } from './NotificationControls';
@@ -140,6 +141,7 @@ function Summary() {
           announce={false}
         >
           <CountNote label="Unmatched faculty" query={unmatched} focus={heading} retry={false} />
+          <Link to="/committee/signups" className={`${linkClass} mt-2 w-fit`}>Open in Sign-ups</Link>
         </SummaryCell>
       </Card>
     </section>
