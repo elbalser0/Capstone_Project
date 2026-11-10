@@ -39,8 +39,8 @@ function TopBar({ title, mode }: { title: string; mode: Mode }) {
   const { data: me } = useMe();
   const { data: cycle } = useCurrentCycle();
   return (
-    <header className="app-shell-header flex h-14 shrink-0 items-center gap-[18px] border-b border-gray-200 bg-white px-8">
-      <h1 className="text-[22px] font-bold text-gray-900">{title}</h1>
+    <header className="app-shell-header flex min-h-14 shrink-0 flex-wrap items-center gap-x-[18px] gap-y-1.5 border-b border-gray-200 bg-white px-8 py-2">
+      <h1 className="min-w-0 wrap-anywhere text-[22px] leading-tight font-bold text-gray-900">{title}</h1>
       {cycle && (
         <span className="inline-flex h-6 items-center gap-2 rounded-md border border-gray-300 px-[11px] text-xs font-bold text-gray-700">
           <CalendarIcon width={11} height={11} />
@@ -48,11 +48,11 @@ function TopBar({ title, mode }: { title: string; mode: Mode }) {
         </span>
       )}
       {me && (
-        <div className="ml-auto flex items-center gap-2.5">
-          <span className="flex size-8 items-center justify-center rounded-full bg-gray-200 text-xs font-bold text-gray-700" aria-hidden>
+        <div className="ml-auto flex min-w-0 items-center gap-2.5">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gray-200 text-xs font-bold text-gray-700" aria-hidden>
             {initials(me)}
           </span>
-          <span className="leading-tight">
+          <span className="min-w-0 leading-tight wrap-anywhere">
             <span className="block text-sm font-bold text-gray-900">{me.displayName}</span>
             <span className="block text-xs text-gray-500">
               {mode === 'committee' ? 'Assessment Committee' : `${RANK_LABEL[me.rank]}, ${me.department.deptName}`}
