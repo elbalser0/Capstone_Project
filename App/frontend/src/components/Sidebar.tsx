@@ -3,7 +3,7 @@ import { Link, NavLink, useMatch, useNavigate } from 'react-router';
 import { useCurrentCycle, useMe } from '../api/hooks/shared';
 import { useIncomingRequests } from '../api/hooks/faculty';
 import { useAuth } from '../auth/AuthProvider';
-import { CalendarIcon, ClipboardIcon, EyeIcon, GridIcon, HelpIcon, ListIcon, LogoutIcon, SendIcon, UsersIcon } from './icons';
+import { CalendarIcon, ClipboardIcon, DocIcon, EyeIcon, FolderIcon, GridIcon, HelpIcon, ListIcon, LogoutIcon, SendIcon, UsersIcon } from './icons';
 import { RoleToggle, type Mode } from './RoleToggle';
 import { Logo } from './ui';
 import { formatShort } from '../lib/format';
@@ -42,6 +42,8 @@ const COMMITTEE_NAV: NavItem[] = [
   { to: '/committee/cycle', label: 'Cycle', icon: CalendarIcon },
   { to: '/committee/faculty', label: 'Faculty', icon: UsersIcon },
   { to: '/committee/signups', label: 'Sign-ups', icon: ListIcon },
+  { to: '/committee/templates', label: 'Template', icon: DocIcon },
+  { to: '/committee/observations', label: 'Observations', icon: FolderIcon },
   { to: '/committee/survey-responses', label: 'Survey responses', icon: ClipboardIcon },
 ];
 
