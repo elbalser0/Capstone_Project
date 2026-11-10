@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, Outlet, useBlocker, useNavigate, useParams } from 'react-router';
-import { useCreateTemplate, useTemplates } from '../../api/hooks/committee';
+import { useCreateTemplate, usePublishTemplate, useTemplates } from '../../api/hooks/committee';
 import type { TemplateQuestion, TemplateStatus, TemplateVersion } from '../../api/types';
 import { usePageTitle } from '../../components/AppShell';
 import { EyeIcon, LockIcon, PenIcon, PlusIcon } from '../../components/icons';
@@ -349,6 +349,75 @@ function WhatChangedModal({ draft, live, onClose }: { draft: Draft; live: Templa
   );
 }
 
+// ---------- Publish ----------
+
+/**
+ * Confirms publishing. An edited (or never saved) draft is saved first with the same body as Save and exit; if the
+ * publish then fails, the saved draft is published on the next try instead of being saved again.
+ */
+function PublishModal({ draft, live, dirty, onClose }: { draft: Draft; live: TemplateVersion | undefined; dirty: boolean; onClose: () => void }) {
+  const navigate = useNavigate();
+  const { setEdits } = useContext(DraftContext);
+  const create = useCreateTemplate();
+  const publish = usePublishTemplate();
+  const [note, setNote] = useState(draft.changeNote);
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [pending, setPending] = useState(false);
+  const busy = useRef(false);
+  const changes = describeChanges(live, draft.questions);
+  // Closing while the save or publish is in flight would lose its result, so ignore Escape and the backdrop until it ends.
+  const close = useCallback(() => { if (!busy.current) onClose(); }, [onClose]);
+
+  const go = async () => {
+    if (busy.current) return;
+    busy.current = true;
+    setPending(true);
+    setError(null);
+    try {
+      let versionId = savedId ?? (dirty ? null : draft.versionId);
+      if (versionId === null) {
+        const saved = await create.mutateAsync({ changeNote: note.trim(), questions: draft.questions.map(({ key: _key, ...q }, i) => ({ ...q, orderNo: i + 1 })) });
+        versionId = saved.versionId;
+        setSavedId(versionId);
+      }
+      await publish.mutateAsync({ versionId, changeNote: note.trim() });
+      setEdits(null);
+      navigate('/committee/templates');
+    } catch (e) {
+      setError(e);
+    } finally {
+      busy.current = false;
+      setPending(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={`Publish version ${draft.versionNo}?`}
+      subtitle="The published version is used for new observations only."
+      onClose={close}
+      footer={
+        <>
+          <Button variant="secondary" disabled={pending} onClick={onClose}>Cancel</Button>
+          <Button disabled={pending} onClick={() => void go()}>{pending ? 'Publishing…' : 'Save and publish'}</Button>
+        </>
+      }
+    >
+      <p className="text-sm text-gray-700">
+        Version {draft.versionNo} goes live{live ? ` and version ${live.versionNo} is retired` : ''}. Observations that are already assigned keep the version they were assigned, and signed records do not change.
+      </p>
+      {live && changes.length > 0 && (
+        <ul className="mt-3 list-disc pl-5 text-sm text-gray-700">{changes.map((line, i) => <li key={i}>{line}</li>)}</ul>
+      )}
+      <label htmlFor="publish-note" className={`${labelClass} mt-4`}>What changed (optional)</label>
+      <TextArea id="publish-note" className="h-[80px]" maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} />
+      {savedId && <p role="status" className="mt-3 text-xs text-gray-500">Your draft was saved. Publishing it did not finish.</p>}
+      <ErrorNote error={error} className="mt-3" />
+    </Modal>
+  );
+}
+
 // ---------- A5b ----------
 
 export function DraftPage() {
@@ -356,8 +425,10 @@ export function DraftPage() {
   const { templates, live, draft, base, dirty, setEdits } = useDraft({ seed: true });
   const [editing, setEditing] = useState<{ index: number; question: Question } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const closeEditing = useCallback(() => setEditing(null), []);
   const closeSaving = useCallback(() => setSaving(false), []);
+  const closePublishing = useCallback(() => setPublishing(false), []);
   usePageTitle(draft ? `Edit draft: version ${draft.versionNo}` : null);
 
   if (templates.error && !templates.data) return <LoadError error={templates.error} onRetry={() => void templates.refetch()} retrying={templates.isFetching} />;
@@ -392,6 +463,7 @@ export function DraftPage() {
         <div className="flex flex-wrap gap-3">
           <Button variant="secondary" onClick={() => navigate('preview')}><EyeIcon width={14} height={8} /> Preview</Button>
           <Button variant="secondary" disabled={empty} onClick={() => setSaving(true)}>Save and exit</Button>
+          <Button disabled={empty} onClick={() => setPublishing(true)}>Save and publish</Button>
         </div>
       </div>
 
@@ -454,6 +526,7 @@ export function DraftPage() {
         />
       )}
       {saving && <WhatChangedModal draft={draft} live={live} onClose={closeSaving} />}
+      {publishing && <PublishModal draft={draft} live={live} dirty={dirty} onClose={closePublishing} />}
     </div>
   );
 }
