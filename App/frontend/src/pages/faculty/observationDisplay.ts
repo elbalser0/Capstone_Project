@@ -42,5 +42,12 @@ export function recordStatus(o: Parties, viewerNetid: string): { tone: TagTone; 
   return { tone: 'due', text: o[missing].netid === viewerNetid ? 'Waiting for your signature' : `Waiting for the ${missing}'s signature` };
 }
 
+export const OBSERVEE_LOCK_NOTE = 'Locked until your observer submits and signs the form. You can review and sign after that.';
+
+/** The observee cannot sign until the observer has: the observer's signature is the form submission. */
+export function observeeWaitsForObserver(o: Parties, viewerNetid: string) {
+  return o.observee.netid === viewerNetid && o.status !== 'not_completed' && !o.observerSignedDate && !isLocked(o);
+}
+
 /** "signed Oct 14, 2026": the response carries dates only, so no time of day is ever shown. */
 export const signedOn = (date: string | null) => (date ? `signed ${formatDate(date)}` : 'Not signed yet');

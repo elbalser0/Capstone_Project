@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
+import { observation } from '../../test/fixtures';
 import { SurveyPage } from './SurveyPage';
 
 const cycle = { cycleId: '4', term: { label: 'Fall 2026' }, phase: 'feedback', surveyOpensDate: '2026-10-01', feedbackDeadline: '2026-11-10' };
@@ -83,4 +84,47 @@ it('rejects oversized files before sending and permits retry with a valid attach
   // MSW's jsdom File bridge serializes the filename as "blob"; native-browser QA checks the filename.
   expect(received.mock.calls[0][0]).toContain('details');
   expect(received.mock.calls[0][0]).toContain('name="troubleFile"');
+});
+
+const timing = 'The survey opens after the observation deadline. It does not wait for signatures.';
+it('shows the intro, numbered questions, the closing date and the timing note while the survey is open', async () => {
+  current({ ...cycle, term: { label: 'Fall 2026', termId: '1' } } as typeof cycle); route();
+  expect(await screen.findByText('Tell the Assessment Committee how the Fall 2026 process went.')).toBeVisible();
+  expect(screen.getByText(timing)).toBeVisible();
+  expect(screen.getByText('Survey closes')).toBeVisible();
+  expect(screen.getByText('Nov 10, 2026', { selector: 'p' })).toBeVisible();
+  expect(screen.getByText(/^1\. /)).toBeVisible();
+  expect(screen.getByText(/^2\. Difficulties/)).toBeVisible();
+  expect(screen.getByText(/^3\. Additional feedback/)).toBeVisible();
+});
+it('shows the intro and the timing note while the survey is closed', async () => {
+  current({ ...cycle, phase: 'closed' }); route();
+  expect(await screen.findByText('Tell the Assessment Committee how the Fall 2026 process went.')).toBeVisible();
+  expect(screen.getByText(timing)).toBeVisible();
+  expect(screen.getByText('Survey closes')).toBeVisible();
+});
+it('shows the professor\'s own observation for this term in the summary card', async () => {
+  current({ ...cycle, term: { label: 'Fall 2026', termId: '1' } } as typeof cycle);
+  server.use(http.get('*/api/me/observations', () => HttpResponse.json([observation])));
+  route();
+  expect(await screen.findByText('Your observation')).toBeVisible();
+  expect(screen.getByText('CS 1337.002, Mon Sep 21, 8:30 AM')).toBeVisible();
+  expect(screen.getByText('Observer: Dr. Elena Ruiz')).toBeVisible();
+  expect(screen.getByText('Record not fully signed')).toBeVisible();
+});
+it('leaves the observation card out when the observation belongs to another term or cannot be read', async () => {
+  current({ ...cycle, term: { label: 'Fall 2026', termId: '9' } } as typeof cycle);
+  server.use(http.get('*/api/me/observations', () => HttpResponse.json([observation])));
+  route();
+  expect(await screen.findByText('Survey closes')).toBeVisible();
+  await waitFor(() => expect(screen.queryByText('Your observation')).not.toBeInTheDocument());
+});
+it('submits the same multipart fields as before the layout change', async () => {
+  current(); let keys: string[] = [];
+  server.use(http.post('*/api/cycles/4/survey-responses', async ({ request }) => { keys = [...(await request.formData()).keys()]; return HttpResponse.json({ responseId: '1' }, { status: 201 }); }));
+  route(); const user = await fillSurvey();
+  await user.type(screen.getByRole('textbox', { name: /Additional feedback/ }), 'More time');
+  await user.click(screen.getByRole('button', { name: 'Submit survey' }));
+  await screen.findByText('Your observer response was submitted.');
+  expect(keys).toEqual(['respondentRole', 'processOk', 'difficulties', 'additionalFeedback']);
 });

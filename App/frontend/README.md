@@ -98,6 +98,8 @@ The form saves a bounded draft in this browser, scoped to the signed-in account 
 
 The read-only observation route's **Print record** button opens the browser's native print flow. The printed view uses the saved `GET /api/observations/{observationId}` record only—not a local unsaved draft—and includes course/section/date, participant names, template version, saved question wording/ratings/comments, other comments, any non-completion reason, status, and both signature states/dates. The current backend returns `observerSignedDate` and `observeeSignedDate` as calendar dates (the exact time-of-day is not exposed), so the print view does not invent signature times. Navigation, screen-only labels, print controls, and signing/retry controls are omitted from paper output. Page size is selected in the browser print dialog; no PDF service or dependency is added.
 
+The observation record is locked for the observee until the observer signs: the observer's signature is the form submission, so the observee sees "Locked until your observer submits and signs the form" and no Sign button, and the backend answers an early sign with `409 FORM_NOT_SUBMITTED`. While a record is not locked, a "Something went wrong?" card lets the observee report that the observation could not be done (`POST /api/observations/{id}/report-missed` with `{ reason }`, only while it is scheduled and the observer has not signed) and lets either participant upload a file about the observation (`POST /api/observations/{id}/issue-file`, multipart field `file`, up to 10 MB). The upload route is not in the backend yet: the page shows "Uploading a file is not available yet. Nothing was uploaded." until it is.
+
 Source-checked field semantics (`backend/src/services/observation.service.ts`, base `e9eb96c`):
 
 | Field | Source behavior |
@@ -115,6 +117,8 @@ On a mounted form refetch, local edits stay tied to the revision that initialize
 ## Survey and attachments
 
 The survey uses the current cycle's `feedback` phase for availability and displays the server-provided opening/closing dates. Participants explicitly choose observer or observee and Yes or No. The API remains authoritative for the survey window, participation and one-response-per-role constraint. Text fields allow 5,000 characters each. The optional trouble file is sent as multipart field `troubleFile`, at most 10 MiB. Pending submission disables the form; errors preserve its inputs, while successful submission clears the attachment and marks that role submitted for this mounted form. A reload may submit again, in which case the server returns `ALREADY_SUBMITTED` rather than saving a duplicate.
+
+The survey page opens after the observation deadline and does not wait for signatures. It says so in both the open and the closed state, and shows when the survey closes and, when the data exists, the professor's own observation for the term. My evaluation explains the professor's due status in words (from `lib/statusTerms.ts`) and shows the notifications sent to them.
 
 The AC response page confirms the user's role before fetching responses and provides loading, empty, error and retry states. File downloads use the cycle/response-scoped endpoint with the current bearer token, not a public storage URL or the opaque `troubleFileKey`. Download errors remain visible without discarding the response list. Response text preserves line breaks. These screens use the existing UI language; exact Figma fidelity remains unverified pending access to the survey/response frames.
 
