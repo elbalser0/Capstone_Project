@@ -15,6 +15,8 @@ import { SurveyPage } from './pages/faculty/SurveyPage';
 import { SurveyResponsesPage } from './pages/committee/SurveyResponsesPage';
 import { SignupsPage } from './pages/committee/SignupsPage';
 import { ProcessGuidePage } from './pages/ProcessGuidePage';
+import { ObservationsPage } from './pages/committee/ObservationsPage';
+import { DraftPage, PreviewPage, TemplatesLayout, TemplatesPage, VersionPage } from './pages/committee/TemplatesPages';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -40,6 +42,17 @@ export const router = createBrowserRouter([
       { path: '/committee/cycle', element: <CyclePage />, handle: { title: 'Start the evaluation cycle' } satisfies RouteHandle },
       { path: '/committee/faculty', element: <FacultyPage />, handle: { title: 'Faculty' } satisfies RouteHandle },
       { path: '/committee/signups', element: <SignupsPage />, handle: { title: 'Sign-up requests' } satisfies RouteHandle },
+      {
+        path: '/committee/templates',
+        element: <TemplatesLayout />,
+        children: [
+          { index: true, element: <TemplatesPage />, handle: { title: 'Observation templates' } satisfies RouteHandle },
+          { path: 'draft', element: <DraftPage />, handle: { title: 'Edit draft', nav: '/committee/templates' } satisfies RouteHandle },
+          { path: 'draft/preview', element: <PreviewPage />, handle: { title: 'Preview', nav: '/committee/templates' } satisfies RouteHandle },
+          { path: ':versionId', element: <VersionPage />, handle: { title: 'Template version', nav: '/committee/templates' } satisfies RouteHandle },
+        ],
+      },
+      { path: '/committee/observations', element: <ObservationsPage />, handle: { title: 'Observations' } satisfies RouteHandle },
       { path: '/faculty/survey', element: <SurveyPage />, handle: { title: 'End-of-process survey' } satisfies RouteHandle },
       { path: '/committee/survey-responses', element: <SurveyResponsesPage />, handle: { title: 'Survey responses' } satisfies RouteHandle },
       {
