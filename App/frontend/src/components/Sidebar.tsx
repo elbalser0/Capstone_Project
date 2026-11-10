@@ -2,7 +2,7 @@ import type { ComponentType, SVGProps } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import { useMe } from '../api/hooks/shared';
 import { useAuth } from '../auth/AuthProvider';
-import { ClipboardIcon, GridIcon, HelpIcon, LogoutIcon, SendIcon } from './icons';
+import { ClipboardIcon, GridIcon, HelpIcon, ListIcon, LogoutIcon, SendIcon } from './icons';
 import { RoleToggle, type Mode } from './RoleToggle';
 import { Logo } from './ui';
 
@@ -22,6 +22,7 @@ const FACULTY_NAV: NavItem[] = [
 
 const COMMITTEE_NAV: NavItem[] = [
   { to: '/committee/dashboard', label: 'Dashboard', icon: GridIcon },
+  { to: '/committee/signups', label: 'Sign-ups', icon: ListIcon },
   { to: '/committee/survey-responses', label: 'Survey responses', icon: ClipboardIcon },
 ];
 

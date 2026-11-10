@@ -318,6 +318,24 @@ describe('Committee dashboard executive summary', () => {
     expect(await within(summary()).findByText('Dr. Sarah Kim, CS 2336.001')).toBeVisible();
   });
 
+  it('links the Unmatched faculty summary to the sign-up requests page', async () => {
+    serve();
+    const { router } = renderRoutes([
+      { path: '/committee/dashboard', element: <DashboardPage /> },
+      { path: '/committee/signups', element: <p>Sign-up requests page</p> },
+    ], '/committee/dashboard');
+    const detail = await within(summary()).findByText('Dr. Sarah Kim, CS 2336.001');
+    const link = within(summary()).getByRole('link', { name: 'Open in Sign-ups' });
+    expect(within(summary()).getAllByRole('link')).toEqual([link]);
+    expect(link).toHaveAttribute('href', '/committee/signups');
+    const cell = within(summary()).getByText('Unmatched faculty').parentElement!;
+    expect(cell).toContainElement(link);
+    expect(detail.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await userEvent.click(link);
+    expect(await screen.findByText('Sign-up requests page')).toBeVisible();
+    expect(router.state.location.pathname).toBe('/committee/signups');
+  });
+
   it('never shows 0 for a count that is loading or failed', async () => {
     serve();
     server.use(
