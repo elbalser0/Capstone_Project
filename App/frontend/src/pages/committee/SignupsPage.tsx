@@ -1,12 +1,12 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../api/client';
-import { useCycleSignups, useMatching, useNotifyListsReady, useRunMatching } from '../../api/hooks/committee';
+import { useAddCandidate, useCycleSignups, useMatching, useNotifyListsReady, useRunMatching } from '../../api/hooks/committee';
 import { sharedKeys, useCurrentCycle } from '../../api/hooks/shared';
 import type { AlertType, MatchingRow } from '../../api/types';
 import { usePageTitle } from '../../components/AppShell';
-import { AlertIcon, CheckIcon, MailIcon } from '../../components/icons';
-import { Banner, Button, Cell, EmptyRow, ErrorNote, Modal, Pagination, Row, Table, Tag, linkClass, usePages, type TagTone } from '../../components/ui';
+import { AlertIcon, CheckIcon, MailIcon, PlusIcon } from '../../components/icons';
+import { Banner, Button, Cell, EmptyRow, ErrorNote, Modal, Pagination, Row, Table, Tag, inputClass, labelClass, linkClass, usePages, type TagTone } from '../../components/ui';
 import { todayIso } from '../../lib/dates';
 import { countSummary, dayLetters, formatClock, formatDateTime, formatShort, formatTime } from '../../lib/format';
 import { UNMATCHED_TEXT } from '../../lib/statusTerms';
@@ -136,6 +136,71 @@ function NotifyListsReady({ cycleId, disabled }: { cycleId: string; disabled: bo
   );
 }
 
+/**
+ * POST /api/signups/{signupId}/candidates with { observerNetid }: the committee adds one active professor
+ * to a sign-up that has fewer than 3 usable observers. The backend's message is shown as sent, the NetID
+ * stays in the box on a failure, and the table is refreshed on success.
+ */
+function AddObserver({ row, cycleId, onAdded, onClose }: { row: MatchingRow; cycleId: string; onAdded: (observerNetid: string) => void; onClose: () => void }) {
+  const add = useAddCandidate(cycleId);
+  const [netid, setNetid] = useState('');
+  const [empty, setEmpty] = useState(false);
+  const adding = useRef(false);
+  const fieldId = useId();
+  const formId = useId();
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const observerNetid = netid.trim();
+    if (!observerNetid) {
+      setEmpty(true);
+      add.reset();
+      return;
+    }
+    if (adding.current) return;
+    adding.current = true;
+    setEmpty(false);
+    add.mutate({ signupId: row.signupId, observerNetid }, {
+      onSettled: () => { adding.current = false; },
+      onSuccess: () => onAdded(observerNetid),
+    });
+  };
+
+  return (
+    <Modal
+      title="Add an observer by hand"
+      subtitle={`${row.observee.displayName}, ${row.section.label}`}
+      onClose={onClose}
+      footer={(
+        <>
+          <Button type="button" variant="secondary" disabled={add.isPending} onClick={onClose}>Cancel</Button>
+          <Button type="submit" form={formId} aria-disabled={add.isPending || undefined}>{add.isPending ? 'Adding…' : 'Add observer'}</Button>
+        </>
+      )}
+    >
+      <form id={formId} onSubmit={submit} noValidate>
+        <p className="mb-4 text-sm text-gray-700">
+          The professor is added to this sign-up's observer list even if the automatic matching rules would not pick them.
+          Pairing and schedule conflicts are still checked when the observee's request is confirmed.
+        </p>
+        <label htmlFor={fieldId} className={labelClass}>Observer NetID</label>
+        <input
+          id={fieldId}
+          className={`${inputClass} w-full`}
+          value={netid}
+          onChange={(e) => { setNetid(e.target.value); setEmpty(false); }}
+          required
+          aria-invalid={empty || undefined}
+          autoComplete="off"
+          spellCheck={false}
+        />
+        {empty && <p role="alert" className="mt-2 text-sm text-red-800">Enter the observer's NetID.</p>}
+        <ErrorNote error={add.isPending ? null : add.error} className="mt-3" />
+      </form>
+    </Modal>
+  );
+}
+
 /** "CS 1337" from "CS 1337.002"; the backend writes the department's full name ("Computer Science 1337.002"). */
 const courseOf = ({ label, sectionNum }: MatchingRow['section']) =>
   (label.endsWith(`.${sectionNum}`) ? label.slice(0, -(sectionNum.length + 1)) : label);
@@ -152,6 +217,8 @@ export function SignupsPage() {
   // isPending reaches React a tick after mutate(), so a fast double click would run twice without this.
   const running = useRef(false);
   const [onlyAttention, setOnlyAttention] = useState(false);
+  const [adding, setAdding] = useState<MatchingRow | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
   const passed = c ? todayIso() > c.signupDeadline : false;
   usePageTitle(c ? `Sign-up requests (deadline ${passed ? 'passed ' : ''}${formatShort(c.signupDeadline)})` : null);
 
@@ -242,6 +309,7 @@ export function SignupsPage() {
       </div>
       <ErrorNote error={run.error} className="mt-4" />
 
+      <p role="status" className="mt-4 text-sm text-gray-900 empty:hidden">{added ?? ''}</p>
       <div className="mt-4 max-w-full overflow-x-auto rounded-lg">
         <div className="min-w-[900px]">
           <Table label="Sign-up requests" columns="minmax(96px,150px) 88px 120px 172px 200px 1fr" head={['Course #', 'Section #', 'Days and time', 'Observee', 'Email', 'Observers found']}>
@@ -252,7 +320,16 @@ export function SignupsPage() {
                 <Cell>{classTime(r)}</Cell>
                 <Cell>{r.observee.displayName}</Cell>
                 <Cell className="truncate text-gray-500">{email.get(r.signupId)}</Cell>
-                <Cell><ObserversFound row={r} ran={ran} /></Cell>
+                <Cell>
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <ObserversFound row={r} ran={ran} />
+                    {r.alert && (
+                      <button type="button" className={`${linkClass} text-[13px]`} aria-label={`Add an observer for ${r.observee.displayName}`} onClick={() => setAdding(r)}>
+                        <PlusIcon width={10} height={10} /> Add observer
+                      </button>
+                    )}
+                  </span>
+                </Cell>
               </Row>
             ))}
             {rows.length === 0 && <EmptyRow>No sign-ups yet.</EmptyRow>}
@@ -260,6 +337,17 @@ export function SignupsPage() {
         </div>
       </div>
       <div className="mt-[11px]"><Pagination pager={pager} label="Sign-up pages" /></div>
+      {adding && (
+        <AddObserver
+          row={adding}
+          cycleId={c.cycleId}
+          onClose={() => setAdding(null)}
+          onAdded={(observerNetid) => {
+            setAdded(`Added ${observerNetid} to the observer list for ${adding.observee.displayName}.`);
+            setAdding(null);
+          }}
+        />
+      )}
     </div>
   );
 }
