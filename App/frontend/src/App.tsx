@@ -4,6 +4,7 @@ import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/committee/DashboardPage';
 import { CyclePage } from './pages/committee/CyclePage';
 import { FacultyPage } from './pages/committee/FacultyPage';
+import { DueListPage, NotificationsPage, OutstandingListPage, UnmatchedListPage } from './pages/committee/DashboardParts';
 import { RequestsPage } from './pages/faculty/RequestsPage';
 import { MyEvaluationPage } from './pages/faculty/MyEvaluationPage';
 import { SignUpPage } from './pages/faculty/SignUpPage';
@@ -37,6 +38,10 @@ export const router = createBrowserRouter([
         element: <DashboardPage />,
         handle: { title: 'Cycle results (KPIs)' } satisfies RouteHandle,
       },
+      { path: '/committee/dashboard/due', element: <DueListPage />, handle: { title: 'Due or overdue for evaluation' } satisfies RouteHandle },
+      { path: '/committee/dashboard/unmatched', element: <UnmatchedListPage />, handle: { title: 'Unmatched faculty' } satisfies RouteHandle },
+      { path: '/committee/dashboard/outstanding', element: <OutstandingListPage />, handle: { title: 'Outstanding observations' } satisfies RouteHandle },
+      { path: '/committee/dashboard/notifications', element: <NotificationsPage />, handle: { title: 'Notifications' } satisfies RouteHandle },
       { path: '/committee/cycle', element: <CyclePage />, handle: { title: 'Start the evaluation cycle' } satisfies RouteHandle },
       { path: '/committee/faculty', element: <FacultyPage />, handle: { title: 'Faculty' } satisfies RouteHandle },
       { path: '/committee/signups', element: <SignupsPage />, handle: { title: 'Sign-up requests' } satisfies RouteHandle },

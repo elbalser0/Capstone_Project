@@ -9,7 +9,7 @@ import { Banner, Button, Cell, DueTag, EmptyRow, ErrorNote, Pagination, Row, Tab
 import { RANK_SHORT, dayLetters, formatDate, formatTime } from '../../lib/format';
 import { DUE_OR_OVERDUE_TEXT, OUTSTANDING_TEXT, UNMATCHED_TEXT } from '../../lib/statusTerms';
 
-// A1 detail lists under the executive summary, in the table style of A3, A4 and A6.
+// A1 detail lists, each on its own page under Dashboard in the sidebar (DashboardParts.tsx), in the table style of A3, A4 and A6.
 // Each list has its own request, so one failing or loading does not hold back the others.
 // Status is the last column, as on A3, A4 and A6; while a table is too wide to show at once it moves
 // next to the name, so it stays in view.
@@ -187,7 +187,7 @@ function classTime(section: CourseSection) {
 
 const STATUS_ORDER = { OVERDUE: 0, DUE: 1 };
 
-function DueFaculty() {
+export function DueFaculty() {
   const cycle = useCurrentCycle();
   const due = useDueProfessors(cycle.data?.cycleId);
   // Overdue first, as on A3; otherwise the API's order (rank, then name).
@@ -222,7 +222,7 @@ const ALERT_TAG: Record<AlertType, [TagTone, string]> = {
   no_acceptance: ['overdue', 'No one accepted'],
 };
 
-function Unmatched() {
+export function Unmatched() {
   const unmatched = useUnmatchedFaculty();
   return (
     <DetailList<UnmatchedFaculty['items'][number]>
@@ -254,7 +254,7 @@ const OBSERVATION_TAG: Record<ObservationStatus | 'none', [TagTone, string]> = {
   completed: ['signed', 'Completed'],
 };
 
-function Outstanding() {
+export function Outstanding() {
   const cycle = useCurrentCycle();
   const signups = useCycleSignups(cycle.data?.cycleId);
   // Same rule as the outstanding-observations count: no observation yet, or one that is not
@@ -281,15 +281,5 @@ function Outstanding() {
       empty={signups.data?.length ? 'Every sign-up has a completed observation.' : 'No one has signed up yet this cycle.'}
       rowKey={(s) => s.signupId}
     />
-  );
-}
-
-export function DashboardSections() {
-  return (
-    <>
-      <DueFaculty />
-      <Unmatched />
-      <Outstanding />
-    </>
   );
 }

@@ -171,8 +171,8 @@ function SendAction({ id, cycleId, disabled }: { id: ActionId; cycleId: string; 
 }
 
 /**
- * The committee's notification sends, under the dashboard lists. Shown only to AC members (the backend
- * checks again); off until the current cycle is known.
+ * The committee's notification sends, on the Notifications page under Dashboard in the sidebar. Shown only
+ * to AC members (the backend checks again); off until the current cycle is known.
  */
 export function NotificationControls() {
   const me = useMe();
