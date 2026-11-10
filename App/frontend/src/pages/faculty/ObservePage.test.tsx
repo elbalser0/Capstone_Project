@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
@@ -254,4 +254,28 @@ it('does not fetch faculty incoming requests in committee mode', async () => {
 it('redirects legacy assignment links to My confirmations', () => {
   const matched = matchRoutes(router.routes, '/faculty/assignments');
   expect(matched?.at(-1)?.route.element).toEqual(<Navigate to="/faculty/observe/confirmations" replace />);
+});
+
+it('tells a pending observer only that a request taken by someone else is cancelled', async () => {
+  setup();
+  shell('/faculty/observe', <ObserveRequestsPage />);
+  expect(await screen.findByText('If someone accepts before you, this request is cancelled. It does not count toward your 3.')).toBeVisible();
+});
+
+it('does not mention email or notifications on Observe', async () => {
+  setup();
+  shell('/faculty/observe', <ObserveRequestsPage />);
+  const main = await screen.findByRole('main');
+  await within(main).findByText('The first colleague to accept is paired automatically.');
+  expect(main).not.toHaveTextContent(/e-?mail/i);
+  expect(main).not.toHaveTextContent(/notif/i);
+});
+
+it('does not mention email or notifications on My confirmations', async () => {
+  setup({ incoming: [] });
+  shell('/faculty/observe/confirmations', <ConfirmationsPage />);
+  const main = await screen.findByRole('main');
+  await within(main).findByText('No confirmations yet this semester.');
+  expect(main).not.toHaveTextContent(/e-?mail/i);
+  expect(main).not.toHaveTextContent(/notif/i);
 });

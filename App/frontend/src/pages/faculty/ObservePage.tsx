@@ -118,7 +118,7 @@ export function ObserveRequestsPage() {
 
       <InfoLine className="mt-[34px]">Requests expire 48 hours after they are sent. You can confirm up to 3 observations per semester.</InfoLine>
       <Note className="mt-4" title="The first colleague to accept is paired automatically.">
-        If someone accepts before you, this request is cancelled and you get an email. It does not count toward your 3.
+        If someone accepts before you, this request is cancelled. It does not count toward your 3.
       </Note>
     </div>
   );
