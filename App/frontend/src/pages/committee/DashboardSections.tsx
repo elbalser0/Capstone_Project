@@ -283,13 +283,3 @@ export function Outstanding() {
     />
   );
 }
-
-export function DashboardSections() {
-  return (
-    <>
-      <DueFaculty />
-      <Unmatched />
-      <Outstanding />
-    </>
-  );
-}

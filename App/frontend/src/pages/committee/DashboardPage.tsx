@@ -8,12 +8,11 @@ import { DownloadIcon } from '../../components/icons';
 import { Banner, Button, Card, ErrorNote, linkClass } from '../../components/ui';
 import { downloadCsv } from '../../lib/csv';
 import { formatDate, formatShort, percent, ranks } from '../../lib/format';
-import { NotificationControls } from './NotificationControls';
-import { NotificationInbox } from './NotificationInbox';
-import { DashboardSections, NO_CYCLE_TEXT, TryAgain, errorText, failureKey, headingFocus, isNoCycle, type Retryable } from './DashboardSections';
+import { NO_CYCLE_TEXT, TryAgain, errorText, failureKey, headingFocus, isNoCycle, type Retryable } from './DashboardSections';
 
 // A1. KPIs are generated the day after a cycle's feedback deadline, so the cards show the
-// latest cycle that has results; the executive summary and the lists below are the current cycle so far.
+// latest cycle that has results; the executive summary is the current cycle so far. Its lists and the
+// notification sends have their own pages under Dashboard in the sidebar (DashboardParts.tsx).
 
 interface KpiMeta {
   group: string;
@@ -61,19 +60,18 @@ function exportCsv(data: CycleKpis) {
 }
 
 /**
- * `failed` shows the detail in red and, unless another part of the page already announces the same failure
- * (`announce` false), makes it an alert that names the count; `failedAt` re-creates it on every new failure.
+ * `failed` shows the detail in red and makes it an alert that names the count; `failedAt` re-creates it on
+ * every new failure.
  */
-function SummaryCell({ label, total, detail, failed = false, failedAt, announce = true, children }: { label: string; total: number | undefined; detail: string; failed?: boolean; failedAt?: number; announce?: boolean; children?: ReactNode }) {
-  const alert = failed && announce;
+function SummaryCell({ label, total, detail, failed = false, failedAt, children }: { label: string; total: number | undefined; detail: string; failed?: boolean; failedAt?: number; children?: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col px-5 py-4 @2xl:my-4 @2xl:py-0">
       <span className="text-xs text-gray-500">{label}</span>
       {/* min-w-0 and wrap-anywhere let a long name break inside the cell instead of widening the page. */}
       <span className="mt-[3px] flex flex-wrap items-baseline gap-x-3.5">
         <span className="text-[22px] font-bold">{total ?? '–'}</span>
-        <span key={failed ? failedAt : 'loaded'} role={alert ? 'alert' : undefined} className={`min-w-0 text-[13px] wrap-anywhere ${failed ? 'text-red-800' : 'text-gray-700'}`}>
-          {alert && <span className="sr-only">{label}: </span>}
+        <span key={failed ? failedAt : 'loaded'} role={failed ? 'alert' : undefined} className={`min-w-0 text-[13px] wrap-anywhere ${failed ? 'text-red-800' : 'text-gray-700'}`}>
+          {failed && <span className="sr-only">{label}: </span>}
           {detail}
         </span>
       </span>
@@ -88,21 +86,17 @@ const notLoaded = ({ error }: { error: unknown }) => (isNoCycle(error) ? NO_CYCL
 /** A count that never arrived because its request failed (not because no cycle has started). */
 const loadFailed = (q: { data?: unknown; error: unknown }) => q.data === undefined && Boolean(q.error) && !isNoCycle(q.error);
 
-/**
- * Under a count whose request failed: a failed refresh keeps the last count and says so, and Try again
- * repeats the request, unless another part of the page already offers it (`retry` false).
- */
-function CountNote({ label, query, focus, retry = true }: { label: string; query: Retryable & { data?: unknown }; focus: RefObject<HTMLElement | null>; retry?: boolean }) {
-  if (!query.error || isNoCycle(query.error) || (!retry && query.data === undefined)) return null;
-  // The part of the page that offers Try again also announces the failure.
+/** Under a count whose request failed: a failed refresh keeps the last count and says so, and Try again repeats the request. */
+function CountNote({ label, query, focus }: { label: string; query: Retryable & { data?: unknown }; focus: RefObject<HTMLElement | null> }) {
+  if (!query.error || isNoCycle(query.error)) return null;
   return (
     <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
       {query.data !== undefined && (
-        <span key={query.errorUpdatedAt} role={retry ? 'alert' : undefined} className="text-xs text-red-800">
-          {retry && <span className="sr-only">{label}: </span>}Couldn't refresh.
+        <span key={query.errorUpdatedAt} role="alert" className="text-xs text-red-800">
+          <span className="sr-only">{label}: </span>Couldn't refresh.
         </span>
       )}
-      {retry && <TryAgain queries={[query]} focus={focus} />}
+      <TryAgain queries={[query]} focus={focus} />
     </span>
   );
 }
@@ -131,16 +125,14 @@ function Summary() {
         >
           <CountNote label="Signed up but not observed" query={outstanding} focus={heading} />
         </SummaryCell>
-        {/* The unmatched list below reads the same request and offers its own Try again. */}
         <SummaryCell
           label="Unmatched faculty"
           total={unmatched.data?.total}
           detail={!unmatched.data ? notLoaded(unmatched) : first ? `${first.observee.displayName}, ${first.section.label}${more > 0 ? `, and ${more} more` : ''}` : 'None'}
           failed={loadFailed(unmatched)}
           failedAt={unmatched.errorUpdatedAt}
-          announce={false}
         >
-          <CountNote label="Unmatched faculty" query={unmatched} focus={heading} retry={false} />
+          <CountNote label="Unmatched faculty" query={unmatched} focus={heading} />
           <Link to="/committee/signups" className={`${linkClass} mt-2 w-fit`}>Open in Sign-ups</Link>
         </SummaryCell>
       </Card>
@@ -217,10 +209,6 @@ export function DashboardPage() {
         </div>
       </section>
       <Summary />
-      <DashboardSections />
-      {/* Not on the A1 frame: the sends sit below the approved layout, the sender's own inbox last. */}
-      <NotificationControls />
-      <NotificationInbox />
     </div>
   );
 }

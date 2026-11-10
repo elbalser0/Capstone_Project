@@ -9,6 +9,7 @@ import type { CycleKpis, DueByRank, DueProfessor, KpiResult, Me, PersonRef, Sign
 import { downloadCsv } from '../../lib/csv';
 import { DUE_OR_OVERDUE_TEXT, OUTSTANDING_TEXT, UNMATCHED_TEXT } from '../../lib/statusTerms';
 import { DashboardPage } from './DashboardPage';
+import { DueListPage, NotificationsPage, OutstandingListPage, UnmatchedListPage } from './DashboardParts';
 
 vi.mock('../../lib/csv', () => ({ downloadCsv: vi.fn() }));
 
@@ -55,7 +56,7 @@ const committeeMember: Me = {
 
 function serve() {
   server.use(
-    // The notification sends and inbox under the lists (tested in NotificationControls.test.tsx).
+    // The notification sends and inbox on their own page (tested in NotificationControls.test.tsx).
     http.get('*/api/me', () => HttpResponse.json(committeeMember)),
     http.get('*/api/me/notifications', () => HttpResponse.json([])),
     http.get('*/api/cycles/latest/kpis', () => HttpResponse.json(kpis)),
@@ -68,13 +69,39 @@ function serve() {
   );
 }
 
-function openPage() {
-  return renderRoutes([{ path: '/committee/dashboard', element: <DashboardPage /> }], '/committee/dashboard');
+// The overview keeps the KPIs and the executive summary; each list and the sends have their own page.
+const OVERVIEW = '/committee/dashboard';
+const DUE_PAGE = '/committee/dashboard/due';
+const UNMATCHED_PAGE = '/committee/dashboard/unmatched';
+const OUTSTANDING_PAGE = '/committee/dashboard/outstanding';
+const NOTIFICATIONS_PAGE = '/committee/dashboard/notifications';
+
+function openPage(path = OVERVIEW) {
+  return renderRoutes([
+    { path: OVERVIEW, element: <DashboardPage /> },
+    { path: DUE_PAGE, element: <DueListPage /> },
+    { path: UNMATCHED_PAGE, element: <UnmatchedListPage /> },
+    { path: OUTSTANDING_PAGE, element: <OutstandingListPage /> },
+    { path: NOTIFICATIONS_PAGE, element: <NotificationsPage /> },
+  ], path);
 }
 
 const section = (name: RegExp) => screen.getByRole('region', { name });
 const dataRows = (region: HTMLElement) => within(region).getAllByRole('row').slice(1);
-const LISTS = [/Due or overdue/, /Unmatched faculty/, /Outstanding observations/];
+/** Each list, its page, and a row the default data shows on it. */
+const LISTS: { name: RegExp; path: string; row: string }[] = [
+  { name: /Due or overdue/, path: DUE_PAGE, row: 'Dr. Raj Mehta' },
+  { name: /Unmatched faculty/, path: UNMATCHED_PAGE, row: 'Dr. Sarah Kim' },
+  { name: /Outstanding observations/, path: OUTSTANDING_PAGE, row: 'Dr. Laura Gomez' },
+];
+const [DUE_LIST, UNMATCHED_LIST, OUTSTANDING_LIST] = LISTS;
+
+/** Opens a list's page and waits for one of its rows, to check that it still loads. */
+async function expectListLoads(list: (typeof LISTS)[number]) {
+  const view = openPage(list.path);
+  expect(await within(section(list.name)).findByText(list.row)).toBeVisible();
+  view.unmount();
+}
 
 /** Every child of the table body is a row and every child of a row is a cell, as screen readers expect. */
 function expectTableStructure(region: HTMLElement) {
@@ -93,22 +120,29 @@ function expectMessageOnly(region: HTMLElement) {
 }
 
 describe('Committee dashboard detail sections', () => {
-  it('adds the notification sends and the inbox after the three lists, leaving the lists in place', async () => {
+  it('shows the notification sends and the inbox on their own page, not on the overview, leaving the lists on theirs', async () => {
     serve();
-    openPage();
+    const notifications = openPage(NOTIFICATIONS_PAGE);
     const sends = await screen.findByRole('region', { name: 'Send notifications' });
     const inbox = await screen.findByRole('region', { name: 'Your notifications' });
-    const lists = LISTS.map((name) => section(name));
-    for (const list of lists) {
-      expect(list.compareDocumentPosition(sends) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    }
     expect(sends.compareDocumentPosition(inbox) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const list of LISTS) expect(screen.queryByRole('region', { name: list.name })).not.toBeInTheDocument();
+    notifications.unmount();
+
+    const overview = openPage();
+    expect(await screen.findByRole('region', { name: 'Executive summary' })).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'Send notifications' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Your notifications' })).not.toBeInTheDocument();
+    for (const list of LISTS) expect(screen.queryByRole('region', { name: list.name })).not.toBeInTheDocument();
+    overview.unmount();
+
+    openPage(DUE_PAGE);
     expect(await screen.findByText('Dr. Raj Mehta')).toBeVisible();
   });
 
   it('lists the faculty who are due or overdue for the current cycle, overdue first', async () => {
     serve();
-    openPage();
+    openPage(DUE_PAGE);
     expect(await screen.findByText('Dr. Raj Mehta')).toBeVisible();
     const due = section(/Due or overdue for evaluation/);
     expect(within(due).getByRole('heading')).toHaveTextContent('Due or overdue for evaluation (2)');
@@ -133,7 +167,7 @@ describe('Committee dashboard detail sections', () => {
         { signupId: '26', observee: dana, section: course, alertType: 'insufficient_observers' },
       ],
     })));
-    openPage();
+    openPage(UNMATCHED_PAGE);
     expect(await screen.findByText('Dr. Kevin Liu')).toBeVisible();
     const region = section(/Unmatched faculty/);
     expect(within(region).getByRole('heading')).toHaveTextContent('Unmatched faculty (3)');
@@ -154,7 +188,7 @@ describe('Committee dashboard detail sections', () => {
     server.use(http.get('*/api/dashboard/unmatched', () => HttpResponse.json({
       ...unmatched, items: [{ ...unmatched.items[0], section: { ...otherCourse, classMode: 'online', meetings: [] } }],
     })));
-    openPage();
+    openPage(UNMATCHED_PAGE);
     expect(await screen.findByText('Online')).toBeVisible();
     const [row] = dataRows(section(/Unmatched faculty/));
     expect(within(row).getByText('Dr. Sarah Kim')).toBeVisible();
@@ -163,7 +197,7 @@ describe('Committee dashboard detail sections', () => {
 
   it('lists sign-ups without a completed observation as outstanding', async () => {
     serve();
-    openPage();
+    openPage(OUTSTANDING_PAGE);
     expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
     const region = section(/Outstanding observations/);
     expect(within(region).getByRole('heading')).toHaveTextContent('Outstanding observations (3)');
@@ -186,7 +220,7 @@ describe('Committee dashboard detail sections', () => {
     }));
     server.use(http.get('*/api/cycles/1/due-professors', () => HttpResponse.json(many)));
     const user = userEvent.setup();
-    openPage();
+    openPage(DUE_PAGE);
     const due = section(/Due or overdue/);
     expect(await within(due).findByText('Dr. Test Person 7')).toBeVisible();
     expect(within(due).queryByText('Dr. Test Person 8')).not.toBeInTheDocument();
@@ -203,36 +237,43 @@ describe('Committee dashboard detail sections', () => {
       http.get('*/api/dashboard/unmatched', () => HttpResponse.json({ cycleId: '1', total: 0, items: [] })),
       http.get('*/api/cycles/1/signups', () => HttpResponse.json([signups[3]])),
     );
-    openPage();
-    expect(await within(section(/Due or overdue/)).findByText('Nobody is due or overdue this cycle.')).toBeVisible();
-    expect(await within(section(/Unmatched faculty/)).findByText('No unmatched faculty.')).toBeVisible();
-    expect(await within(section(/Outstanding observations/)).findByText('Every sign-up has a completed observation.')).toBeVisible();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    for (const name of LISTS) {
-      expect(within(section(name)).getByRole('heading')).not.toHaveTextContent(/\(\d+\)/);
-      expectMessageOnly(section(name));
+    const empty: [(typeof LISTS)[number], string][] = [
+      [DUE_LIST, 'Nobody is due or overdue this cycle.'],
+      [UNMATCHED_LIST, 'No unmatched faculty.'],
+      [OUTSTANDING_LIST, 'Every sign-up has a completed observation.'],
+    ];
+    for (const [list, text] of empty) {
+      const view = openPage(list.path);
+      expect(await within(section(list.name)).findByText(text)).toBeVisible();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(within(section(list.name)).getByRole('heading')).not.toHaveTextContent(/\(\d+\)/);
+      expectMessageOnly(section(list.name));
+      view.unmount();
     }
   });
 
   it('makes a table a keyboard stop only while it is too wide to show at once', async () => {
     serve();
     // jsdom has no layout: every box measures 0 wide, so the tables fit.
-    const first = openPage();
-    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
-    for (const name of LISTS) {
+    for (const { name, path, row } of LISTS) {
+      const view = openPage(path);
+      expect(await screen.findByText(row)).toBeVisible();
       const scroller = within(section(name)).getByRole('group', { name });
       expect(scroller).not.toHaveAttribute('tabindex');
       expect(within(scroller).getByRole('table')).toBeVisible();
       expectTableStructure(section(name));
+      view.unmount();
     }
-    first.unmount();
 
     const wide = vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(900);
     const box = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(500);
     try {
-      openPage();
-      expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
-      for (const name of LISTS) expect(within(section(name)).getByRole('group', { name })).toHaveAttribute('tabindex', '0');
+      for (const { name, path, row } of LISTS) {
+        const view = openPage(path);
+        expect(await screen.findByText(row)).toBeVisible();
+        expect(within(section(name)).getByRole('group', { name })).toHaveAttribute('tabindex', '0');
+        view.unmount();
+      }
     } finally {
       wide.mockRestore();
       box.mockRestore();
@@ -242,25 +283,27 @@ describe('Committee dashboard detail sections', () => {
   it('shows loading text, not an empty list, while a list is pending', async () => {
     serve();
     server.use(http.get('*/api/cycles/1/due-professors', never));
-    openPage();
+    const view = openPage(DUE_PAGE);
     const due = section(/Due or overdue/);
     expect(await within(due).findByText('Loading faculty…')).toBeVisible();
     expect(within(due).queryByText('Nobody is due or overdue this cycle.')).not.toBeInTheDocument();
     expectMessageOnly(due);
-    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
+    view.unmount();
+    await expectListLoads(OUTSTANDING_LIST);
   });
 
   it('shows a failed list as an error while the other lists still load', async () => {
     serve();
     server.use(http.get('*/api/cycles/1/due-professors', () => failure('The requested endpoint does not exist.', 404, 'NOT_FOUND')));
-    openPage();
+    const view = openPage(DUE_PAGE);
     const due = section(/Due or overdue/);
     expect(await within(due).findByRole('alert')).toHaveTextContent('The requested endpoint does not exist.');
     expect(within(due).queryByText('Nobody is due or overdue this cycle.')).not.toBeInTheDocument();
     expect(within(due).getByRole('heading')).toHaveTextContent(/^Due or overdue for evaluation$/);
     expectMessageOnly(due);
-    expect(await screen.findByText('Dr. Sarah Kim')).toBeVisible();
-    expect(screen.getByText('Dr. Laura Gomez')).toBeVisible();
+    view.unmount();
+    await expectListLoads(UNMATCHED_LIST);
+    await expectListLoads(OUTSTANDING_LIST);
   });
 
   it('shows failed unmatched and outstanding lists as errors while the due list still loads', async () => {
@@ -269,22 +312,28 @@ describe('Committee dashboard detail sections', () => {
       http.get('*/api/dashboard/unmatched', () => failure('Unmatched faculty could not be read.')),
       http.get('*/api/cycles/1/signups', () => failure('Sign-ups could not be read.')),
     );
-    openPage();
+    const unmatchedView = openPage(UNMATCHED_PAGE);
     expect(await within(section(/Unmatched faculty/)).findByRole('alert')).toHaveTextContent('Unmatched faculty could not be read.');
-    expect(await within(section(/Outstanding observations/)).findByRole('alert')).toHaveTextContent('Sign-ups could not be read.');
     expect(within(section(/Unmatched faculty/)).queryByText('No unmatched faculty.')).not.toBeInTheDocument();
+    unmatchedView.unmount();
+    const outstandingView = openPage(OUTSTANDING_PAGE);
+    expect(await within(section(/Outstanding observations/)).findByRole('alert')).toHaveTextContent('Sign-ups could not be read.');
     expect(within(section(/Outstanding observations/)).queryByText('Every sign-up has a completed observation.')).not.toBeInTheDocument();
-    expect(await screen.findByText('Dr. Raj Mehta')).toBeVisible();
+    outstandingView.unmount();
+    await expectListLoads(DUE_LIST);
   });
 
   it('shows an error in the cycle lists when the current cycle cannot be read', async () => {
     serve();
     server.use(http.get('*/api/cycles/current', () => failure('The current cycle could not be read.')));
-    openPage();
+    const dueView = openPage(DUE_PAGE);
     expect(await within(section(/Due or overdue/)).findByRole('alert')).toHaveTextContent('The current cycle could not be read.');
-    expect(await within(section(/Outstanding observations/)).findByRole('alert')).toHaveTextContent('The current cycle could not be read.');
     expect(within(section(/Due or overdue/)).queryByText('No evaluation cycle has started yet.')).not.toBeInTheDocument();
-    expect(await screen.findByText('Dr. Sarah Kim')).toBeVisible();
+    dueView.unmount();
+    const outstandingView = openPage(OUTSTANDING_PAGE);
+    expect(await within(section(/Outstanding observations/)).findByRole('alert')).toHaveTextContent('The current cycle could not be read.');
+    outstandingView.unmount();
+    await expectListLoads(UNMATCHED_LIST);
   });
 
   it('says once that no cycle has started, instead of errors, zeros or empty lists', async () => {
@@ -388,12 +437,9 @@ describe('Committee dashboard recovery', () => {
     const reads = countReads();
     try {
       const user = userEvent.setup();
-      openPage();
+      openPage(DUE_PAGE);
       const due = section(/Due or overdue/);
       expect(await within(due).findByRole('alert')).toHaveTextContent("Couldn't load this list: Server error.");
-      expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
-      expect(await screen.findByText('Dr. Sarah Kim, CS 2336.001')).toBeVisible();
-      expect(await screen.findAllByText('N/A')).toHaveLength(7);
       const before = { ...reads };
       await user.click(within(due).getByRole('button', { name: 'Try again' }));
       expect(await within(due).findByText('Dr. Raj Mehta')).toBeVisible();
@@ -408,7 +454,7 @@ describe('Committee dashboard recovery', () => {
     serve();
     server.use(http.get('*/api/cycles/1/due-professors', sequence(() => failure('Server error.'), () => failure('Still down.'))));
     const user = userEvent.setup();
-    openPage();
+    openPage(DUE_PAGE);
     const due = section(/Due or overdue/);
     await user.click(await within(due).findByRole('button', { name: 'Try again' }));
     expect(within(due).getByRole('heading')).toHaveFocus();
@@ -420,7 +466,7 @@ describe('Committee dashboard recovery', () => {
     serve();
     server.use(http.get('*/api/dashboard/unmatched', sequence(() => failure('Server error.'), never)));
     const user = userEvent.setup();
-    openPage();
+    openPage(UNMATCHED_PAGE);
     const region = section(/Unmatched faculty/);
     await user.click(await within(region).findByRole('button', { name: 'Try again' }));
     expect(await within(region).findByText('Loading unmatched faculty…')).toBeVisible();
@@ -430,7 +476,7 @@ describe('Committee dashboard recovery', () => {
   it('says it is trying again while a failed refresh is retried, without dropping focus', async () => {
     serve();
     const user = userEvent.setup();
-    const { queryClient } = openPage();
+    const { queryClient } = openPage(UNMATCHED_PAGE);
     const region = section(/Unmatched faculty/);
     expect(await within(region).findByText('Dr. Sarah Kim')).toBeVisible();
     server.use(http.get('*/api/dashboard/unmatched', () => failure('Server error.')));
@@ -445,7 +491,7 @@ describe('Committee dashboard recovery', () => {
   it('keeps the last rows when a refresh fails, then recovers with Try again', async () => {
     serve();
     const user = userEvent.setup();
-    const { queryClient } = openPage();
+    const { queryClient } = openPage(DUE_PAGE);
     const due = section(/Due or overdue/);
     expect(await within(due).findByText('Dr. Raj Mehta')).toBeVisible();
     server.use(http.get('*/api/cycles/1/due-professors', () => failure('Server error.')));
@@ -462,7 +508,7 @@ describe('Committee dashboard recovery', () => {
 
   it('keeps the outstanding rows when their refresh fails', async () => {
     serve();
-    const { queryClient } = openPage();
+    const { queryClient } = openPage(OUTSTANDING_PAGE);
     const region = section(/Outstanding observations/);
     expect(await within(region).findByText('Dr. Laura Gomez')).toBeVisible();
     server.use(http.get('*/api/cycles/1/signups', () => failure('Server error.')));
@@ -472,18 +518,20 @@ describe('Committee dashboard recovery', () => {
   });
 
   it('does not mark a list stale when only the cycle check failed to refresh', async () => {
-    serve();
-    const { queryClient } = openPage();
-    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
-    expect(screen.getByText('Dr. Raj Mehta')).toBeVisible();
-    server.use(http.get('*/api/cycles/current', () => failure('Cycle read failed.')));
-    await act(() => queryClient.refetchQueries());
-    expect(queryClient.getQueryState(['cycles', 'current'])?.status).toBe('error');
-    // The query client hands results to the page on a timer, so let it run before checking that nothing appeared.
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(within(section(/Due or overdue/)).queryByRole('alert')).not.toBeInTheDocument();
-    expect(within(section(/Outstanding observations/)).queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getByText('Dr. Raj Mehta')).toBeVisible();
+    // Both cycle lists read the current cycle; each is on its own page.
+    for (const list of [DUE_LIST, OUTSTANDING_LIST]) {
+      serve();
+      const view = openPage(list.path);
+      expect(await screen.findByText(list.row)).toBeVisible();
+      server.use(http.get('*/api/cycles/current', () => failure('Cycle read failed.')));
+      await act(() => view.queryClient.refetchQueries());
+      expect(view.queryClient.getQueryState(['cycles', 'current'])?.status).toBe('error');
+      // The query client hands results to the page on a timer, so let it run before checking that nothing appeared.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(within(section(list.name)).queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.getByText(list.row)).toBeVisible();
+      view.unmount();
+    }
   });
 
   it('says no cycle without a Try again where the routes report none, while the cycle check itself failed', async () => {
@@ -495,39 +543,53 @@ describe('Committee dashboard recovery', () => {
       http.get('*/api/dashboard/outstanding-observations', noCycle),
       http.get('*/api/dashboard/unmatched', noCycle),
     );
-    openPage();
-    const unmatchedList = section(/Unmatched faculty/);
-    expect(await within(unmatchedList).findByText('No evaluation cycle has started yet.')).toBeVisible();
-    expect(within(unmatchedList).queryByRole('alert')).not.toBeInTheDocument();
+    const overview = openPage();
     expect(await within(summaryCount('Due for evaluation')).findByText('No evaluation cycle has started yet.')).toBeVisible();
     const summary = screen.getByRole('region', { name: 'Executive summary' });
     expect(within(summary).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    overview.unmount();
+
+    const unmatchedView = openPage(UNMATCHED_PAGE);
+    const unmatchedList = section(/Unmatched faculty/);
+    expect(await within(unmatchedList).findByText('No evaluation cycle has started yet.')).toBeVisible();
+    expect(within(unmatchedList).queryByRole('alert')).not.toBeInTheDocument();
+    unmatchedView.unmount();
+
     // The two cycle lists need the cycle itself, so they show its failure.
-    expect(await within(section(/Due or overdue/)).findByRole('alert')).toHaveTextContent("Couldn't load this list: Cycle read failed.");
-    expect(within(section(/Outstanding observations/)).getByRole('alert')).toHaveTextContent("Couldn't load this list: Cycle read failed.");
+    for (const list of [DUE_LIST, OUTSTANDING_LIST]) {
+      const view = openPage(list.path);
+      expect(await within(section(list.name)).findByRole('alert')).toHaveTextContent("Couldn't load this list: Cycle read failed.");
+      view.unmount();
+    }
   });
 
   it('keeps the Figma column order while a table fits, and moves the status next to the name while it scrolls', async () => {
     serve();
     const head = (name: RegExp) => within(section(name)).getAllByRole('columnheader').map((h) => h.textContent);
+    const COLUMNS: [(typeof LISTS)[number], string[], string[]][] = [
+      [DUE_LIST, ['Name', 'Rank', 'Department', 'Last observed', 'Status'], ['Name', 'Status', 'Rank', 'Department', 'Last observed']],
+      [UNMATCHED_LIST, ['Observee', 'Rank', 'Course', 'Days and time', 'Reason'], ['Observee', 'Reason', 'Rank', 'Course', 'Days and time']],
+      [OUTSTANDING_LIST, ['Observee', 'Rank', 'Observer', 'Course', 'Date', 'Status'], ['Observee', 'Status', 'Rank', 'Observer', 'Course', 'Date']],
+    ];
     // jsdom has no layout, so every table fits.
-    const first = openPage();
-    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
-    expect(head(/Due or overdue/)).toEqual(['Name', 'Rank', 'Department', 'Last observed', 'Status']);
-    expect(head(/Unmatched faculty/)).toEqual(['Observee', 'Rank', 'Course', 'Days and time', 'Reason']);
-    expect(head(/Outstanding observations/)).toEqual(['Observee', 'Rank', 'Observer', 'Course', 'Date', 'Status']);
-    expect(within(dataRows(section(/Due or overdue/))[0]).getAllByRole('cell')[4]).toHaveTextContent('OVERDUE');
-    first.unmount();
+    for (const [list, fits] of COLUMNS) {
+      const view = openPage(list.path);
+      expect(await screen.findByText(list.row)).toBeVisible();
+      expect(head(list.name)).toEqual(fits);
+      if (list === DUE_LIST) expect(within(dataRows(section(list.name))[0]).getAllByRole('cell')[4]).toHaveTextContent('OVERDUE');
+      view.unmount();
+    }
 
     const wide = vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(900);
     const box = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(500);
     try {
-      openPage();
-      expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
-      await waitFor(() => expect(head(/Due or overdue/)).toEqual(['Name', 'Status', 'Rank', 'Department', 'Last observed']));
-      expect(head(/Unmatched faculty/)).toEqual(['Observee', 'Reason', 'Rank', 'Course', 'Days and time']);
-      expect(head(/Outstanding observations/)).toEqual(['Observee', 'Status', 'Rank', 'Observer', 'Course', 'Date']);
-      expect(within(dataRows(section(/Due or overdue/))[0]).getAllByRole('cell')[1]).toHaveTextContent('OVERDUE');
+      for (const [list, , scrolls] of COLUMNS) {
+        const view = openPage(list.path);
+        expect(await screen.findByText(list.row)).toBeVisible();
+        await waitFor(() => expect(head(list.name)).toEqual(scrolls));
+        if (list === DUE_LIST) expect(within(dataRows(section(list.name))[0]).getAllByRole('cell')[1]).toHaveTextContent('OVERDUE');
+        view.unmount();
+      }
     } finally {
       wide.mockRestore();
       box.mockRestore();
@@ -538,7 +600,7 @@ describe('Committee dashboard recovery', () => {
     serve();
     const long = 'The server could not finish this request because the database did not answer in time.';
     server.use(http.get('*/api/cycles/1/due-professors', () => failure(long)));
-    openPage();
+    openPage(DUE_PAGE);
     const due = section(/Due or overdue/);
     expect(await within(due).findByRole('alert')).toHaveTextContent(`Couldn't load this list: ${long}`);
     expectMessageOnly(due);
@@ -550,7 +612,7 @@ describe('Committee dashboard recovery', () => {
       http.get('*/api/cycles/current', sequence(() => HttpResponse.json(cycle), () => failure('Cycle read failed.'))),
       http.get('*/api/cycles/1/due-professors', never),
     );
-    const { queryClient } = openPage();
+    const { queryClient } = openPage(DUE_PAGE);
     const due = section(/Due or overdue/);
     expect(await within(due).findByText('Loading faculty…')).toBeVisible();
     await act(() => queryClient.refetchQueries({ queryKey: ['cycles', 'current'] }));
@@ -563,20 +625,20 @@ describe('Committee dashboard recovery', () => {
   it('says no one has signed up yet when the cycle has no sign-ups', async () => {
     serve();
     server.use(http.get('*/api/cycles/1/signups', () => HttpResponse.json([])));
-    openPage();
+    openPage(OUTSTANDING_PAGE);
     const region = section(/Outstanding observations/);
     expect(await within(region).findByText('No one has signed up yet this cycle.')).toBeVisible();
     expect(within(region).queryByText('Every sign-up has a completed observation.')).not.toBeInTheDocument();
   });
 
-  it('offers one Try again for a failed unmatched request, in the list, and marks the count as failed', async () => {
+  it('offers one Try again for a failed unmatched request on its list page', async () => {
     serve();
     server.use(http.get('*/api/dashboard/unmatched', () => failure('Server error.')));
-    openPage();
-    expect(await within(section(/Unmatched faculty/)).findByRole('button', { name: 'Try again' })).toBeVisible();
+    openPage(UNMATCHED_PAGE);
+    const region = section(/Unmatched faculty/);
+    expect(await within(region).findByRole('alert')).toHaveTextContent("Couldn't load this list: Server error.");
+    expect(within(region).getByRole('button', { name: 'Try again' })).toBeVisible();
     expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1);
-    expect(within(summaryCount('Unmatched faculty')).getByText("Couldn't load")).toHaveClass('text-red-800');
-    expect(within(summaryCount('Unmatched faculty')).queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('loads a failed count again with Try again', async () => {
@@ -610,7 +672,7 @@ describe('Committee dashboard recovery', () => {
     serve();
     server.use(http.get('*/api/cycles/latest/kpis', never));
     openPage();
-    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
+    expect(await within(summaryCount('Unmatched faculty')).findByText('Dr. Sarah Kim, CS 2336.001')).toBeVisible();
     for (const name of KPI_NAMES) {
       expect(within(kpiCard(name)).getByText('–')).toBeVisible();
       expect(within(kpiCard(name)).getByText('Loading')).toBeVisible();
@@ -706,18 +768,16 @@ describe('Committee dashboard recovery', () => {
 });
 
 describe('Committee dashboard counts and cycle edge cases', () => {
-  it('notes a failed refresh of the unmatched count, leaving its Try again to the list', async () => {
+  it('notes and announces a failed refresh of the unmatched count, with its own Try again now that the list is on its own page', async () => {
     serve();
     const { queryClient } = openPage();
     expect(await within(summaryCount('Unmatched faculty')).findByText('Dr. Sarah Kim, CS 2336.001')).toBeVisible();
     server.use(http.get('*/api/dashboard/unmatched', () => failure('Server error.')));
     await act(() => queryClient.refetchQueries());
-    expect(await within(summaryCount('Unmatched faculty')).findByText("Couldn't refresh.")).toBeVisible();
-    // The unmatched list announces this failure, so the count does not announce it a second time.
-    expect(within(summaryCount('Unmatched faculty')).queryByRole('alert')).not.toBeInTheDocument();
+    expect(await within(summaryCount('Unmatched faculty')).findByRole('alert')).toHaveTextContent("Unmatched faculty: Couldn't refresh.");
     expect(within(summaryCount('Unmatched faculty')).getByText('Dr. Sarah Kim, CS 2336.001')).toBeVisible();
-    expect(within(summaryCount('Unmatched faculty')).queryByRole('button')).not.toBeInTheDocument();
-    expect(within(section(/Unmatched faculty/)).getByRole('button', { name: 'Try again' })).toBeVisible();
+    expect(within(summaryCount('Unmatched faculty')).getByRole('button', { name: 'Try again' })).toBeVisible();
+    expect(screen.queryByRole('region', { name: /Unmatched faculty/ })).not.toBeInTheDocument();
   });
 
   it('announces a failed count, and announces it again when Try again fails again', async () => {
@@ -755,10 +815,14 @@ describe('Committee dashboard counts and cycle edge cases', () => {
       http.get('*/api/cycles/current', () => HttpResponse.json(null)),
       http.get('*/api/cycles/latest/kpis', () => HttpResponse.json(closedKpis)),
     );
-    openPage();
+    const overview = openPage();
     expect(await within(kpiCard('Assessment Participation Rate')).findByText('93%')).toBeVisible();
-    expect(within(section(/Due or overdue/)).getByText('No evaluation cycle has started yet.')).toBeVisible();
-    expect(within(section(/Outstanding observations/)).getByText('No evaluation cycle has started yet.')).toBeVisible();
+    overview.unmount();
+    for (const list of [DUE_LIST, OUTSTANDING_LIST]) {
+      const view = openPage(list.path);
+      expect(await within(section(list.name)).findByText('No evaluation cycle has started yet.')).toBeVisible();
+      view.unmount();
+    }
   });
 });
 
@@ -775,9 +839,11 @@ describe('Committee dashboard pager', () => {
       http.get('*/api/cycles/1/signups', () => HttpResponse.json(pending)),
     );
     const user = userEvent.setup();
-    openPage();
+    const outstanding = openPage(OUTSTANDING_PAGE);
+    expect(await screen.findByRole('navigation', { name: 'Outstanding observations pages' })).toBeVisible();
+    outstanding.unmount();
+    openPage(DUE_PAGE);
     const nav = await screen.findByRole('navigation', { name: 'Due or overdue for evaluation pages' });
-    expect(screen.getByRole('navigation', { name: 'Outstanding observations pages' })).toBeVisible();
     expect(within(nav).getByText('1 to 7 of 60')).toBeVisible();
     expect(pagerButtons(nav)).toEqual(['Previous page', 'Page 1', 'Page 2', 'Page 3', 'Page 4', 'Page 5', 'Page 9', 'Next page']);
     await user.click(within(nav).getByRole('button', { name: 'Page 9' }));
@@ -792,7 +858,7 @@ describe('Committee dashboard pager', () => {
     serve();
     server.use(http.get('*/api/cycles/1/due-professors', () => HttpResponse.json(people(12 * 7))));
     const user = userEvent.setup();
-    openPage();
+    openPage(DUE_PAGE);
     const nav = await screen.findByRole('navigation', { name: 'Due or overdue for evaluation pages' });
     const slots = () => [...nav.querySelectorAll('span.flex-wrap > *')].slice(1, -1).map((el) => (el.textContent === '…' ? null : Number(el.textContent)));
     for (let page = 1; page <= 12; page++) {
@@ -809,7 +875,7 @@ describe('Committee dashboard pager', () => {
   it('lists every page when there are seven or fewer', async () => {
     serve();
     server.use(http.get('*/api/cycles/1/due-professors', () => HttpResponse.json(people(7 * 7))));
-    openPage();
+    openPage(DUE_PAGE);
     const nav = await screen.findByRole('navigation', { name: 'Due or overdue for evaluation pages' });
     expect(pagerButtons(nav)).toEqual(['Previous page', ...Array.from({ length: 7 }, (_, i) => `Page ${i + 1}`), 'Next page']);
     expect(within(nav).queryByText('…')).not.toBeInTheDocument();
@@ -819,7 +885,7 @@ describe('Committee dashboard pager', () => {
     serve();
     server.use(http.get('*/api/cycles/1/due-professors', () => HttpResponse.json(people(10))));
     const user = userEvent.setup();
-    openPage();
+    openPage(DUE_PAGE);
     const nav = await screen.findByRole('navigation', { name: 'Due or overdue for evaluation pages' });
     const next = within(nav).getByRole('button', { name: 'Next page' });
     await user.click(next);
@@ -834,11 +900,21 @@ describe('Committee dashboard pager', () => {
 });
 
 describe('Committee dashboard list descriptions', () => {
-  const DESCRIBED: [RegExp, string][] = [
-    [/Due or overdue for evaluation/, DUE_OR_OVERDUE_TEXT],
-    [/Unmatched faculty/, UNMATCHED_TEXT],
-    [/Outstanding observations/, OUTSTANDING_TEXT],
+  const DESCRIBED: [(typeof LISTS)[number], string][] = [
+    [DUE_LIST, DUE_OR_OVERDUE_TEXT],
+    [UNMATCHED_LIST, UNMATCHED_TEXT],
+    [OUTSTANDING_LIST, OUTSTANDING_TEXT],
   ];
+
+  /** Opens each list's page, waits for the text that list shows in this state, and checks its description. */
+  async function expectEachDescribed(shown: [string | RegExp, string | RegExp, string | RegExp]) {
+    for (const [i, [list, text]] of DESCRIBED.entries()) {
+      const view = openPage(list.path);
+      expect(await within(section(list.name)).findByText(shown[i])).toBeVisible();
+      expectDescribed(list.name, text);
+      view.unmount();
+    }
+  }
 
   /** The description sits right under the list's heading and the list is described by it. */
   function expectDescribed(name: RegExp, text: string) {
@@ -851,11 +927,7 @@ describe('Committee dashboard list descriptions', () => {
 
   it('describes each list under its heading once the lists load', async () => {
     serve();
-    openPage();
-    expect(await screen.findByText('Dr. Raj Mehta')).toBeVisible();
-    expect(await screen.findByText('Dr. Sarah Kim')).toBeVisible();
-    expect(await screen.findByText('Dr. Laura Gomez')).toBeVisible();
-    for (const [name, text] of DESCRIBED) expectDescribed(name, text);
+    await expectEachDescribed(['Dr. Raj Mehta', 'Dr. Sarah Kim', 'Dr. Laura Gomez']);
   });
 
   it('describes each list while it loads', async () => {
@@ -865,11 +937,7 @@ describe('Committee dashboard list descriptions', () => {
       http.get('*/api/dashboard/unmatched', never),
       http.get('*/api/cycles/1/signups', never),
     );
-    openPage();
-    expect(await screen.findByText('Loading faculty…')).toBeVisible();
-    expect(screen.getByText('Loading unmatched faculty…')).toBeVisible();
-    expect(screen.getByText('Loading observations…')).toBeVisible();
-    for (const [name, text] of DESCRIBED) expectDescribed(name, text);
+    await expectEachDescribed(['Loading faculty…', 'Loading unmatched faculty…', 'Loading observations…']);
   });
 
   it('describes each list when it is empty', async () => {
@@ -879,11 +947,7 @@ describe('Committee dashboard list descriptions', () => {
       http.get('*/api/dashboard/unmatched', () => HttpResponse.json({ ...unmatched, total: 0, items: [] })),
       http.get('*/api/cycles/1/signups', () => HttpResponse.json([])),
     );
-    openPage();
-    expect(await screen.findByText('Nobody is due or overdue this cycle.')).toBeVisible();
-    expect(await screen.findByText('No unmatched faculty.')).toBeVisible();
-    expect(await screen.findByText('No one has signed up yet this cycle.')).toBeVisible();
-    for (const [name, text] of DESCRIBED) expectDescribed(name, text);
+    await expectEachDescribed(['Nobody is due or overdue this cycle.', 'No unmatched faculty.', 'No one has signed up yet this cycle.']);
   });
 
   it('describes each list when it fails to load', async () => {
@@ -893,11 +957,7 @@ describe('Committee dashboard list descriptions', () => {
       http.get('*/api/dashboard/unmatched', () => failure('Unmatched faculty could not be read.')),
       http.get('*/api/cycles/1/signups', () => failure('Sign-ups could not be read.')),
     );
-    openPage();
-    expect(await screen.findByText(/Due faculty could not be read/)).toBeVisible();
-    expect(await screen.findByText(/Unmatched faculty could not be read/)).toBeVisible();
-    expect(await screen.findByText(/Sign-ups could not be read/)).toBeVisible();
-    for (const [name, text] of DESCRIBED) expectDescribed(name, text);
+    await expectEachDescribed([/Due faculty could not be read/, /Unmatched faculty could not be read/, /Sign-ups could not be read/]);
   });
 
   it('describes each list before the first cycle starts', async () => {
@@ -906,8 +966,7 @@ describe('Committee dashboard list descriptions', () => {
       http.get('*/api/cycles/current', () => HttpResponse.json(null)),
       http.get('*/api/dashboard/unmatched', noCycle),
     );
-    openPage();
-    await waitFor(() => expect(screen.getAllByText('No evaluation cycle has started yet.').length).toBeGreaterThanOrEqual(3));
-    for (const [name, text] of DESCRIBED) expectDescribed(name, text);
+    const none = 'No evaluation cycle has started yet.';
+    await expectEachDescribed([none, none, none]);
   });
 });
