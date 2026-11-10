@@ -1,12 +1,37 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { ApiError } from '../../api/client';
-import { useSubmitSurvey } from '../../api/hooks/faculty';
+import { useMyObservations, useSubmitSurvey } from '../../api/hooks/faculty';
 import { useCurrentCycle } from '../../api/hooks/shared';
-import type { SurveyInput } from '../../api/types';
-import { Button, Card, ErrorNote } from '../../components/ui';
-import { formatDate } from '../../lib/format';
+import type { Cycle, SurveyInput } from '../../api/types';
+import { Button, Card, ErrorNote, LockedTag, Tag } from '../../components/ui';
+import { formatDate, formatRange, isLocked } from '../../lib/format';
+import { recordStatus, whenShort } from './observationDisplay';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+const TIMING_NOTE = 'The survey opens after the observation deadline. It does not wait for signatures.';
+
+/** "Survey closes" and, when the data exists, the professor's own observation as observee for this term (the history call is observee-only). */
+function SurveySummary({ cycle }: { cycle: Cycle }) {
+  const observations = useMyObservations();
+  const mine = observations.data?.find((o) => o.term.termId === cycle.term.termId);
+  return (
+    <Card className="self-start px-6 py-5">
+      <p className="text-xs text-gray-500">Survey closes</p>
+      <p className="mt-1 text-base font-bold text-gray-900">{formatDate(cycle.feedbackDeadline)}</p>
+      {mine && (
+        <div className="mt-4 border-t border-gray-200 pt-4">
+          <p className="text-xs text-gray-500">Your observation</p>
+          <div className="mt-2">
+            {isLocked(mine) ? <LockedTag /> : <Tag tone={recordStatus(mine, mine.observee.netid).tone}>{recordStatus(mine, mine.observee.netid).text}</Tag>}
+          </div>
+          <p className="mt-2.5 text-sm text-gray-900">{mine.section.label}, {whenShort(mine)}</p>
+          <p className="mt-1 text-sm text-gray-500">Observer: {mine.observer.displayName}</p>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function SurveyForm({ cycleId }: { cycleId: string }) {
   const submit = useSubmitSurvey(cycleId);
@@ -51,7 +76,7 @@ function SurveyForm({ cycleId }: { cycleId: string }) {
           : error?.message;
 
   return (
-    <Card className="mt-5 max-w-[720px] px-6 py-6">
+    <Card className="min-w-0 px-6 py-6">
       <h2 className="text-lg font-bold">End-of-process survey</h2>
       <p className="mt-2 text-sm text-gray-600">One response per role. If you participated in both roles, submit each separately.</p>
       {successRole && <p role="status" className="mt-4 rounded-md bg-green-100 px-4 py-3 text-sm text-green-900">Your {successRole} response was submitted.</p>}
@@ -67,17 +92,17 @@ function SurveyForm({ cycleId }: { cycleId: string }) {
           ))}
         </fieldset>
         <fieldset>
-          <legend className="text-sm font-bold">Did the observation process go well? *</legend>
+          <legend className="text-sm font-bold">1. Did the observation process go well? *</legend>
           {([['yes', true], ['no', false]] as const).map(([label, value]) => (
             <label key={label} className="mt-2 mr-5 inline-flex items-center gap-2 text-sm capitalize">
               <input type="radio" name="processOk" value={label} required checked={processOk === value} onChange={() => setProcessOk(value)} />{label}
             </label>
           ))}
         </fieldset>
-        <label className="flex flex-col gap-2 text-sm font-bold">Difficulties (optional)
+        <label className="flex flex-col gap-2 text-sm font-bold">2. Difficulties (optional)
           <textarea className="min-h-24 rounded-md border border-gray-300 p-3 font-normal" maxLength={5000} value={difficulties} onChange={(e) => setDifficulties(e.target.value)} />
         </label>
-        <label className="flex flex-col gap-2 text-sm font-bold">Additional feedback (optional)
+        <label className="flex flex-col gap-2 text-sm font-bold">3. Additional feedback (optional)
           <textarea className="min-h-24 rounded-md border border-gray-300 p-3 font-normal" maxLength={5000} value={additionalFeedback} onChange={(e) => setAdditionalFeedback(e.target.value)} />
         </label>
         <label className="flex flex-col gap-2 text-sm font-bold">Trouble file (optional, up to 10 MiB)
@@ -104,9 +129,14 @@ export function SurveyPage() {
     {cycle.error && <><ErrorNote error={cycle.error} /><Button variant="secondary" className="mt-3" onClick={() => void cycle.refetch()}>Try again</Button></>}
     {cycle.data === null && <p>No current cycle is available.</p>}
     {cycle.data && <>
-      <p className="text-sm text-gray-600">{cycle.data.term.label} · Survey window: {formatDate(cycle.data.surveyOpensDate)}–{formatDate(cycle.data.feedbackDeadline)}</p>
-      {cycle.data.phase === 'feedback' ? <SurveyForm key={cycle.data.cycleId} cycleId={cycle.data.cycleId} /> :
-        <p className="mt-5 rounded-md border border-gray-200 bg-gray-50 p-4 text-sm">The survey is not open. It is available from {formatDate(cycle.data.surveyOpensDate)} through {formatDate(cycle.data.feedbackDeadline)}.</p>}
+      <p className="text-sm text-gray-900">Tell the Assessment Committee how the {cycle.data.term.label} process went.</p>
+      <p className="mt-1 text-sm text-gray-600">{cycle.data.term.label} · Survey window: {formatRange(cycle.data.surveyOpensDate, cycle.data.feedbackDeadline)}</p>
+      <p className="mt-1 text-sm text-gray-600">{TIMING_NOTE}</p>
+      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,720px)_minmax(0,20.5rem)] lg:items-start">
+        {cycle.data.phase === 'feedback' ? <SurveyForm key={cycle.data.cycleId} cycleId={cycle.data.cycleId} /> :
+          <p className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm">The survey is not open. It is available from {formatDate(cycle.data.surveyOpensDate)} through {formatDate(cycle.data.feedbackDeadline)}.</p>}
+        <SurveySummary cycle={cycle.data} />
+      </div>
     </>}
   </div>;
 }
