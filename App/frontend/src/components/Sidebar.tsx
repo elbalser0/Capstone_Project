@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from 'react';
-import { NavLink, useNavigate } from 'react-router';
+import { Link, NavLink, useMatch, useNavigate } from 'react-router';
 import { useCurrentCycle, useMe } from '../api/hooks/shared';
 import { useIncomingRequests } from '../api/hooks/faculty';
 import { useAuth } from '../auth/AuthProvider';
@@ -12,8 +12,11 @@ type Icon = ComponentType<SVGProps<SVGSVGElement>>;
 interface NavItem {
   to: string;
   label: string;
-  icon: Icon;
+  icon?: Icon;
+  /** Highlight only on this exact path (a trailing slash allowed), not on the pages under it. */
   end?: boolean;
+  /** Pages under this one, listed indented in a nested list below it (the dashboard's own pages). */
+  children?: NavItem[];
 }
 
 const FACULTY_NAV: NavItem[] = [
@@ -24,7 +27,18 @@ const FACULTY_NAV: NavItem[] = [
 ];
 
 const COMMITTEE_NAV: NavItem[] = [
-  { to: '/committee/dashboard', label: 'Dashboard', icon: GridIcon },
+  {
+    to: '/committee/dashboard',
+    label: 'Dashboard',
+    icon: GridIcon,
+    end: true,
+    children: [
+      { to: '/committee/dashboard/due', label: 'Due or overdue' },
+      { to: '/committee/dashboard/unmatched', label: 'Unmatched' },
+      { to: '/committee/dashboard/outstanding', label: 'Outstanding' },
+      { to: '/committee/dashboard/notifications', label: 'Notifications' },
+    ],
+  },
   { to: '/committee/cycle', label: 'Cycle', icon: CalendarIcon },
   { to: '/committee/faculty', label: 'Faculty', icon: UsersIcon },
   { to: '/committee/signups', label: 'Sign-ups', icon: ListIcon },
@@ -33,15 +47,20 @@ const COMMITTEE_NAV: NavItem[] = [
 
 export const LANDING: Record<Mode, string> = { faculty: '/faculty/evaluation', committee: '/committee/dashboard' };
 
-function NavRow({ item, forced, badge = 0, opens, disabled = false }: { item: NavItem; forced?: boolean; badge?: number; opens?: string; disabled?: boolean }) {
+function NavRow({ item, activeNav, sub = false, badge = 0, opens, disabled = false }: { item: NavItem; activeNav?: string; sub?: boolean; badge?: number; opens?: string; disabled?: boolean }) {
   const Icon = item.icon;
-  const classes = (active: boolean) => `relative flex min-h-9 items-center gap-[11px] rounded-md pl-[18px] focus-visible:outline-2 focus-visible:outline-brand ${
-    active ? 'border border-gray-200 bg-white font-bold text-gray-900' : 'text-gray-700 hover:bg-gray-200/60'
-  }`;
-  const contents = (active: boolean) => (
+  // Matched here rather than by NavLink: NavLink's `end` compares the path exactly, so
+  // `/committee/dashboard/` would highlight no row, and it drops aria-current for a row that
+  // `activeNav` highlights.
+  const match = useMatch({ path: item.to, end: Boolean(item.end) });
+  const active = !disabled && (Boolean(match) || item.to === activeNav);
+  const classes = `relative flex items-center gap-[11px] rounded-md focus-visible:outline-2 focus-visible:outline-brand ${
+    sub ? 'min-h-8 pl-[45px] text-[13px]' : 'min-h-9 pl-[18px]'
+  } ${active ? 'border border-gray-200 bg-white font-bold text-gray-900' : 'text-gray-700 hover:bg-gray-200/60'}`;
+  const contents = (
     <>
-      {active && <span className="absolute top-2 -left-px h-5 w-[3px] rounded-sm bg-brand" aria-hidden />}
-      <span className={`flex w-4 shrink-0 justify-center ${active ? 'text-gray-900' : 'text-gray-600'}`}><Icon /></span>
+      {active && <span className={`absolute top-2 -left-px w-[3px] rounded-sm bg-brand ${sub ? 'h-4' : 'h-5'}`} aria-hidden />}
+      {Icon && <span className={`flex w-4 shrink-0 justify-center ${active ? 'text-gray-900' : 'text-gray-600'}`}><Icon /></span>}
       <span className="flex-1">{item.label}</span>
       {badge > 0 && <span aria-label={`${badge} new requests`} className="mr-3 flex min-w-5 items-center justify-center rounded-full bg-brand px-1.5 py-0.5 text-[11px] font-bold text-white">{badge}</span>}
       {opens && <span className="mr-3 text-[11px] font-normal text-gray-500">Opens {opens}</span>}
@@ -50,16 +69,16 @@ function NavRow({ item, forced, badge = 0, opens, disabled = false }: { item: Na
   return (
     <li>
       {disabled ? (
-        <div className={`${classes(false)} cursor-default`} aria-disabled="true">{contents(false)}</div>
+        <div className={`${classes} cursor-default`} aria-disabled="true">{contents}</div>
       ) : (
-        <NavLink
-          to={item.to}
-          end={item.end}
-          aria-current={forced ? 'page' : undefined}
-          className={({ isActive }) => classes(isActive || Boolean(forced))}
-        >
-          {({ isActive }) => contents(isActive || Boolean(forced))}
-        </NavLink>
+        <Link to={item.to} aria-current={active ? 'page' : undefined} className={classes}>
+          {contents}
+        </Link>
+      )}
+      {item.children && (
+        <ul className="mt-1 flex flex-col gap-1">
+          {item.children.map((child) => <NavRow key={child.to} item={child} activeNav={activeNav} sub />)}
+        </ul>
       )}
     </li>
   );
@@ -78,7 +97,7 @@ function FacultyNavigation({ activeNav }: { activeNav?: string }) {
         {FACULTY_NAV.map((item) => {
           const observe = item.to === '/faculty/observe';
           const survey = item.to === '/faculty/survey';
-          return <NavRow key={item.to} item={item} forced={item.to === activeNav} badge={observe ? pendingCount : 0} opens={survey ? surveyOpens : undefined} disabled={survey && surveyLocked} />;
+          return <NavRow key={item.to} item={item} activeNav={activeNav} badge={observe ? pendingCount : 0} opens={survey ? surveyOpens : undefined} disabled={survey && surveyLocked} />;
         })}
       </ul>
     </nav>
@@ -89,7 +108,7 @@ function CommitteeNavigation({ activeNav }: { activeNav?: string }) {
   return (
     <nav aria-label="Assessment Committee" className="px-3">
       <ul className="flex flex-col gap-2">
-        {COMMITTEE_NAV.map((item) => <NavRow key={item.to} item={item} forced={item.to === activeNav} />)}
+        {COMMITTEE_NAV.map((item) => <NavRow key={item.to} item={item} activeNav={activeNav} />)}
       </ul>
     </nav>
   );
