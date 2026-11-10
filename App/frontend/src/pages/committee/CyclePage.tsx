@@ -1,13 +1,13 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
-import { useCreateCycle, useUpdateCycle } from '../../api/hooks/committee';
+import { Link, useNavigate } from 'react-router';
+import { useCreateCycle, useCycleFaculty, useDuePreview, useDueProfessors, useUpdateCycle } from '../../api/hooks/committee';
 import { useCurrentCycle, useTerms } from '../../api/hooks/shared';
-import type { CreateCycleInput, Cycle, UpdateCycleInput } from '../../api/types';
+import type { CreateCycleInput, Cycle, DueStatus, UpdateCycleInput } from '../../api/types';
 import { usePageTitle } from '../../components/AppShell';
-import { CalendarIcon, ChevronIcon } from '../../components/icons';
-import { Button, Card, ErrorNote, inputClass, labelClass } from '../../components/ui';
+import { CalendarIcon, ChevronIcon, MailIcon } from '../../components/icons';
+import { Button, Card, DueTag, ErrorNote, Tag, inputClass, labelClass, linkClass } from '../../components/ui';
 import { todayIso } from '../../lib/dates';
-import { formatDate } from '../../lib/format';
+import { formatDate, formatShort } from '../../lib/format';
 import { isMissingEndpoint } from '../../lib/missingEndpoint';
 
 // A2. Start the evaluation cycle for a term with its three deadlines (POST /api/cycles). While the
@@ -114,12 +114,150 @@ function Retry({ error, retry, className = '' }: { error: unknown; retry: () => 
   );
 }
 
+// ---------- Who is due ----------
+
+type Counts =
+  | { state: 'idle' }
+  | { state: 'loading' }
+  | { state: 'missing' }
+  | { state: 'error'; error: unknown; retry: () => void }
+  /** notDue is null when only the due and overdue professors are known (the due-professors fallback). */
+  | { state: 'ready'; due: number; overdue: number; notDue: number | null };
+
+const PREVIEW_MISSING = 'The due preview is not available yet. You can still start the cycle.';
+const FALLBACK_NOTE = 'The full faculty list is not available yet, so only due and overdue professors are shown.';
+
+function countRows(rows: { dueStatus: DueStatus }[], full: boolean): Counts {
+  const count = (status: DueStatus) => rows.filter((r) => r.dueStatus === status).length;
+  return { state: 'ready', due: count('DUE'), overdue: count('OVERDUE'), notDue: full ? count('NOT_DUE') : null };
+}
+
+/** Before a cycle starts: who would be due for the chosen term. */
+function usePreviewCounts(termId: string): Counts {
+  const preview = useDuePreview(termId || undefined);
+  if (!termId) return { state: 'idle' };
+  if (preview.data) return countRows(preview.data, true);
+  if (isMissingEndpoint(preview.error)) return { state: 'missing' };
+  if (preview.error) return { state: 'error', error: preview.error, retry: () => void preview.refetch() };
+  return { state: 'loading' };
+}
+
+/** An open cycle: the full faculty list, or the due-professors list while that endpoint is missing. */
+function useCycleCounts(cycleId: string): Counts {
+  const faculty = useCycleFaculty(cycleId);
+  const missing = isMissingEndpoint(faculty.error);
+  // Requested only once the full list is known to be missing.
+  const fallback = useDueProfessors(missing ? cycleId : undefined);
+  if (faculty.data) return countRows(faculty.data, true);
+  if (missing) {
+    if (fallback.data) return countRows(fallback.data, false);
+    if (fallback.error) return { state: 'error', error: fallback.error, retry: () => void fallback.refetch() };
+    return { state: 'loading' };
+  }
+  if (faculty.error) return { state: 'error', error: faculty.error, retry: () => void faculty.refetch() };
+  return { state: 'loading' };
+}
+
+const professors = (n: number) => (n === 1 ? '1 professor is' : `${n} professors are`);
+
+/** The "n professors are due or overdue" box inside the settings card. */
+function DueBox({ counts, cycle }: { counts: Counts; cycle: Cycle | null }) {
+  let body: ReactNode;
+  if (counts.state === 'ready') {
+    body = (
+      <>
+        <p className="text-sm font-bold text-gray-900">{professors(counts.due + counts.overdue)} due or overdue.</p>
+        <p className="mt-[3px] text-sm text-gray-700">
+          {cycle
+            ? `This cycle started ${formatDate(cycle.startDate)}. Remind them from the Faculty page.`
+            : 'Once the cycle starts, you can remind them from the Faculty page.'}
+        </p>
+        <div className="mt-3 flex gap-2">
+          <Tag tone="due">{counts.due} DUE</Tag>
+          <Tag tone="overdue">{counts.overdue} OVERDUE</Tag>
+        </div>
+      </>
+    );
+  } else if (counts.state === 'missing') {
+    body = <p className="text-sm text-gray-700">{PREVIEW_MISSING}</p>;
+  } else if (counts.state === 'error') {
+    body = <Retry error={counts.error} retry={counts.retry} />;
+  } else if (counts.state === 'loading') {
+    body = <p role="status" className="text-sm text-gray-700">Checking who is due…</p>;
+  } else {
+    body = <p className="text-sm text-gray-700">Choose a term to see who would be due.</p>;
+  }
+  return (
+    <div className="mt-7 rounded-md border border-gray-200 bg-gray-50 px-4 pt-[15px] pb-3.5">
+      <div className="flex gap-[9px] pl-0.5">
+        <MailIcon className="mt-[3px] shrink-0 text-gray-700" />
+        <div className="min-w-0 flex-1">{body}</div>
+      </div>
+    </div>
+  );
+}
+
+/** The "Who is due" card beside the form. The rules follow the backend's evaluation status. */
+function WhoIsDue({ counts, lastCycle }: { counts: Counts; lastCycle: Cycle | undefined }) {
+  const rows: [DueStatus, number][] = [];
+  if (counts.state === 'ready') {
+    rows.push(['DUE', counts.due], ['OVERDUE', counts.overdue]);
+    if (counts.notDue !== null) rows.push(['NOT_DUE', counts.notDue]);
+  }
+  const total = rows.reduce((sum, [, n]) => sum + n, 0);
+  return (
+    <Card className="self-start px-6 pt-5 pb-[19px]">
+      <h2 className="text-base font-bold text-gray-900">Who is due</h2>
+      <dl className="mt-[11px] flex flex-col gap-[11px] text-sm">
+        <div>
+          <dt className="font-bold text-gray-900">Assistant professors</dt>
+          <dd className="mt-[3px] text-gray-500">every year</dd>
+        </div>
+        <div>
+          <dt className="font-bold text-gray-900">Associate and Full professors</dt>
+          <dd className="mt-[3px] text-gray-500">every 2 years</dd>
+        </div>
+        <div>
+          <dt className="font-bold text-gray-900">First observation</dt>
+          <dd className="mt-[3px] text-gray-500">two years after starting</dd>
+        </div>
+      </dl>
+      <div className="mt-[21px] border-t border-gray-200 pt-[15px]">
+        {counts.state === 'ready' && (
+          <>
+            <p className="text-xs text-gray-500">
+              {counts.notDue === null ? `Due or overdue this term (${total})` : `Faculty this term (${total})`}
+            </p>
+            <dl className="mt-[13px] flex flex-col gap-3" aria-label="Faculty by status">
+              {rows.map(([status, n]) => (
+                <div key={status} className="flex items-center justify-between">
+                  <dt><DueTag status={status} /></dt>
+                  <dd className="text-sm font-bold text-gray-900">{n}</dd>
+                </div>
+              ))}
+            </dl>
+            {counts.notDue === null && <p className="mt-3 text-xs text-gray-500">{FALLBACK_NOTE}</p>}
+          </>
+        )}
+        {counts.state === 'missing' && <p className="text-xs text-gray-500">{PREVIEW_MISSING}</p>}
+        <Link to="/committee/faculty" className={`${linkClass} mt-4`}>Review the faculty list</Link>
+      </div>
+      {lastCycle && (
+        <p className="mt-[19px] border-t border-gray-200 pt-[13px] text-xs text-gray-500">
+          Last cycle: {lastCycle.term.label}, closed {formatShort(lastCycle.feedbackDeadline)}
+        </p>
+      )}
+    </Card>
+  );
+}
+
 // ---------- The two forms ----------
 
-function Settings({ term, dates, onChange, problem, error, actions }: {
+function Settings({ term, dates, onChange, dueBox, problem, error, actions }: {
   term: ReactNode;
   dates: Deadlines;
   onChange: (key: keyof Deadlines) => (v: string) => void;
+  dueBox: ReactNode;
   problem: string | null;
   error: unknown;
   actions: ReactNode;
@@ -131,6 +269,7 @@ function Settings({ term, dates, onChange, problem, error, actions }: {
         {term}
         <DateFields dates={dates} onChange={onChange} />
       </div>
+      {dueBox}
       {problem && <p role="alert" className="mt-4 text-sm text-red-800">{problem}</p>}
       <ErrorNote error={error} className="mt-4" />
       <div className="mt-6 flex flex-wrap items-center gap-3">{actions}</div>
@@ -160,6 +299,7 @@ function StartForm({ lastCycle }: { lastCycle: Cycle | undefined }) {
   const upcoming = (terms.data ?? []).filter((t) => t.startDate > (lastCycle?.term.startDate ?? '') && t.endDate >= today);
   const term = upcoming.find((t) => t.termId === chosen) ?? upcoming[0];
   const termId = term?.termId ?? '';
+  const counts = usePreviewCounts(termId);
   usePageTitle(term ? `Start the ${term.label} evaluation cycle` : null);
 
   const problem = orderProblem(today, dates);
@@ -215,6 +355,7 @@ function StartForm({ lastCycle }: { lastCycle: Cycle | undefined }) {
         )}
         dates={dates}
         onChange={onChange}
+        dueBox={<DueBox counts={counts} cycle={null} />}
         problem={problem}
         error={create.error}
         actions={(
@@ -229,6 +370,7 @@ function StartForm({ lastCycle }: { lastCycle: Cycle | undefined }) {
           </>
         )}
       />
+      <WhoIsDue counts={counts} lastCycle={lastCycle} />
     </>
   );
 }
@@ -242,6 +384,7 @@ function EditForm({ cycle }: { cycle: Cycle }) {
     observationDeadline: cycle.observationDeadline,
     feedbackDeadline: cycle.feedbackDeadline,
   });
+  const counts = useCycleCounts(cycle.cycleId);
   usePageTitle(`${cycle.term.label} evaluation cycle`);
 
   const changes: UpdateCycleInput = {};
@@ -267,6 +410,7 @@ function EditForm({ cycle }: { cycle: Cycle }) {
         )}
         dates={dates}
         onChange={onChange}
+        dueBox={<DueBox counts={counts} cycle={cycle} />}
         problem={problem}
         error={update.error}
         actions={(
@@ -278,6 +422,7 @@ function EditForm({ cycle }: { cycle: Cycle }) {
           </>
         )}
       />
+      <WhoIsDue counts={counts} lastCycle={undefined} />
     </>
   );
 }
