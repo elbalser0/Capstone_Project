@@ -58,10 +58,12 @@ describe('cycle faculty list against the database', { skip }, () => {
       ['inactive', 'Inactive', 'Professor', 'full', 1, false],
       ['n-new', 'New', 'Hire', 'assistant', null, true],
     ] as const) {
+      // A schema trigger sets eval_interval_years from rank (assistant 1, associate and full 2)
+      // and ignores the value sent, so the insert sends the same value the trigger keeps.
       await sql(`INSERT INTO professor (netid, first_name, last_name, email, rank, dept_id,
                                         eval_interval_years, baseline_last_eval_term, start_term, is_active)
-                 VALUES ($1, $2, $3, $1 || '@example.edu', $4, 1, 2, $5, $7, $6)`,
-      [netid, first, last, rank, baseline, active, netid === 'n-new' ? 3 : 1]);
+                 VALUES ($1, $2, $3, $1 || '@example.edu', $4, 1, $8, $5, $7, $6)`,
+      [netid, first, last, rank, baseline, active, netid === 'n-new' ? 3 : 1, rank === 'assistant' ? 1 : 2]);
     }
     await sql("INSERT INTO ac_member (netid) VALUES ('ac')");
     await sql(`INSERT INTO eval_cycle (term_id, started_by, start_date, signup_deadline, observation_deadline, feedback_deadline)
@@ -131,6 +133,11 @@ describe('cycle faculty list against the database', { skip }, () => {
     // Never observed: two years after the start term.
     assert.equal(find(rows, 'n-new').lastObservedTerm, null);
     assert.equal(find(rows, 'n-new').dueTerm.label, 'Fall 2028');
+  });
+
+  test('assistants get a 1-year interval from the schema, others 2', async () => {
+    const { rows } = await sql("SELECT netid, eval_interval_years FROM professor WHERE netid IN ('a-amy', 'b-base', 'c-none') ORDER BY netid");
+    assert.deepEqual(rows.map((row) => [row.netid, row.eval_interval_years]), [['a-amy', 1], ['b-base', 2], ['c-none', 2]]);
   });
 
   test('omits inactive professors', async () => {
