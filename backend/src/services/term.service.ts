@@ -60,10 +60,17 @@ const STATUS_ORDER = { OVERDUE: 0, DUE: 1, NOT_DUE: 2 } as const;
 
 function mapDuePreviewRow(row: PreviewProfessorRow, terms: EvaluationTerm[], cycle: EvaluationCycle) {
   const evaluation = mapEvaluationStatus(row, terms, cycle);
-  const dueTerm = terms.find((term) => term.season === evaluation.dueTerm.season && term.year === evaluation.dueTerm.year)
-    // The frontend contract requires a full Term. Until future terms are added, use the latest
-    // configured term, matching the existing frontend preview behavior.
-    ?? terms[terms.length - 1];
+  const dueTermRow = terms.find((term) => term.season === evaluation.dueTerm.season && term.year === evaluation.dueTerm.year);
+  const dueTerm = dueTermRow
+    ? mapTerm(dueTermRow)
+    : {
+      termId: null,
+      season: evaluation.dueTerm.season,
+      year: evaluation.dueTerm.year,
+      label: evaluation.dueTerm.label,
+      startDate: null,
+      endDate: null,
+    };
   return {
     professor: {
       netid: row.netid,
@@ -78,7 +85,7 @@ function mapDuePreviewRow(row: PreviewProfessorRow, terms: EvaluationTerm[], cyc
       ? (row.saved_due_status === 'overdue' ? 'OVERDUE' : row.saved_due_status === 'due' ? 'DUE' : 'NOT_DUE')
       : evaluation.status,
     lastObservedTerm: evaluation.lastObservedTerm,
-    dueTerm: mapTerm(dueTerm),
+    dueTerm,
   };
 }
 
