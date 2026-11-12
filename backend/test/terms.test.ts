@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import express from 'express';
 import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import type { PoolClient } from 'pg';
 import { app } from '../src/app.js';
 import { requireAC } from '../src/middleware/auth.middleware.js';
+import { errorHandler } from '../src/middleware/error.middleware.js';
+import { termsRouter } from '../src/routes/terms.routes.js';
 import { listTerms } from '../src/services/term.service.js';
 
 test('GET /api/terms requires a login', async () => {
@@ -27,6 +30,38 @@ test('GET /api/terms/{termId}/due-preview requires a login', async () => {
     const response = await fetch(`${base}/api/terms/2/due-preview`);
     assert.equal(response.status, 401);
     assert.deepEqual(await response.json(), { error: { code: 'UNAUTHENTICATED', message: 'Missing login token.' } });
+  } finally {
+    if (server.listening) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test('GET /api/terms rejects authenticated faculty at the route', async () => {
+  const testApp = express();
+  testApp.use((req, _res, next) => {
+    req.user = {
+      netid: 'faculty1',
+      firstName: 'Test',
+      lastName: 'Faculty',
+      displayName: 'Dr. Test Faculty',
+      email: 'faculty@example.edu',
+      rank: 'assistant',
+      department: { deptId: '1', deptName: 'Computer Science' },
+      role: 'faculty',
+    };
+    next();
+  });
+  testApp.use('/api/terms', termsRouter);
+  testApp.use(errorHandler);
+
+  const server = testApp.listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve, reject) => server.once('listening', resolve).once('error', reject));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const response = await fetch(`${base}/api/terms`);
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), {
+      error: { code: 'FORBIDDEN', message: 'Only Assessment Committee members can do this.' },
+    });
   } finally {
     if (server.listening) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
