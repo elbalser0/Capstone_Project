@@ -13,6 +13,7 @@ import type {
   ForwardResult,
   MatchingRow,
   OutstandingObservations,
+  PersonRef,
   Signup,
   SurveyResponse,
   TemplateVersion,
@@ -119,7 +120,9 @@ export function useAddCandidate(cycleId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ signupId, observerNetid }: { signupId: string; observerNetid: string }) =>
-      api<MatchingRow>(`/signups/${signupId}/candidates`, { method: 'POST', body: { observerNetid } }),
+      api<{ signupId: string; observer: PersonRef; roundNo: number }>(
+        `/signups/${signupId}/candidates`, { method: 'POST', body: { observerNetid } },
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: committeeKeys.matching(cycleId) }),
   });
 }

@@ -107,6 +107,7 @@ beforeEach(() => {
       return meReply();
     }),
     http.get('/api/cycles/current', () => HttpResponse.json(null)),
+    http.get('/api/me/requests/incoming', () => HttpResponse.json([])),
   );
 });
 afterEach(() => {

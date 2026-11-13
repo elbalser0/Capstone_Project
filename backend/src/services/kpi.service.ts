@@ -139,11 +139,20 @@ async function storedKpis(cycleId: number) {
   }));
 }
 
+// Returns whether this call stored the KPIs.
 async function calculateAndStore(cycleId: number) {
-  await inTransaction(async (client) => {
+  return inTransaction(async (client) => {
+    // The feedback deadline may have been extended since this cycle was picked. Locking the
+    // cycle row makes a deadline change (updateCycle) wait for this transaction, or this
+    // transaction see the change, so KPIs are never stored for a reopened cycle.
+    const { rows } = await client.query<{ closed: boolean }>(
+      'SELECT feedback_deadline < CURRENT_DATE AS closed FROM eval_cycle WHERE cycle_id = $1 FOR UPDATE',
+      [cycleId]);
+    if (!rows[0]?.closed) return false;
+
     const kpis = computeKpis(await loadCycleFacts(client, cycleId));
-    // Another request may be storing the same KPIs; the first one wins.
-    await client.query(`
+    // Another run may be storing the same KPIs; the first one wins.
+    const { rowCount } = await client.query(`
       INSERT INTO kpi_result (cycle_id, kpi_code, numerator, denominator, kpi_value)
       SELECT $1, * FROM unnest($2::text[], $3::numeric[], $4::numeric[], $5::numeric[])
       ON CONFLICT (cycle_id, kpi_code) DO NOTHING
@@ -154,23 +163,34 @@ async function calculateAndStore(cycleId: number) {
       kpis.map((k) => k.denominator),
       kpis.map((k) => k.kpiValue),
     ]);
+    return (rowCount ?? 0) > 0;
   });
 }
 
-// GET /api/cycles/{cycleId}/kpis: KPIs are calculated once, on the first request after
-// the feedback deadline, and stay fixed from then on. "latest" is the newest closed cycle,
-// or the current cycle (with no KPIs yet) if none has closed.
+// Run by the KPI generation job: calculates and saves the KPIs of every cycle whose feedback
+// deadline has passed and that has none yet. Saved KPIs stay fixed. Returns the cycles done.
+export async function generateDueKpis(): Promise<number[]> {
+  const { rows } = await getPool().query<{ cycle_id: number }>(`
+    SELECT c.cycle_id FROM eval_cycle AS c
+    WHERE c.feedback_deadline < CURRENT_DATE
+      AND NOT EXISTS (SELECT 1 FROM kpi_result AS k WHERE k.cycle_id = c.cycle_id)
+    ORDER BY c.feedback_deadline, c.cycle_id
+  `);
+  const generated: number[] = [];
+  for (const { cycle_id: cycleId } of rows) {
+    if (await calculateAndStore(cycleId)) generated.push(cycleId);
+  }
+  return generated;
+}
+
+// GET /api/cycles/{cycleId}/kpis: the saved KPIs, or none before they are generated.
+// "latest" is the newest closed cycle, or the current cycle if none has closed.
 export async function getCycleKpis(cycleId: number | 'latest') {
   const cycle = cycleId === 'latest'
     ? await fetchCycle('c.feedback_deadline < CURRENT_DATE', []) ?? await getCurrentCycle()
     : await fetchCycle('c.cycle_id = $1', [cycleId]);
   if (!cycle) throw new ApiError(404, 'NOT_FOUND', 'Cycle not found.');
 
-  const id = Number(cycle.cycleId);
-  let kpis = await storedKpis(id);
-  if (kpis.length === 0 && cycle.phase === 'closed') {
-    await calculateAndStore(id);
-    kpis = await storedKpis(id);
-  }
+  const kpis = await storedKpis(Number(cycle.cycleId));
   return { cycle, computedDate: kpis[0]?.computedDate ?? null, kpis };
 }

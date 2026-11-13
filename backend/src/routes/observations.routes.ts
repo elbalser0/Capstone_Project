@@ -1,5 +1,10 @@
 import { Router, type Request } from 'express';
+import { requireAC } from '../middleware/auth.middleware.js';
 import { ApiError } from '../middleware/error.middleware.js';
+import { forwardObservation } from '../services/forward.service.js';
+import { getIssueFile, uploadIssueFile } from '../services/issue-file.service.js';
+import { readMultipart } from './multipart.js';
+import { MAX_FILE_BYTES, MAX_FORM_BYTES } from './survey.routes.js';
 import {
   getObservation,
   listAssignments,
@@ -93,4 +98,40 @@ observationsRouter.post('/:observationId/sign', async (req, res) => {
 observationsRouter.post('/:observationId/report-missed', async (req, res) => {
   const id = observationId(req);
   res.status(200).json(await reportMissed(id, req.user!, readReportMissed(req.body)));
+});
+
+// AC only: email a signed and locked record. Body { email }.
+observationsRouter.post('/:observationId/forward', requireAC, async (req, res) => {
+  const id = observationId(req);
+  const body = typeof req.body === 'object' && req.body !== null ? req.body as Record<string, unknown> : {};
+  res.status(201).json(await forwardObservation(id, req.user!, body.email));
+});
+
+// Multipart form data with one field, file (up to 10 MB). Replies with the updated observation.
+observationsRouter.post('/:observationId/issue-file', async (req, res) => {
+  const id = observationId(req);
+  if (!req.is('multipart/form-data')) throw new ApiError(400, 'FILE_REQUIRED', 'Send the file as form data.');
+  const form = await readMultipart(req, MAX_FORM_BYTES,
+    () => new ApiError(413, 'TOO_LARGE', 'Files can be up to 10 MB.'),
+    () => new ApiError(400, 'FILE_REQUIRED', 'The form data could not be read.'));
+  const upload = form.get('file');
+  let file;
+  if (upload instanceof Blob && upload.size > 0) {
+    if (upload.size > MAX_FILE_BYTES) throw new ApiError(400, 'FILE_TOO_LARGE', 'Files can be up to 10 MB.');
+    file = {
+      name: (((upload as File).name ?? '').trim() || 'attachment').replaceAll('/', '_').slice(0, 255),
+      type: upload.type || 'application/octet-stream',
+      data: Buffer.from(await upload.arrayBuffer()),
+    };
+  }
+  res.status(200).json(await uploadIssueFile(id, req.user!, file));
+});
+
+observationsRouter.get('/:observationId/issue-file', async (req, res) => {
+  const file = await getIssueFile(observationId(req), req.user!);
+  res.status(200)
+    .type(file.file_type)
+    .set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.file_name)}`)
+    .set('X-Content-Type-Options', 'nosniff')
+    .send(file.file_data);
 });

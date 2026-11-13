@@ -25,7 +25,7 @@ export const sharedHandlers = [
   }),
 
   http.get('/api/terms', ({ request }) => {
-    signedIn(request);
+    committeeMember(request);
     return HttpResponse.json([...db.term].sort((a, b) => a.start_date.localeCompare(b.start_date)).map((t) => term(t.term_id)));
   }),
 

@@ -5,6 +5,8 @@ import type { EvaluationStatus, ObservationSummary, Signup } from '../../api/typ
 import { CalendarIcon, InfoIcon } from '../../components/icons';
 import { Card, DueTag, ErrorNote, PageError, Tag, buttonClass } from '../../components/ui';
 import { RANK_LABEL, formatDate, formatRange, isLocked } from '../../lib/format';
+import { DUE_STATUS_TEXT } from '../../lib/statusTerms';
+import { NotificationInbox } from '../committee/NotificationInbox';
 
 // E1 (and E1a for an AC member signed in on their Faculty pages: same page, the sidebar differs).
 
@@ -24,6 +26,7 @@ function StatusCard({ status }: { status: EvaluationStatus }) {
         <div>
           <DueTag status={status.status} />
           <h2 className="mt-3 text-xl font-bold text-gray-900">{headline(status)}</h2>
+          <p className="mt-2 text-sm text-gray-700">{DUE_STATUS_TEXT[status.status]}</p>
           <p className="mt-2 text-sm text-gray-500">{`${RANK_LABEL[status.rank]}, evaluated ${interval}. ${last}`}</p>
         </div>
         {status.canSignUp && (
@@ -138,6 +141,7 @@ export function MyEvaluationPage() {
       <StatusCard status={status.data} />
       <h2 className="mt-6 mb-3 text-base font-bold text-gray-900">My observations</h2>
       <ObservationsTable status={status.data} />
+      <NotificationInbox />
       <div className="mt-8 flex gap-3 rounded-lg border border-gray-200 bg-gray-50 px-5 py-[15px]">
         <InfoIcon className="mt-0.5 text-gray-700" />
         <div>

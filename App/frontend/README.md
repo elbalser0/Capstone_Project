@@ -19,11 +19,20 @@ Open `http://localhost:5173`. The example environment enables the mock API so th
 - `/login`: email/password form, password visibility toggle, and sign-in errors.
 - `/faculty/evaluation`: faculty identity, evaluation status, deadlines, and observation history.
 - `/faculty/sign-up`: pick a course and the class meetings you'd like to be observed in.
-- `/faculty/assignments`: assigned observations with links to their record and form.
+- `/faculty/observe`: incoming observation requests, proposed times, accept or decline controls, and a count toward the semester limit.
+- `/faculty/observe/confirmations`: accepted assignments, cancelled requests, and links to forms or records. Legacy `/faculty/assignments` URLs redirect here.
 - `/faculty/observe/:observationId`: read-only assigned observation record, with browser-native printing of its saved contents.
 - `/faculty/observe/:observationId/form`: observer-only local draft editor using the assigned observation's question ranges.
 - `/faculty/observe/:observationId/sign`: observer review and signed-form submission; the observee signs from the saved record.
-- `/committee/dashboard`: committee home with KPI results, a current-cycle summary, and lists of due or overdue faculty, unmatched faculty and outstanding observations.
+- `/faculty/survey`: current-cycle survey submission as an observer or observee, with an optional trouble file.
+- `/committee/survey-responses`: AC-only current-cycle responses and authenticated trouble-file downloads.
+- `/committee/dashboard`: committee home with KPI results and a current-cycle summary. Its lists of due or overdue faculty, unmatched faculty and outstanding observations, and the notification sends, each have a short page under Dashboard in the sidebar (`/committee/dashboard/due`, `/committee/dashboard/unmatched`, `/committee/dashboard/outstanding` and `/committee/dashboard/notifications`).
+- `/committee/cycle`: start the evaluation cycle for a term with its three deadlines (with a draft saved on this device), or change the deadlines while the cycle is open, beside who is due.
+- `/committee/faculty`: every professor's status this cycle with filters, name search, CSV export, and due reminders to the selected due or overdue professors.
+- `/committee/signups`: AC-only sign-up requests: run observer selection after the sign-up deadline, see the sign-ups that need attention, add an observer by hand, and notify observees that their lists are ready.
+- `/committee/templates`: the observation form's versions with their draft, live or retired tags, a read-only view of any version, and a draft editor (add, edit and remove questions, rating ranges and labels) with a preview, a "what changed" summary, a warning before leaving unsaved edits, and publishing with a change note. Saving sends `POST /api/templates` and publishing `PATCH /api/templates/{versionId}/publish`; a published version applies to new observations only.
+- `/committee/observations`: the current cycle's sign-ups as outstanding (including "Waiting for the observee to sign", read from each scheduled record) or completed, and "Forward a link" on completed records. The forward call (`POST /api/observations/{observationId}/forward`) is not in the backend yet: the dialog is built against `useForwardObservation` and says "Forwarding a link is not available yet. Nothing was sent." until the route exists.
+- `/guide`: Process guide, linked from the sidebar in both views: the current cycle's deadlines, the steps of a semester, and who is due.
 
 Committee demo accounts can switch between Faculty and Committee views. Faculty-only accounts cannot open the committee dashboard. Faculty who are due can open sign-up from My evaluation. Current and past observations link to the read-only record. Other later-sprint pages are not included.
 
@@ -53,7 +62,7 @@ npm test
 
 Set `VITE_USE_MOCKS=false` in `.env` and restart Vite to send requests through the existing `/api` development proxy to `http://localhost:3000`. The Express package is at the repository root under `backend/`, not inside `App/`.
 
-The evaluation-status and sign-up write routes still return 501 on `main`, and several read routes are missing, so those pages show errors against the real backend.
+The evaluation-status, sign-up, candidate, outgoing-request, observation, survey and notification routes are implemented in the backend source. Check the running backend revision and configuration before diagnosing a missing route; source availability alone does not verify populated end-to-end behavior.
 
 The current screens request:
 
@@ -70,6 +79,12 @@ The current screens request:
 - `GET /api/dashboard/unmatched`
 - `GET /api/cycles/{cycleId}/due-professors`
 - `GET /api/cycles/{cycleId}/signups`
+- `POST /api/cycles/{cycleId}/survey-responses`
+- `GET /api/cycles/{cycleId}/survey-responses`
+- `GET /api/cycles/{cycleId}/survey-responses/{responseId}/trouble-file`
+- `POST /api/cycles` and `PATCH /api/cycles/{cycleId}`
+- `GET /api/terms`, `GET /api/terms/{termId}/due-preview` and `GET /api/cycles/{cycleId}/faculty` (not in the backend yet: the cycle and faculty pages show a "not available yet" note for each, and the faculty page falls back to the due-professors list)
+- `POST /api/cycles/{cycleId}/notifications/due-reminders` with `{ netids }`
 
 Response types are in `src/api/types.ts`. Roles are `faculty` and `AC`; committee membership adds access without removing faculty access. Backend routes must enforce their own permissions. Client-side route guards are not server authorization.
 
@@ -85,13 +100,49 @@ The form saves a bounded draft in this browser, scoped to the signed-in account 
 
 The read-only observation route's **Print record** button opens the browser's native print flow. The printed view uses the saved `GET /api/observations/{observationId}` record only—not a local unsaved draft—and includes course/section/date, participant names, template version, saved question wording/ratings/comments, other comments, any non-completion reason, status, and both signature states/dates. The current backend returns `observerSignedDate` and `observeeSignedDate` as calendar dates (the exact time-of-day is not exposed), so the print view does not invent signature times. Navigation, screen-only labels, print controls, and signing/retry controls are omitted from paper output. Page size is selected in the browser print dialog; no PDF service or dependency is added.
 
+The observation record is locked for the observee until the observer signs: the observer's signature is the form submission, so the observee sees "Locked until your observer submits and signs the form" and no Sign button, and the backend answers an early sign with `409 FORM_NOT_SUBMITTED`. While a record is not locked, a "Something went wrong?" card lets the observee report that the observation could not be done (`POST /api/observations/{id}/report-missed` with `{ reason }`, only while it is scheduled and the observer has not signed) and lets either participant upload a file about the observation (`POST /api/observations/{id}/issue-file`, multipart field `file`, up to 10 MB). The upload route is not in the backend yet: the page shows "Uploading a file is not available yet. Nothing was uploaded." until it is.
+
+Source-checked field semantics (`backend/src/services/observation.service.ts`, base `e9eb96c`):
+
+| Field | Source behavior |
+| --- | --- |
+| `scheduledDate` | Saved observation date; a displayed time is inferred only from an unambiguous regular section meeting, not an actual attendance timestamp. |
+| `answers`, `otherComments` | Saved responses and the observation's assigned historical template questions, not the current live template or local draft. |
+| `observerSignedDate` | Set when the observer submits or resubmits; exposed as a calendar date. Typed-name confirmation is not stored. |
+| `observeeSignedDate` | Set when the observee signs the exact saved revision; completes and locks the record. Exposed as a calendar date. |
+| `lastSavedDate` | Revision token updated by observer submission and observee signing. Not a standalone signature timestamp. |
+
+Short and long controlled saved records were rendered in Chromium on Letter and A4: short output was one page on each; long output was six Letter pages and five A4 pages. Text checks covered saved content, signature states, absence of local drafts and hidden navigation/actions, and no blank trailing page. Representative first/middle/final pages were visually inspected. This verifies browser printing with controlled responses, not physical printers or live persistence. Backend-team confirmation and the approved populated observer-submit → observee-sign → refetch/print run remain required for #198/#162.
+
+On a mounted form refetch, local edits stay tied to the revision that initialized the editor. A visible warning explains that the server changed; saving does not relabel old answers as current. The signing screen uses the newer saved server responses and requires explicit acknowledgement before submitting them. Older draft edits are not automatically merged.
+
+## Survey and attachments
+
+The survey uses the current cycle's `feedback` phase for availability and displays the server-provided opening/closing dates. Participants explicitly choose observer or observee and Yes or No. The API remains authoritative for the survey window, participation and one-response-per-role constraint. Text fields allow 5,000 characters each. The optional trouble file is sent as multipart field `troubleFile`, at most 10 MiB. Pending submission disables the form; errors preserve its inputs, while successful submission clears the attachment and marks that role submitted for this mounted form. A reload may submit again, in which case the server returns `ALREADY_SUBMITTED` rather than saving a duplicate.
+
+The survey page opens after the observation deadline and does not wait for signatures. It says so in both the open and the closed state, and shows when the survey closes and, when the data exists, the professor's own observation for the term. My evaluation explains the professor's due status in words (from `lib/statusTerms.ts`) and shows the notifications sent to them.
+
+The AC response page confirms the user's role before fetching responses and provides loading, empty, error and retry states. File downloads use the cycle/response-scoped endpoint with the current bearer token, not a public storage URL or the opaque `troubleFileKey`. Download errors remain visible without discarding the response list. Response text preserves line breaks. These screens use the existing UI language; exact Figma fidelity remains unverified pending access to the survey/response frames.
+
+Survey tests and isolated Chromium checks cover submission with and without files and authenticated binary download. They do not prove Firebase authorization, server storage or PostgreSQL persistence. Existing demo fixtures are not a substitute for an approved feedback-phase cycle. Coordinate the populated connected run with the backend team before closing integration work. Notification send controls are a separate frontend workstream; due reminders already queue email in the existing backend, but `{ sent }` counts notifications, not confirmed email deliveries. Admin/import screens are outside this workstream.
+
 The evaluation view distinguishes loading, failed requests, empty history, and current-cycle sign-up details. Signature labels use both the observation lifecycle and the available signature dates. When only a sign-up summary is available, the page does not guess whether the record is signed. Observation history is horizontally scrollable on narrower screens; its available record links open the read-only route.
 
 Run `npm test` for page-level regression tests using controlled HTTP responses. These tests do not establish real-backend authentication or database persistence. The evaluation-status, current sign-up, and observee observation-history endpoints must be available before connected status-view acceptance can be verified.
 
 ## Committee dashboard (`/committee/dashboard`)
 
-Below the KPI cards and executive summary, three lists show the current cycle:
+The dashboard is split into short pages so each one stays readable. In Committee mode the sidebar lists them as a list nested under Dashboard, and exactly one row is highlighted on each page:
+
+| Sidebar row | Page | Shows |
+| --- | --- | --- |
+| Dashboard | `/committee/dashboard` | The KPI cards with Export CSV, and the executive summary; each count links to its list's page |
+| Due or overdue | `/committee/dashboard/due` | The due or overdue list |
+| Unmatched | `/committee/dashboard/unmatched` | The unmatched faculty list |
+| Outstanding | `/committee/dashboard/outstanding` | The outstanding observations list |
+| Notifications | `/committee/dashboard/notifications` | The notification sends, then your own notifications |
+
+Faculty-only accounts are sent from every one of these pages to My evaluation, as before. The three lists show the current cycle:
 
 | List | Request | Rows |
 | --- | --- | --- |
@@ -99,22 +150,51 @@ Below the KPI cards and executive summary, three lists show the current cycle:
 | Unmatched faculty | `GET /api/dashboard/unmatched` | Sign-ups with no observation that have no observer, too few observers, or no one who accepted |
 | Outstanding observations | `GET /api/cycles/{cycleId}/signups` | Sign-ups with no observation yet, or one that is not completed (completed means the observee has signed) |
 
-Each list says when it is loading, empty or failed, and one failing does not hide the others. A summary count that is loading or failed shows a dash, never 0. Before the first cycle starts, `GET /api/cycles/current` returns `null`, so the page shows one message that no cycle has started in place of the cards and lists. The dashboard endpoints also answer `404 NO_CYCLE` then.
+Each list has a one-line description under its heading (from `src/lib/statusTerms.ts`) that says who is on it and what due, overdue and outstanding mean; it shows while the list loads, is empty or fails, and the list's section is described by it for screen readers. Each list says when it is loading, empty or failed. A summary count that is loading or failed shows a dash, never 0. Before the first cycle starts, `GET /api/cycles/current` returns `null`, so the overview shows one message that no cycle has started in place of the cards, each list page says it once in place of its list, and the Notifications page keeps its sends turned off with a note that there is no one to notify yet. The dashboard endpoints also answer `404 NO_CYCLE` then.
 
-A list, a count or the KPI cards that fail to load offer Try again, which repeats only the requests that failed and moves keyboard focus to that part of the page. A failed refresh keeps the last data on screen with a "Couldn't refresh" note, and a failed count is announced. The KPI cards show a dash with Loading or Couldn't load until the KPIs arrive, and N/A only when the cycle has no value for a KPI (no result yet, or nothing to divide by).
+A list, a count or the KPI cards that fail to load offer Try again, which repeats only the requests that failed and moves keyboard focus to that part of the page. A failed refresh keeps the last data on screen with a "Couldn't refresh" note, and a failed count is announced. The unmatched count and the unmatched list read the same request but are on different pages now, so each offers its own Try again. The KPI cards show a dash with Loading or Couldn't load until the KPIs arrive, and N/A only when the cycle has no value for a KPI (no result yet, or nothing to divide by).
 
 The KPI cards, the summary counts and the Export CSV row follow the width of the content column (not the window, since the sidebar takes part of it): four KPI cards per row, then two, then one. Each list keeps the Figma column order, status last. A table that is too wide for the column scrolls sideways inside its section, with a fade at the edge while columns are out of view, and its status moves next to the name so it stays in view. Loading, empty and failed lists show their message in a plain box instead. Lists show 7 rows a page, as in the A3 and A4 tables; the pager keeps at most seven page slots (the first, the last and the nearby pages), so its arrows stay put.
-
-Not settled with the backend yet:
-
-- The sign-ups response has no signature dates, so the outstanding list cannot tell "waiting for the observee to sign" apart from Scheduled.
-- The due list and the "Due for evaluation" count come from the due roster captured when the cycle started (`eval_due`), and nothing updates it during the cycle. Question for the backend team: should a professor whose observation is completed and signed this cycle stay listed as due or overdue? The frontend shows the roster as the API returns it.
 
 The mock API differs from the backend in a few places the dashboard reads (the mock itself is unchanged here):
 
 - Unmatched: the mock never returns `insufficient_observers` and ignores resolved alerts.
 - Latest KPIs: before any cycle has started, the mock still returns a cycle that has results; the backend answers 404.
 - Observations: the mock marks an observation completed when the observer submits it; the backend does so only when the observee signs. In demo mode the "Signed up but not observed" count and the outstanding list can therefore disagree after a submission.
+
+### Open dashboard rule questions (#199)
+
+The backend team has not answered these yet, so the lists follow the API as it is today and nothing is guessed:
+
+1. Does "Unmatched faculty" mean only sign-ups with an open alert, or every sign-up that has no observer yet? Today the list shows only sign-ups with no observation that have an open `no_observer` or `insufficient_observers` alert, or (`no_acceptance`) requests sent and no usable observer left, as `GET /api/dashboard/unmatched` returns them. A sign-up with pending requests and no alert is not on it; it is on the outstanding list as "No observer yet".
+2. Does a professor whose observation is completed and signed this cycle stay on the due roster? Today the due list and the "Due for evaluation" count show the roster captured when the cycle started (`eval_due`), which nothing updates during the cycle, so that professor stays listed as due or overdue.
+3. Can the sign-ups summary (`GET /api/cycles/{cycleId}/signups`) include `observerSignedDate` and `observeeSignedDate`? Without them the outstanding list cannot tell "waiting for the observee to sign" apart from Scheduled, so it shows Scheduled for both.
+
+When an answer arrives, the list's filter, its description in `src/lib/statusTerms.ts` and its tests change together.
+
+## Sign-up requests (`/committee/signups`)
+
+After the sign-up deadline the committee runs observer selection, checks the sign-ups that need attention, adds an observer by hand where the list came up short, and tells observees their lists are ready. The dashboard's Unmatched faculty summary links here ("Open in Sign-ups").
+
+| Action or read | Request |
+| --- | --- |
+| Table and attention banner | `GET /api/cycles/{cycleId}/matching` (each sign-up with its observer list and newest open alert) |
+| Observee email column | `GET /api/cycles/{cycleId}/signups` |
+| Run observer selection | `POST /api/cycles/{cycleId}/matching`, no body; the backend refuses it with `409 SIGNUP_OPEN` until the day after the sign-up deadline, so the button stays off until then |
+| Notify observees: lists are ready | `POST /api/cycles/{cycleId}/notifications/lists-ready`, no body, answered with `{ sent }` |
+| Add observer (rows with an alert) | `POST /api/signups/{signupId}/candidates` with exactly `{ observerNetid }`, trimmed |
+
+The lists-ready send follows the dashboard's rules: it asks first, ignores repeat clicks while it runs, is never retried automatically, and says when nobody was notified or when only committee members may send. Run observer selection and Add observer also send once under repeated clicks. Every error message from the backend is shown as sent, and the NetID stays in the box after a failed add.
+
+Checked against the real backend (same revision as this branch) on a private local PostgreSQL database built from `database/schema.sql`, the migrations and the seed data, with 14 sign-ups made through the API: the page listed them as not run yet before the deadline; after it, observer selection filled the lists (9 with 5 observers, 5 with fewer than 3) and the banner, Show only these and the table matched; lists-ready reported 14 notifications; an add with the observee's own NetID and one with an unknown NetID showed the backend's messages, and a valid add brought that sign-up to 3 observers and cleared its alert.
+
+On the shared database (read only, signed in with Firebase as an AC member, 2026-11-10): the page showed the cycle's one sign-up as not run yet after the deadline, with Run on, Notify off and no attention banner, which matches the dashboard's empty Unmatched faculty list; every read returned 200. Running selection, notifying and adding an observer were not done there.
+
+Still depends on the backend:
+
+- "Ran" shows the newest `ranAt` across the sign-ups. The backend fills it from the newest observer match, so a later manual add moves it too.
+- The mock answers `POST /api/signups/{signupId}/candidates` with a matching row and its own eligibility rules; the backend returns `{ signupId, observer, roundNo }` and accepts any active professor while fewer than 3 observers are usable. The page reads neither body, so both work.
+- The insufficient threshold (3) and the list size (5) are the backend's `INSUFFICIENT_BELOW` and `MAX_CANDIDATES`; the backend notes the team still has to confirm 3.
 
 ## Mock data
 
@@ -145,4 +225,4 @@ It sends `POST /api/signups/{signupId}/requests` with the selected `observerNeti
 Not settled with the backend yet:
 
 - The candidates response cannot tell "matching has not run" from "matching found no eligible observers", so after the deadline both show the same neutral message.
-- `POST /api/signups/{signupId}/requests` is implemented in the backend. This page still needs the backend candidate and outgoing-request reads before it can use the live API end to end.
+- Candidate and outgoing-request reads and the request write are implemented in the backend source. Populated connected-flow acceptance still needs the intended backend revision, approved fictional accounts and test data.

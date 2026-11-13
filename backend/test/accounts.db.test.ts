@@ -158,6 +158,31 @@ describe('login accounts against the database', { skip }, () => {
       }
     });
 
+    // The import is mounted before the /api/admin guard, so it stays AC-only until it moves to the admin role.
+    test('POST /api/admin/import is open to AC members who are not admins, and to no one else', async () => {
+      async function postTerm(email: string) {
+        const form = new FormData();
+        form.append('term', new Blob(['term_id,season,year,start_date,end_date\n900,spring,2027,2027-01-12,2027-05-08\n'],
+          { type: 'text/csv' }), 'term.csv');
+        const response = await fetch(`${base}/api/admin/import`, {
+          method: 'POST', headers: { authorization: `Bearer ${email}` }, body: form,
+        });
+        return { status: response.status, body: await response.json() };
+      }
+
+      const ac = await postTerm('ann.committee@example.edu');
+      assert.equal(ac.status, 200);
+      assert.equal(ac.body.imported.term, 1);
+
+      const faculty = await postTerm('paula.prof@example.edu');
+      assert.equal(faculty.status, 403);
+      assert.equal(faculty.body.error.message, 'Only Assessment Committee members can do this.');
+
+      const adminOnly = await postTerm('ada.admin@example.edu');
+      assert.equal(adminOnly.status, 403);
+      assert.equal(adminOnly.body.error.code, 'NOT_A_PROFESSOR');
+    });
+
     test('an admin reaches the admin router', async () => {
       for (const email of ['ada.admin@example.edu', 'bo.both@example.edu']) {
         const { status, body } = await get('/api/admin/anything', email);
