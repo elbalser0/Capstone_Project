@@ -1,5 +1,7 @@
 import { Router, type Request } from 'express';
+import { requireAC } from '../middleware/auth.middleware.js';
 import { ApiError } from '../middleware/error.middleware.js';
+import { forwardObservation } from '../services/forward.service.js';
 import {
   getObservation,
   listAssignments,
@@ -93,4 +95,11 @@ observationsRouter.post('/:observationId/sign', async (req, res) => {
 observationsRouter.post('/:observationId/report-missed', async (req, res) => {
   const id = observationId(req);
   res.status(200).json(await reportMissed(id, req.user!, readReportMissed(req.body)));
+});
+
+// AC only: email a signed and locked record. Body { email }.
+observationsRouter.post('/:observationId/forward', requireAC, async (req, res) => {
+  const id = observationId(req);
+  const body = typeof req.body === 'object' && req.body !== null ? req.body as Record<string, unknown> : {};
+  res.status(201).json(await forwardObservation(id, req.user!, body.email));
 });
