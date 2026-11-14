@@ -69,9 +69,11 @@ export function participationRate({ due, signups }: CycleFacts): KpiRow {
   return rate('2.1', due.filter((d) => signedUp.has(d.netid)).length, due.length);
 }
 
+// Confirmed observers: an observation exists once an observer confirms a request, whether or
+// not they signed up themselves. A sign-up has at most one observation, so this stays <= 100%.
 export function observerUtilization({ signups, observations }: CycleFacts): KpiRow {
-  const observers = new Set(observations.filter((o) => o.status !== 'not_completed').map((o) => o.observerNetid));
-  return rate('2.2', signups.filter((s) => observers.has(s.netid)).length, signups.length);
+  const observers = new Set(observations.map((o) => o.observerNetid));
+  return rate('2.2', observers.size, signups.length);
 }
 
 export function listSufficiency({ signups }: CycleFacts): KpiRow {

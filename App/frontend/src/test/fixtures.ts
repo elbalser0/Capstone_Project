@@ -1,4 +1,4 @@
-import type { CourseSection, Cycle, EvaluationStatus, ObservationSummary, PersonRef, Signup, Term } from '../api/types';
+import type { CourseSection, Cycle, EvaluationStatus, FacultyStatus, ObservationSummary, PersonRef, Signup, Term } from '../api/types';
 
 export const term: Term = {
   termId: '1', season: 'fall', year: 2026, label: 'Fall 2026', startDate: '2026-08-24', endDate: '2026-12-12',
@@ -34,3 +34,15 @@ export const observation: ObservationSummary = {
   observationId: '30', term, observer, observee: faculty, section: course, scheduledDate: '2026-09-21',
   status: 'scheduled', observeeSignedDate: null, observerSignedDate: null,
 };
+export const nextTerm: Term = {
+  termId: '2', season: 'spring', year: 2027, label: 'Spring 2027', startDate: '2027-01-11', endDate: '2027-05-08',
+};
+/** One A3 row; pass the fields that differ. */
+export const facultyStatus = (netid: string, name: string, dueStatus: FacultyStatus['dueStatus'], extra: Partial<FacultyStatus> = {}): FacultyStatus => ({
+  professor: { netid, firstName: name, lastName: 'Test', displayName: `Dr. ${name} Test`, rank: 'assistant', email: `${netid}@demo.edu` },
+  department: { deptId: '1', deptName: 'Computer Science' },
+  dueStatus,
+  lastObservedTerm: null,
+  dueTerm: term,
+  ...extra,
+});

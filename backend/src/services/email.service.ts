@@ -103,3 +103,35 @@ export function queueReminderEmails(emails: ReminderEmail[]) {
   inFlight.add(job);
   void job.finally(() => inFlight.delete(job));
 }
+
+export interface PlainEmail {
+  to: string;
+  subject: string;
+  text: string;
+}
+
+// Sends one email in the background, the same way as reminders: EMAIL_MODE decides
+// whether it goes out, and a failed email is only logged, never thrown.
+export function queueEmail(email: PlainEmail) {
+  const job = (async () => {
+    let mailer: Transporter | null;
+    try {
+      mailer = await getTransport();
+    } catch (error) {
+      console.error(`Email to ${email.to} was not sent:`, (error as Error).message);
+      return { to: email.to, sent: false };
+    }
+    if (!mailer) return { to: email.to, sent: false };
+    try {
+      const info = await mailer.sendMail({ from: senderAddress(), ...email });
+      const preview = nodemailer.getTestMessageUrl(info);
+      if (preview) console.log(`Email to ${email.to}: ${preview}`);
+      return { to: email.to, sent: true, info };
+    } catch (error) {
+      console.error(`Email to ${email.to} failed:`, (error as Error).message);
+      return { to: email.to, sent: false };
+    }
+  })();
+  inFlight.add(job);
+  void job.finally(() => inFlight.delete(job));
+}
