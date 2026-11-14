@@ -80,7 +80,7 @@ export async function createProfessor(professor: NewProfessor): Promise<AdminPro
       }
       const startTerm = await findNextTermId(client);
       if (startTerm === null) {
-        throw new ApiError(409, 'NEXT_TERM_MISSING', 'Add the next term before adding professors.');
+        throw new ApiError(409, 'NEXT_TERM_MISSING', 'Import the next term (term.csv) before adding professors.');
       }
       await client.query(`
         INSERT INTO professor (netid, first_name, last_name, email, rank, dept_id,
@@ -98,8 +98,8 @@ export async function createProfessor(professor: NewProfessor): Promise<AdminPro
     if (code === '23505' && constraint === 'professor_email_lower_unique') {
       throw new ApiError(409, 'EMAIL_TAKEN', 'A professor with that email already exists.');
     }
-    // The department was deleted after the check above.
-    if (code === '23503') {
+    // The department was deleted after the check above. Other foreign keys (start_term) fall through.
+    if (code === '23503' && constraint === 'professor_dept_id_fkey') {
       throw new ApiError(400, 'INVALID_PROFESSOR', 'deptId does not match a department.');
     }
     throw error;

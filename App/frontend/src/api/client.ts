@@ -60,3 +60,34 @@ export async function api<T>(path: string, { method = 'GET', query, body }: Requ
   }
   return data as T;
 }
+
+/** AC-only binary endpoint. Never navigate directly: the bearer token must accompany the request. */
+export async function downloadSurveyTroubleFile(cycleId: string, responseId: string): Promise<void> {
+  const token = await tokenProvider();
+  const res = await fetch(`${BASE}/cycles/${encodeURIComponent(cycleId)}/survey-responses/${encodeURIComponent(responseId)}/trouble-file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let error: ApiErrorBody | undefined;
+    try { error = await res.json() as ApiErrorBody; } catch { /* Non-JSON error response. */ }
+    throw new ApiError(res.status, error?.error?.code ?? 'HTTP_ERROR', error?.error?.message ?? `Download failed (${res.status}).`);
+  }
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  let name = '';
+  try { name = encoded ? decodeURIComponent(encoded) : ''; } catch { /* Fall back to a known-safe name. */ }
+  // Treat the server's header as untrusted: strip path segments, controls and filesystem metacharacters.
+  name = name.split(/[\\/]/).pop()?.replace(/[\x00-\x1f\x7f<>:"|?*]/g, '_').trim().replace(/^\.+$/, '') ?? '';
+  name = name.slice(0, 255) || `survey-response-${responseId}-attachment`;
+  const url = URL.createObjectURL(await res.blob());
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.hidden = true;
+    document.body.appendChild(link);
+    try { link.click(); } finally { link.remove(); }
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

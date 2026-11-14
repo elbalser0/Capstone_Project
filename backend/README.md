@@ -93,8 +93,8 @@ semesters.
 ## Admin endpoints
 
 Every `/api/admin` route requires an active `app_admin` row for the signed-in
-email; anyone else gets 403 `FORBIDDEN`. Add the first admin with the example
-INSERT in `database/migrations/20261104_app_admin.sql`. Admin actions change one
+email; anyone else gets 403 `FORBIDDEN`. That includes `POST /api/admin/import`
+(below). Add the first admin with the example INSERT in `database/migrations/20261104_app_admin.sql`. Admin actions change one
 professor at a time. Professors and AC memberships are deactivated, never deleted.
 
 `GET /api/admin/professors` returns every professor, inactive ones included,
@@ -110,7 +110,7 @@ are trimmed; `deptId` is a department ID string. The professor starts in the
 next term (the earliest term starting after today) with no prior evaluation,
 and the rank trigger sets `eval_interval_years`. Invalid fields or an unknown
 department return 400 `INVALID_PROFESSOR`. It returns 409 `NEXT_TERM_MISSING`
-when no term starts after today, 409 `NETID_TAKEN`, or 409 `EMAIL_TAKEN`
+when no term starts after today (import the next term's `term.csv` first), 409 `NETID_TAKEN`, or 409 `EMAIL_TAKEN`
 (emails are compared case-insensitively).
 
 `PATCH /api/admin/professors/:netid` takes any of `{ rank, isAc, isActive }` and
@@ -134,15 +134,30 @@ warn when no professor has both `isAc` and `isActive`.
 `GET /api/admin/departments` returns `[{ deptId, deptName }]` sorted by name,
 for the Add Professor dropdown.
 
-`POST /api/admin/terms` adds a term from `{ season, year, startDate, endDate }`
-(`season` is `fall` or `spring`; dates are `YYYY-MM-DD`; `startDate` must be in
-`year`) and returns 201 with `{ termId, season, year, label, startDate, endDate }`.
-Invalid fields return 400 `INVALID_TERM`. It returns 409 `TERM_EXISTS` for a
-season and year that already exist, 409 `TERM_OVERLAP` when the dates overlap
-another term (sharing a first or last day counts), and 409 `TERM_OUT_OF_ORDER`
-when sorting terms by start date would break season order. Gaps are allowed and
-can be filled later; past terms are allowed. Admins add the next term this way
-before adding a professor who starts in it.
+## Admin import
+
+`POST /api/admin/import` loads a new semester's teaching data. Send form data with
+one CSV file per table, named `term`, `course`, `section` and `meeting_time`, in the
+same layout as `Scripts/seed_data`. Send any of them; at least one is required.
+Professors and departments are not imported here: add them on the admin pages.
+Admins only (an admin does not need to be a professor); AC members who are not admins get 403.
+
+The IDs in the files only link the files to each other. An ID that is not in the
+uploaded parent file means a row already in the database (for example a
+`course_id` in `section.csv` when `course.csv` is not sent). The database picks
+new IDs, and rows already there are skipped: a term by season and year, a course
+by department and number, a section by course, term and section number, and a
+meeting by section, day and start time. Uploading the same files again adds
+nothing. Every row is checked first and the import runs in one transaction, so a
+bad row (or an instructor who is not a professor yet) saves nothing and returns
+400 `INVALID_IMPORT` naming the file and line. The reply counts what was added
+and skipped per table, for example
+`{"imported":{"term":1,"course":0,"section":186,"meeting_time":358},"skipped":{...}}`.
+The files can be up to 5 MB together.
+
+For a new semester with new professors: upload `term.csv` first, add the new
+professors with that start term, then upload the course, section and meeting
+time files.
 
 ## PostgreSQL connectivity
 

@@ -6,6 +6,7 @@ import { after, before, beforeEach, describe, test } from 'node:test';
 import { skip, sql, useTestDatabase } from './db-test-helper.js';
 import { adminRouter } from '../src/routes/admin.routes.js';
 import { errorHandler } from '../src/middleware/error.middleware.js';
+import { findNextTermId } from '../src/services/term.service.js';
 
 // Isolate the admin routes from Firebase: every request is an admin (auth is covered in accounts.db.test.ts).
 const routeApp = express();
@@ -211,5 +212,38 @@ describe('admin professors against the database', { skip }, () => {
       await sql('TRUNCATE department RESTART IDENTITY CASCADE');
       assert.deepEqual(await get('/api/admin/departments'), { status: 200, body: [] });
     });
+  });
+});
+
+// The start term a newly added professor gets.
+describe('findNextTermId against the database', { skip }, () => {
+  useTestDatabase();
+  beforeEach(async () => {
+    await sql('TRUNCATE term RESTART IDENTITY CASCADE');
+  });
+
+  async function addRelative(season: string, year: number, startOffset: number, endOffset: number) {
+    const { rows } = await sql(`INSERT INTO term (season, year, start_date, end_date)
+                                VALUES ($1, $2, CURRENT_DATE + $3::int, CURRENT_DATE + $4::int) RETURNING term_id`,
+    [season, year, startOffset, endOffset]);
+    return rows[0].term_id as number;
+  }
+
+  test('returns the earliest term that starts after today, not the current term', async () => {
+    await addRelative('fall', 2090, -30, 30);
+    await addRelative('fall', 2091, 200, 260);
+    const next = await addRelative('spring', 2091, 60, 120);
+    assert.equal(await findNextTermId(), next);
+  });
+
+  test('a term starting today is not the next term', async () => {
+    await addRelative('fall', 2090, 0, 90);
+    assert.equal(await findNextTermId(), null);
+  });
+
+  test('returns null when there is no future term', async () => {
+    await addRelative('fall', 2090, -200, -100);
+    await addRelative('spring', 2091, -30, 30);
+    assert.equal(await findNextTermId(), null);
   });
 });

@@ -152,12 +152,37 @@ describe('login accounts against the database', { skip }, () => {
 
     test('a professor who is not an admin gets 403 FORBIDDEN from admin routes', async () => {
       for (const email of ['paula.prof@example.edu', 'ann.committee@example.edu']) {
-        for (const path of ['/api/admin/anything', '/api/admin/professors', '/api/admin/departments', '/api/admin/terms']) {
+        for (const path of ['/api/admin/anything', '/api/admin/professors', '/api/admin/departments']) {
           const { status, body } = await get(path, email);
           assert.equal(status, 403, `${email} ${path}`);
           assert.equal(body.error.code, 'FORBIDDEN', `${email} ${path}`);
         }
       }
+    });
+
+    test('POST /api/admin/import is open to admins only, professor or not', async () => {
+      async function postTerm(email: string) {
+        const form = new FormData();
+        form.append('term', new Blob(['term_id,season,year,start_date,end_date\n900,spring,2027,2027-01-12,2027-05-08\n'],
+          { type: 'text/csv' }), 'term.csv');
+        const response = await fetch(`${base}/api/admin/import`, {
+          method: 'POST', headers: { authorization: `Bearer ${email}` }, body: form,
+        });
+        return { status: response.status, body: await response.json() };
+      }
+
+      // An admin who is not a professor can import.
+      const adminOnly = await postTerm('ada.admin@example.edu');
+      assert.equal(adminOnly.status, 200);
+      assert.equal(adminOnly.body.imported.term, 1);
+
+      // An AC member who is not an admin, and plain faculty, cannot.
+      for (const email of ['ann.committee@example.edu', 'paula.prof@example.edu']) {
+        const refused = await postTerm(email);
+        assert.equal(refused.status, 403, email);
+        assert.equal(refused.body.error.message, 'Only admins can do this.', email);
+      }
+      assert.equal((await sql("SELECT count(*)::int AS n FROM term WHERE year = 2027")).rows[0].n, 1);
     });
 
     test('an admin reaches the admin router', async () => {
