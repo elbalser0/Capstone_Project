@@ -162,20 +162,54 @@ async function importTerms(client: PoolClient, rows: Row[], imported: ImportCoun
     if (seen.has(`${season} ${year}`)) throw badRow('term', row, `${season} ${year} is listed twice.`);
     seen.add(`${season} ${year}`);
 
+    const existing = await client.query<{ term_id: number }>(
+      'SELECT term_id FROM term WHERE season = $1 AND year = $2', [season, year]);
+    if (existing.rows[0]) {
+      skipped.term += 1;
+      ids.set(fileId, existing.rows[0].term_id);
+      continue;
+    }
+    await checkTermFits(client, row, season, year, start, end);
     const added = await client.query<{ term_id: number }>(`
       INSERT INTO term (season, year, start_date, end_date) VALUES ($1, $2, $3, $4)
-      ON CONFLICT (season, year) DO NOTHING RETURNING term_id`, [season, year, start, end]);
-    if (added.rows[0]) {
-      imported.term += 1;
-      ids.set(fileId, added.rows[0].term_id);
-    } else {
-      skipped.term += 1;
-      const existing = await client.query<{ term_id: number }>(
-        'SELECT term_id FROM term WHERE season = $1 AND year = $2', [season, year]);
-      ids.set(fileId, existing.rows[0].term_id);
-    }
+      RETURNING term_id`, [season, year, start, end]);
+    imported.term += 1;
+    ids.set(fileId, added.rows[0].term_id);
   }
   return ids;
+}
+
+// Spring comes before fall in a year, the same order the due-date calculation uses.
+const semesterIndex = (season: string, year: number) => year * 2 + (season === 'fall' ? 1 : 0);
+const termLabel = (season: string, year: number) => `${season === 'fall' ? 'Fall' : 'Spring'} ${year}`;
+
+// A new term may not overlap another term, and sorting terms by start date must keep season order
+// (the same checks as the closed admin terms PR #207). Terms added earlier in this file count too.
+async function checkTermFits(client: PoolClient, row: Row, season: string, year: number, start: string, end: string) {
+  const label = termLabel(season, year);
+  const { rows: [overlap] } = await client.query<{ season: string; year: number }>(`
+    SELECT season, year FROM term
+    WHERE start_date <= $2::date AND end_date >= $1::date
+    ORDER BY start_date LIMIT 1`, [start, end]);
+  if (overlap) {
+    throw badRow('term', row, `${label}'s dates overlap ${termLabel(overlap.season, overlap.year)}.`);
+  }
+  const { rows: [near] } = await client.query<{
+    prev_season: string | null; prev_year: number | null; next_season: string | null; next_year: number | null;
+  }>(`
+    SELECT prev.season AS prev_season, prev.year AS prev_year, next.season AS next_season, next.year AS next_year
+    FROM (SELECT 1) AS one
+    LEFT JOIN LATERAL (SELECT season, year FROM term WHERE start_date < $1::date
+                       ORDER BY start_date DESC LIMIT 1) AS prev ON true
+    LEFT JOIN LATERAL (SELECT season, year FROM term WHERE start_date > $1::date
+                       ORDER BY start_date LIMIT 1) AS next ON true`, [start]);
+  const index = semesterIndex(season, year);
+  if (near.prev_season && semesterIndex(near.prev_season, near.prev_year!) >= index) {
+    throw badRow('term', row, `${label} cannot start after ${termLabel(near.prev_season, near.prev_year!)}.`);
+  }
+  if (near.next_season && semesterIndex(near.next_season, near.next_year!) <= index) {
+    throw badRow('term', row, `${label} cannot start before ${termLabel(near.next_season, near.next_year!)}.`);
+  }
 }
 
 async function importCourses(client: PoolClient, rows: Row[], imported: ImportCounts, skipped: ImportCounts): Promise<IdMap> {
