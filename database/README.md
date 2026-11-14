@@ -4,7 +4,7 @@ This folder contains the PostgreSQL scripts for Assessment Helper.
 
 ## Files
 
-- schema.sql: Creates all 22 tables, constraints, and the professor
+- schema.sql: Creates all 24 tables, constraints, and the professor
   evaluation interval function and trigger.
 - checkDatabase.sql: Displays table names and column information.
 - reset_identity_after_seed.sql: Sets the next generated IDs after
@@ -35,6 +35,10 @@ Coordinate with the team before using it on the shared database.
 - `migrations/20261030_alert_auto_resolution.sql`: Apply to an existing database
   to allow automatic alert resolution without attributing it to an AC member.
   New databases get this constraint from `schema.sql`.
+- `migrations/20261104_app_admin.sql`: Apply to an existing database to add
+  the `app_admin` table for admin logins. It is safe to run more than once.
+  Uncomment and edit its example INSERT to add the first admin.
+  New databases get this table from `schema.sql`.
 
 ## Connection details
 
