@@ -160,6 +160,31 @@ describe('login accounts against the database', { skip }, () => {
       }
     });
 
+    test('POST /api/admin/import is open to admins only, professor or not', async () => {
+      async function postTerm(email: string) {
+        const form = new FormData();
+        form.append('term', new Blob(['term_id,season,year,start_date,end_date\n900,spring,2027,2027-01-12,2027-05-08\n'],
+          { type: 'text/csv' }), 'term.csv');
+        const response = await fetch(`${base}/api/admin/import`, {
+          method: 'POST', headers: { authorization: `Bearer ${email}` }, body: form,
+        });
+        return { status: response.status, body: await response.json() };
+      }
+
+      // An admin who is not a professor can import.
+      const adminOnly = await postTerm('ada.admin@example.edu');
+      assert.equal(adminOnly.status, 200);
+      assert.equal(adminOnly.body.imported.term, 1);
+
+      // An AC member who is not an admin, and plain faculty, cannot.
+      for (const email of ['ann.committee@example.edu', 'paula.prof@example.edu']) {
+        const refused = await postTerm(email);
+        assert.equal(refused.status, 403, email);
+        assert.equal(refused.body.error.message, 'Only admins can do this.', email);
+      }
+      assert.equal((await sql("SELECT count(*)::int AS n FROM term WHERE year = 2027")).rows[0].n, 1);
+    });
+
     test('an admin reaches the admin router', async () => {
       for (const email of ['ada.admin@example.edu', 'bo.both@example.edu']) {
         const { status, body } = await get('/api/admin/anything', email);

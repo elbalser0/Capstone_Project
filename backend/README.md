@@ -93,8 +93,8 @@ semesters.
 ## Admin endpoints
 
 Every `/api/admin` route requires an active `app_admin` row for the signed-in
-email; anyone else gets 403 `FORBIDDEN`. Add the first admin with the example
-INSERT in `database/migrations/20261104_app_admin.sql`. Admin actions change one
+email; anyone else gets 403 `FORBIDDEN`. That includes `POST /api/admin/import`
+(below). Add the first admin with the example INSERT in `database/migrations/20261104_app_admin.sql`. Admin actions change one
 professor at a time. Professors and AC memberships are deactivated, never deleted.
 
 `GET /api/admin/professors` returns every professor, inactive ones included,
@@ -125,6 +125,31 @@ another term (sharing a first or last day counts), and 409 `TERM_OUT_OF_ORDER`
 when sorting terms by start date would break season order. Gaps are allowed and
 can be filled later; past terms are allowed. Admins add the next term this way
 before adding a professor who starts in it.
+
+## Admin import
+
+`POST /api/admin/import` loads a new semester's teaching data. Send form data with
+one CSV file per table, named `term`, `course`, `section` and `meeting_time`, in the
+same layout as `Scripts/seed_data`. Send any of them; at least one is required.
+Professors and departments are not imported here: add them on the admin pages.
+Admins only (an admin does not need to be a professor); AC members who are not admins get 403.
+
+The IDs in the files only link the files to each other. An ID that is not in the
+uploaded parent file means a row already in the database (for example a
+`course_id` in `section.csv` when `course.csv` is not sent). The database picks
+new IDs, and rows already there are skipped: a term by season and year, a course
+by department and number, a section by course, term and section number, and a
+meeting by section, day and start time. Uploading the same files again adds
+nothing. Every row is checked first and the import runs in one transaction, so a
+bad row (or an instructor who is not a professor yet) saves nothing and returns
+400 `INVALID_IMPORT` naming the file and line. The reply counts what was added
+and skipped per table, for example
+`{"imported":{"term":1,"course":0,"section":186,"meeting_time":358},"skipped":{...}}`.
+The files can be up to 5 MB together.
+
+For a new semester with new professors: upload `term.csv` first, add the new
+professors with that start term, then upload the course, section and meeting
+time files.
 
 ## PostgreSQL connectivity
 
