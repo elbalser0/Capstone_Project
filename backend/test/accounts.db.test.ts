@@ -158,8 +158,7 @@ describe('login accounts against the database', { skip }, () => {
       }
     });
 
-    // The import is mounted before the /api/admin guard, so it stays AC-only until it moves to the admin role.
-    test('POST /api/admin/import is open to AC members who are not admins, and to no one else', async () => {
+    test('POST /api/admin/import is open to admins only, professor or not', async () => {
       async function postTerm(email: string) {
         const form = new FormData();
         form.append('term', new Blob(['term_id,season,year,start_date,end_date\n900,spring,2027,2027-01-12,2027-05-08\n'],
@@ -170,17 +169,18 @@ describe('login accounts against the database', { skip }, () => {
         return { status: response.status, body: await response.json() };
       }
 
-      const ac = await postTerm('ann.committee@example.edu');
-      assert.equal(ac.status, 200);
-      assert.equal(ac.body.imported.term, 1);
-
-      const faculty = await postTerm('paula.prof@example.edu');
-      assert.equal(faculty.status, 403);
-      assert.equal(faculty.body.error.message, 'Only Assessment Committee members can do this.');
-
+      // An admin who is not a professor can import.
       const adminOnly = await postTerm('ada.admin@example.edu');
-      assert.equal(adminOnly.status, 403);
-      assert.equal(adminOnly.body.error.code, 'NOT_A_PROFESSOR');
+      assert.equal(adminOnly.status, 200);
+      assert.equal(adminOnly.body.imported.term, 1);
+
+      // An AC member who is not an admin, and plain faculty, cannot.
+      for (const email of ['ann.committee@example.edu', 'paula.prof@example.edu']) {
+        const refused = await postTerm(email);
+        assert.equal(refused.status, 403, email);
+        assert.equal(refused.body.error.message, 'Only admins can do this.', email);
+      }
+      assert.equal((await sql("SELECT count(*)::int AS n FROM term WHERE year = 2027")).rows[0].n, 1);
     });
 
     test('an admin reaches the admin router', async () => {

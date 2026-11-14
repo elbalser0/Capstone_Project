@@ -7,6 +7,7 @@ import { skip, sql, useTestDatabase } from './db-test-helper.js';
 
 const { importRouter, MAX_IMPORT_BYTES } = await import('../src/routes/import.routes.js');
 const { errorHandler } = await import('../src/middleware/error.middleware.js');
+const { requireAdmin } = await import('../src/middleware/auth.middleware.js');
 
 const TERM = 'term_id,season,year,start_date,end_date\n900,spring,2027,2027-01-12,2027-05-08\n';
 const COURSE = 'course_id,dept_id,course_num,title,course_level\n500,1,4390,"Senior Design, Part 2",4000\n';
@@ -15,11 +16,16 @@ const SECTION = 'section_id,course_id,term_id,section_num,instructor_id,class_mo
 const MEETING = 'section_id,day_of_week,start_time,end_time,room\n'
   + '7000,Tuesday,13:00,14:15,ECN 2.120\n7000,thursday,13:00,14:15,ECN 2.120\n7001,monday,9:00,9:50,\n';
 
-// Posts CSV files the way the frontend does, as the given professor.
-async function upload(netid: string, files: Record<string, string>) {
+// Posts CSV files the way the frontend does, behind the same admin check as app.ts.
+// admin: an admin who is not a professor. ac1: an AC member who is not an admin. prof1: faculty.
+async function upload(who: 'admin' | 'ac1' | 'prof1', files: Record<string, string>) {
   const app = express();
-  app.use((req, _res, next) => { req.user = { netid, role: netid === 'ac1' ? 'AC' : 'faculty' } as typeof req.user; next(); });
-  app.use('/api/admin/import', importRouter);
+  app.use((req, _res, next) => {
+    req.user = who === 'admin' ? undefined : { netid: who, role: who === 'ac1' ? 'AC' : 'faculty' } as typeof req.user;
+    req.account = { email: `${who}@example.edu`, professor: req.user, admin: who === 'admin' ? { email: 'admin@example.edu' } : undefined } as typeof req.account;
+    next();
+  });
+  app.use('/api/admin/import', requireAdmin, importRouter);
   app.use(errorHandler);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -52,7 +58,7 @@ describe('admin import against the database', { skip }, () => {
   });
 
   test('imports a new semester, linking the files by their own IDs', async () => {
-    const result = await upload('ac1', { term: TERM, course: COURSE, section: SECTION, meeting_time: MEETING });
+    const result = await upload('admin', { term: TERM, course: COURSE, section: SECTION, meeting_time: MEETING });
     assert.equal(result.status, 200);
     assert.deepEqual(result.body, {
       imported: { term: 1, course: 1, section: 2, meeting_time: 3 },
@@ -74,8 +80,8 @@ describe('admin import against the database', { skip }, () => {
 
   test('uploading the same files again adds nothing', async () => {
     const files = { term: TERM, course: COURSE, section: SECTION, meeting_time: MEETING };
-    await upload('ac1', files);
-    const again = await upload('ac1', files);
+    await upload('admin', files);
+    const again = await upload('admin', files);
     assert.equal(again.status, 200);
     assert.deepEqual(again.body, {
       imported: { term: 0, course: 0, section: 0, meeting_time: 0 },
@@ -85,9 +91,9 @@ describe('admin import against the database', { skip }, () => {
   });
 
   test('a term can be uploaded alone, then its sections can point at it', async () => {
-    assert.equal((await upload('ac1', { term: TERM })).status, 200);
+    assert.equal((await upload('admin', { term: TERM })).status, 200);
     const sections = 'section_id,course_id,term_id,section_num,instructor_id,class_mode\n1,1,2,001,prof1,in-person\n';
-    const result = await upload('ac1', { section: sections });
+    const result = await upload('admin', { section: sections });
     assert.equal(result.status, 200);
     assert.equal(result.body.imported.section, 1);
     assert.equal((await sql('SELECT term_id FROM section')).rows[0].term_id, 2);
@@ -95,7 +101,7 @@ describe('admin import against the database', { skip }, () => {
 
   test('an instructor who is not a professor stops the whole import', async () => {
     const sections = SECTION.replace('prof2', 'newprof');
-    const result = await upload('ac1', { term: TERM, course: COURSE, section: sections, meeting_time: MEETING });
+    const result = await upload('admin', { term: TERM, course: COURSE, section: sections, meeting_time: MEETING });
     assert.equal(result.status, 400);
     assert.equal(result.body.error.code, 'INVALID_IMPORT');
     assert.equal(result.body.error.message, 'section.csv line 3: instructor newprof is not a professor yet. Add them on the admin page first.');
@@ -119,26 +125,30 @@ describe('admin import against the database', { skip }, () => {
       [{ section: SECTION.replace('7001', '7000') }, 'section.csv line 3: section_id 7000 is listed twice.'],
     ];
     for (const [files, message] of cases) {
-      const result = await upload('ac1', files);
+      const result = await upload('admin', files);
       assert.equal(result.status, 400, message);
       assert.equal(result.body.error.message, message);
     }
     assert.deepEqual([await count('term'), await count('course'), await count('section'), await count('meeting_time')], [1, 1, 0, 0]);
   });
 
-  test('refuses professors and departments, unknown or empty uploads, and non-AC users', async () => {
-    const professor = await upload('ac1', { professor: 'netid\n' });
+  test('refuses professors and departments, unknown or empty uploads, and non-admins (faculty and AC)', async () => {
+    const professor = await upload('admin', { professor: 'netid\n' });
     assert.equal(professor.status, 400);
     assert.equal(professor.body.error.message, 'professor.csv is not imported here. Add professors on the admin page.');
-    assert.equal((await upload('ac1', { rooms: 'a\n' })).body.error.message, 'Unknown file rooms. Send term, course, section or meeting_time.');
-    assert.equal((await upload('ac1', {})).body.error.message, 'Send at least one CSV file.');
+    assert.equal((await upload('admin', { rooms: 'a\n' })).body.error.message, 'Unknown file rooms. Send term, course, section or meeting_time.');
+    assert.equal((await upload('admin', {})).body.error.message, 'Send at least one CSV file.');
     const faculty = await upload('prof1', { term: TERM });
     assert.equal(faculty.status, 403);
+    // An AC member who is not an admin can no longer import.
+    const ac = await upload('ac1', { term: TERM });
+    assert.equal(ac.status, 403);
+    assert.equal(ac.body.error.message, 'Only admins can do this.');
     assert.equal(await count('term'), 1);
   });
 
   test('refuses an upload over the size limit with 413', async () => {
-    const result = await upload('ac1', { term: TERM + 'x'.repeat(MAX_IMPORT_BYTES) });
+    const result = await upload('admin', { term: TERM + 'x'.repeat(MAX_IMPORT_BYTES) });
     assert.equal(result.status, 413);
     assert.equal(result.body.error.code, 'TOO_LARGE');
   });
