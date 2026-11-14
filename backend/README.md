@@ -117,7 +117,8 @@ uploaded parent file means a row already in the database (for example a
 new IDs, and rows already there are skipped: a term by season and year, a course
 by department and number, a section by course, term and section number, and a
 meeting by section, day and start time. Uploading the same files again adds
-nothing. Every row is checked first and the import runs in one transaction, so a
+nothing. A new term may not overlap another term, and sorting terms by start date
+must keep season order (spring before fall in a year). Every row is checked first and the import runs in one transaction, so a
 bad row (or an instructor who is not a professor yet) saves nothing and returns
 400 `INVALID_IMPORT` naming the file and line. The reply counts what was added
 and skipped per table, for example

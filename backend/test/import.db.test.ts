@@ -132,6 +132,36 @@ describe('admin import against the database', { skip }, () => {
     assert.deepEqual([await count('term'), await count('course'), await count('section'), await count('meeting_time')], [1, 1, 0, 0]);
   });
 
+  test('a new term may not overlap another term or break season order, wherever it is in the file', async () => {
+    const header = 'term_id,season,year,start_date,end_date\n';
+    const cases: [string, string][] = [
+      // Spring 2027 dated inside Fall 2026 (2026-08-24 to 2026-12-11).
+      ['901,spring,2027,2026-11-01,2027-05-08', "term.csv line 2: Spring 2027's dates overlap Fall 2026."],
+      // Starts before Fall 2026 but is a later semester.
+      ['901,spring,2027,2026-01-12,2026-05-08', 'term.csv line 2: Spring 2027 cannot start before Fall 2026.'],
+      // Starts after Fall 2026 but is an earlier semester.
+      ['901,spring,2026,2027-01-12,2027-05-08', 'term.csv line 2: Spring 2026 cannot start after Fall 2026.'],
+    ];
+    for (const [line, message] of cases) {
+      const result = await upload('admin', { term: header + line + '\n' });
+      assert.equal(result.status, 400, message);
+      assert.equal(result.body.error.message, message);
+    }
+    // Rows in the same file are checked against each other too.
+    const clash = await upload('admin', { term: header + '901,spring,2027,2027-01-12,2027-05-08\n902,fall,2027,2027-05-01,2027-12-10\n' });
+    assert.equal(clash.status, 400);
+    assert.equal(clash.body.error.message, "term.csv line 3: Fall 2027's dates overlap Spring 2027.");
+    assert.equal(await count('term'), 1);
+    // Listed out of order but dated correctly, both are added.
+    const ok = await upload('admin', { term: header + '902,fall,2027,2027-08-23,2027-12-10\n901,spring,2027,2027-01-12,2027-05-08\n' });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.imported.term, 2);
+    // A term that already exists is still skipped, not checked.
+    const again = await upload('admin', { term: header + '900,fall,2026,2026-09-01,2026-12-01\n' });
+    assert.equal(again.status, 200);
+    assert.equal(again.body.skipped.term, 1);
+  });
+
   test('refuses professors and departments, unknown or empty uploads, and non-admins (faculty and AC)', async () => {
     const professor = await upload('admin', { professor: 'netid\n' });
     assert.equal(professor.status, 400);
