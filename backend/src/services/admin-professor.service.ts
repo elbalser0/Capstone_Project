@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
+import { REQUEST_HOURS } from './request.service.js';
 import { findNextTermId } from './term.service.js';
 import { displayName, type Rank } from './user.service.js';
 
@@ -130,7 +131,10 @@ async function isInCurrentCycle(client: PoolClient, netid: string): Promise<bool
         OR EXISTS (SELECT 1 FROM observation_request AS r
                    JOIN sign_up AS s ON s.signup_id = r.signup_id
                    JOIN open_cycle USING (cycle_id)
-                   WHERE r.observer_netid = $1 AND r.status IN ('pending', 'accepted'))
+                   WHERE r.observer_netid = $1
+                     AND (r.status = 'accepted'
+                          OR (r.status = 'pending'
+                              AND r.sent_date > now() - make_interval(hours => ${REQUEST_HOURS}))))
         OR EXISTS (SELECT 1 FROM observation AS o
                    JOIN sign_up AS s ON s.signup_id = o.signup_id
                    JOIN open_cycle USING (cycle_id)
@@ -149,14 +153,17 @@ export async function updateProfessor(netid: string, changes: ProfessorChanges):
     if (!rows[0]) throw new ApiError(404, 'NOT_FOUND', 'Professor not found.');
     let isActive = rows[0].is_active;
 
-    if (changes.isActive === false && isActive) {
-      if (await isInCurrentCycle(client, netid)) {
-        throw new ApiError(409, 'IN_CURRENT_CYCLE',
-          'This professor has a sign-up, observation request or scheduled observation in the current cycle.');
+    if (changes.isActive === false) {
+      if (isActive) {
+        if (await isInCurrentCycle(client, netid)) {
+          throw new ApiError(409, 'IN_CURRENT_CYCLE',
+            'This professor has a sign-up, observation request or scheduled observation in the current cycle.');
+        }
+        await client.query('UPDATE professor SET is_active = false WHERE netid = $1', [netid]);
+        isActive = false;
       }
-      await client.query('UPDATE professor SET is_active = false WHERE netid = $1', [netid]);
+      // Also clears an AC membership left active on a professor who was already inactive.
       await client.query('UPDATE ac_member SET is_active = false WHERE netid = $1', [netid]);
-      isActive = false;
     } else if (changes.isActive === true && !isActive) {
       // AC membership is not restored; add it again with isAc if needed.
       await client.query('UPDATE professor SET is_active = true WHERE netid = $1', [netid]);

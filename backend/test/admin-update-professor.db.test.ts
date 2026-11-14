@@ -125,6 +125,14 @@ describe('updating a professor against the database', { skip }, () => {
         assert.equal(body.error.code, 'INVALID_PROFESSOR');
       }
     });
+
+    test('returns 400 for a netid that is not three letters and six digits', async () => {
+      for (const netid of ['ab12345', 'abc1234567', '%20%20']) {
+        const { status, body } = await patch(netid, { rank: 'full' });
+        assert.equal(status, 400, netid);
+        assert.equal(body.error.code, 'INVALID_PROFESSOR', netid);
+      }
+    });
   });
 
   describe('rank', () => {
@@ -202,6 +210,14 @@ describe('updating a professor against the database', { skip }, () => {
       assert.deepEqual([body.isActive, body.isAc], [true, false]);
     });
 
+    test('deactivating an already inactive professor also clears a leftover AC membership', async () => {
+      await sql('UPDATE professor SET is_active = false WHERE netid = $1', [AC]);
+      const { status, body } = await patch(AC, { isActive: false });
+      assert.equal(status, 200);
+      assert.deepEqual([body.isActive, body.isAc], [false, false]);
+      assert.equal((await stored(AC)).ac_active, false);
+    });
+
     async function assertBlocked() {
       const { status, body } = await patch(TARGET, { isActive: false });
       assert.equal(status, 409);
@@ -223,6 +239,13 @@ describe('updating a professor against the database', { skip }, () => {
     test('returns 409 IN_CURRENT_CYCLE for a pending observation request', async () => {
       await request(await signUp(OBSERVEE, currentCycle), TARGET, 'pending');
       await assertBlocked();
+    });
+
+    test('a pending request past its 48 hours does not block', async () => {
+      const signupId = await signUp(OBSERVEE, currentCycle);
+      await request(signupId, TARGET, 'pending');
+      await sql("UPDATE observation_request SET sent_date = now() - interval '49 hours' WHERE signup_id = $1", [signupId]);
+      await assertNotBlocked();
     });
 
     test('returns 409 IN_CURRENT_CYCLE for an accepted observation request', async () => {

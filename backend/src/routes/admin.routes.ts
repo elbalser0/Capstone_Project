@@ -82,8 +82,12 @@ adminRouter.post('/professors', async (req, res) => {
 });
 
 adminRouter.patch('/professors/:netid', async (req, res) => {
+  const netid = req.params.netid.trim().toLowerCase();
+  if (!NETID.test(netid)) {
+    throw new ApiError(400, 'INVALID_PROFESSOR', 'netid must be three letters followed by six digits, like abc123456.');
+  }
   const changes = parseProfessorChanges(req.body);
-  res.status(200).json(await updateProfessor(req.params.netid.trim().toLowerCase(), changes));
+  res.status(200).json(await updateProfessor(netid, changes));
 });
 
 adminRouter.get('/departments', async (_req, res) => {
