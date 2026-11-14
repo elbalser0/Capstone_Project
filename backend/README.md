@@ -93,10 +93,8 @@ semesters.
 ## Admin endpoints
 
 Every `/api/admin` route requires an active `app_admin` row for the signed-in
-email; anyone else gets 403 `FORBIDDEN`. The one exception for now is
-`POST /api/admin/import` (below), which is mounted ahead of that check and still
-requires an AC member. Add the first admin with the example
-INSERT in `database/migrations/20261104_app_admin.sql`. Admin actions change one
+email; anyone else gets 403 `FORBIDDEN`. That includes `POST /api/admin/import`
+(below). Add the first admin with the example INSERT in `database/migrations/20261104_app_admin.sql`. Admin actions change one
 professor at a time. Professors and AC memberships are deactivated, never deleted.
 
 `GET /api/admin/professors` returns every professor, inactive ones included,
