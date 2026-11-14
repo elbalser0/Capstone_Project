@@ -1,6 +1,8 @@
 import { Router } from 'express';
+import { requireAC } from '../middleware/auth.middleware.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { listSignupCandidates } from '../services/candidate.service.js';
+import { addManualCandidate } from '../services/matching.service.js';
 import { listCourses } from '../services/course.service.js';
 import { getEvaluationStatus } from '../services/evaluation-status.service.js';
 import { createSignup, getMySignup } from '../services/signup.service.js';
@@ -56,4 +58,20 @@ signupsRouter.get('/:signupId/candidates', async (req, res) => {
     throw new ApiError(400, 'INVALID_SIGNUP_ID', 'signupId must be a positive integer.');
   }
   res.status(200).json(await listSignupCandidates(signupId, req.user!.netid));
+});
+
+signupsRouter.post('/:signupId/candidates', requireAC, async (req, res) => {
+  const signupId = parsePositiveId(req.params.signupId);
+  if (signupId === null) {
+    throw new ApiError(400, 'INVALID_SIGNUP_ID', 'signupId must be a positive integer.');
+  }
+  const body: unknown = req.body;
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new ApiError(400, 'INVALID_CANDIDATE', 'Provide an observerNetid.');
+  }
+  const observerNetid = (body as Record<string, unknown>).observerNetid;
+  if (typeof observerNetid !== 'string' || observerNetid.trim().length === 0 || observerNetid.trim().length > 128) {
+    throw new ApiError(400, 'INVALID_CANDIDATE', 'observerNetid must be a non-empty string of at most 128 characters.');
+  }
+  res.status(201).json(await addManualCandidate(signupId, observerNetid.trim()));
 });

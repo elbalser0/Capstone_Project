@@ -12,6 +12,8 @@ import { myAssignmentsRouter, myObservationsRouter, observationsRouter } from '.
 import { meRouter } from './routes/me.routes.js';
 import { myRequestsRouter, signupRequestsRouter } from './routes/requests.routes.js';
 import { surveyRouter } from './routes/survey.routes.js';
+import { importRouter } from './routes/import.routes.js';
+import { termsRouter } from './routes/terms.routes.js';
 
 export const app = express();
 app.disable('x-powered-by');
@@ -30,6 +32,9 @@ app.use('/api/me', authenticate, meRouter, requireProfessor, facultyMeRouter);
 app.use('/api/signups', requireLogin, signupsRouter);
 app.use('/api/observations', requireLogin, observationsRouter);
 app.use('/api/templates', requireLogin, templatesRouter);
+// Admins only. An admin does not need to be a professor.
+app.use('/api/admin/import', authenticate, requireAdmin, importRouter);
+app.use('/api/terms', requireLogin, termsRouter);
 app.use('/api/admin', authenticate, requireAdmin, adminRouter);
 app.use((_req, res) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'The requested endpoint does not exist.' } });
