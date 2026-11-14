@@ -32,8 +32,8 @@ app.use('/api/me', authenticate, meRouter, requireProfessor, facultyMeRouter);
 app.use('/api/signups', requireLogin, signupsRouter);
 app.use('/api/observations', requireLogin, observationsRouter);
 app.use('/api/templates', requireLogin, templatesRouter);
-// Mounted before the /api/admin guard so AC members keep import access until it moves to the admin role.
-app.use('/api/admin/import', requireLogin, importRouter);
+// Admins only. An admin does not need to be a professor.
+app.use('/api/admin/import', authenticate, requireAdmin, importRouter);
 app.use('/api/terms', requireLogin, termsRouter);
 app.use('/api/admin', authenticate, requireAdmin, adminRouter);
 app.use((_req, res) => {

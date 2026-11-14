@@ -1,17 +1,16 @@
 import { Router } from 'express';
-import { requireAC } from '../middleware/auth.middleware.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { IMPORT_TABLES, importData, type ImportFiles, type ImportTable } from '../services/import.service.js';
 import { readMultipart } from './multipart.js';
 
-// Mounted at /api/admin/import (after requireLogin). AC only until the admin role is in.
+// Mounted at /api/admin/import after authenticate and requireAdmin.
 export const importRouter = Router();
 
 export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 const invalid = (message: string) => new ApiError(400, 'INVALID_IMPORT', message);
 
 // Form fields are the table names, each one CSV file, like Scripts/seed_data.
-importRouter.post('/', requireAC, async (req, res) => {
+importRouter.post('/', async (req, res) => {
   if (!req.is('multipart/form-data')) throw invalid('Send the CSV files as form data, one field per table.');
   const form = await readMultipart(req, MAX_IMPORT_BYTES,
     () => new ApiError(413, 'TOO_LARGE', 'The files can be up to 5 MB together.'),

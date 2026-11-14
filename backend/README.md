@@ -105,7 +105,7 @@ professor at a time. Professors and AC memberships are deactivated, never delete
 one CSV file per table, named `term`, `course`, `section` and `meeting_time`, in the
 same layout as `Scripts/seed_data`. Send any of them; at least one is required.
 Professors and departments are not imported here: add them on the admin pages.
-AC members only for now; it moves to the admin role once that is in.
+Admins only (an admin does not need to be a professor); AC members who are not admins get 403.
 
 The IDs in the files only link the files to each other. An ID that is not in the
 uploaded parent file means a row already in the database (for example a
