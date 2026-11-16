@@ -78,4 +78,24 @@ describe('admin professors against the database', { skip }, () => {
       assert.deepEqual(isAc, { act000001: true, old000002: false, fac000003: false });
     });
   });
+
+  describe('GET /api/admin/departments', () => {
+    test('lists departments sorted by name with string IDs', async () => {
+      await sql("INSERT INTO department (dept_name) VALUES ('Biology'), ('Physics')");
+      assert.deepEqual(await get('/api/admin/departments'), {
+        status: 200,
+        body: [
+          { deptId: '3', deptName: 'Biology' },
+          { deptId: '1', deptName: 'Computer Science' },
+          { deptId: '2', deptName: 'Mathematics' },
+          { deptId: '4', deptName: 'Physics' },
+        ],
+      });
+    });
+
+    test('returns an empty list when there are no departments', async () => {
+      await sql('TRUNCATE department RESTART IDENTITY CASCADE');
+      assert.deepEqual(await get('/api/admin/departments'), { status: 200, body: [] });
+    });
+  });
 });

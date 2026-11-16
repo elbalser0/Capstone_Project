@@ -12,6 +12,7 @@ test('GET /api/me and admin endpoints require a login', async () => {
       ['GET', '/api/me'],
       ['GET', '/api/me/evaluation-status'],
       ['GET', '/api/admin/professors'],
+      ['GET', '/api/admin/departments'],
       ['GET', '/api/admin/anything'],
       ['POST', '/api/admin/professors'],
     ];

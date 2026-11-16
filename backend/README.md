@@ -103,6 +103,9 @@ displayName, email, rank, department: { deptId, deptName }, isAc, isActive }`,
 where `isAc` means an active `ac_member` row. There are no query parameters; the
 admin table searches in the browser.
 
+`GET /api/admin/departments` returns `[{ deptId, deptName }]` sorted by name,
+for the Add Professor dropdown.
+
 ## Admin import
 
 `POST /api/admin/import` loads a new semester's teaching data. Send form data with
