@@ -17,11 +17,8 @@ importRouter.post('/', async (req, res) => {
     () => invalid('The form data could not be read.'));
   const files: ImportFiles = {};
   for (const [name, value] of form.entries()) {
-    if (name === 'professor' || name === 'department') {
-      throw invalid(`${name}.csv is not imported here. Add ${name}s on the admin page.`);
-    }
     if (!IMPORT_TABLES.includes(name as ImportTable)) {
-      throw invalid(`Unknown file ${name}. Send term, course, section or meeting_time.`);
+      throw invalid(`Unknown file ${name}. Send ${IMPORT_TABLES.join(', ')}.`);
     }
     if (typeof value === 'string') throw invalid(`${name} must be a CSV file.`);
     if (files[name as ImportTable] !== undefined) throw invalid(`${name} was sent twice.`);

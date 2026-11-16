@@ -108,29 +108,30 @@ for the Add Professor dropdown.
 
 ## Admin import
 
-`POST /api/admin/import` loads a new semester's teaching data. Send form data with
-one CSV file per table, named `term`, `course`, `section` and `meeting_time`, in the
-same layout as `Scripts/seed_data`. Send any of them; at least one is required.
-Professors and departments are not imported here: add them on the admin pages.
-Admins only (an admin does not need to be a professor); AC members who are not admins get 403.
+`POST /api/admin/import` loads data in the same layout as `Scripts/seed_data`. Send
+form data with one CSV file per table, named `department`, `term`, `professor`,
+`ac_member`, `course`, `section` and `meeting_time`. Send any of them; at least one
+is required. They are imported in that order, so a row can point to a row from an
+earlier file. Admins only (an admin does not need to be a professor); AC members who
+are not admins get 403.
 
 The IDs in the files only link the files to each other. An ID that is not in the
 uploaded parent file means a row already in the database (for example a
 `course_id` in `section.csv` when `course.csv` is not sent). The database picks
-new IDs, and rows already there are skipped: a term by season and year, a course
-by department and number, a section by course, term and section number, and a
+new IDs, and rows already there are skipped, never updated: a department by name,
+a term by season and year, a professor or AC member by netid, a course by
+department and number, a section by course, term and section number, and a
 meeting by section, day and start time. Uploading the same files again adds
-nothing. A new term may not overlap another term, and sorting terms by start date
-must keep season order (spring before fall in a year). Every row is checked first and the import runs in one transaction, so a
-bad row (or an instructor who is not a professor yet) saves nothing and returns
-400 `INVALID_IMPORT` naming the file and line. The reply counts what was added
-and skipped per table, for example
-`{"imported":{"term":1,"course":0,"section":186,"meeting_time":358},"skipped":{...}}`.
+nothing. NetIDs must look like `abc123456` and are stored in lowercase, so
+`ABC123456` and `abc123456` are the same professor. The rank sets
+`eval_interval_years`. A professor imported as inactive is also inactive on the AC,
+and an inactive professor cannot be an active AC member. A new term may not overlap
+another term, and sorting terms by start date must keep season order (spring before
+fall in a year). Every row is checked first and the import runs in one transaction,
+so a bad row saves nothing and returns 400 `INVALID_IMPORT` naming the file and
+line. The reply counts what was added and skipped for all seven tables, for example
+`{"imported":{"department":0,"term":1,...,"meeting_time":358},"skipped":{...}}`.
 The files can be up to 5 MB together.
-
-For a new semester with new professors: upload `term.csv` first, add the new
-professors with that start term, then upload the course, section and meeting
-time files.
 
 ## PostgreSQL connectivity
 
