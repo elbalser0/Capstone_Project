@@ -1,7 +1,7 @@
 // Request and response shapes for every endpoint in the team's API list (Weekly Report 6).
 // Field names follow the Oct 15 entity list, in camelCase. The mock server in src/mocks and
 // the Express backend should both return exactly these shapes.
-
+import type { ImportType } from '../lib/importCsv';
 export type Rank = 'assistant' | 'associate' | 'full';
 export type Role = 'AC' | 'faculty';
 export type DueStatus = 'NOT_DUE' | 'DUE' | 'OVERDUE';
@@ -84,6 +84,7 @@ export interface Me {
   department: Department;
   /** "AC" means a professor who is also an active Assessment Committee member. */
   role: Role;
+  isAdmin?:boolean;
 }
 
 /** GET /api/me/notifications */
@@ -396,10 +397,25 @@ export interface ForwardResult {
 
 /** POST /api/admin/import */
 export interface ImportResult {
-  imported: Record<'professor' | 'department' | 'course' | 'section' | 'meeting_time' | 'term', number>;
+  imported: Partial<Record<ImportType, number>>;
+  skipped: Partial<Record<ImportType, number>>;
+  updated?: Partial<Record<ImportType, number>>;
 }
 
 /** Error body from the backend: {"error":{"code":"...","message":"..."}} */
 export interface ApiErrorBody {
   error: { code: string; message: string };
+}
+
+/** GET /api/admin/professors */
+export interface AdminProfessor {
+  netid: string;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  email: string;
+  rank: Rank;
+  department: Department;
+  isAc: boolean;
+  isActive: boolean;
 }

@@ -11,6 +11,7 @@ export interface ProfessorRow {
   dept_id: string;
   eval_interval_years: number;
   baseline_last_eval_term: string | null;
+  start_term?: string;
   is_active: boolean;
 }
 
