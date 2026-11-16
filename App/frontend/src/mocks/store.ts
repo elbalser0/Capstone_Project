@@ -51,6 +51,8 @@ if (
     is_active: true,
   });
 }
+/** Fictional admin with no professor record, like an app_admin row whose email matches no professor. */
+export const ADMIN_ONLY_DEMO_EMAIL = 'admin.only@demo.edu';
 export const today = () => db.meta.today;
 /** "now" for timestamps written by the mock: the data's date at midday UTC. */
 export const now = () => `${db.meta.today}T12:00:00.000Z`;
@@ -73,12 +75,22 @@ export function found<T>(value: T | null | undefined, message: string, code = 'N
  * Demo tokens look like "demo:maya.lin@demo.edu". The real backend verifies a Firebase ID
  * token instead and looks the email up the same way.
  */
-export function signedIn(request: Request): ProfessorRow {
+export function demoEmail(request: Request): string | null {
   const header = request.headers.get('Authorization') ?? '';
-  const email = header.startsWith('Bearer demo:') ? header.slice('Bearer demo:'.length).toLowerCase() : null;
+  return header.startsWith('Bearer demo:') ? header.slice('Bearer demo:'.length).toLowerCase() : null;
+}
+
+export function signedIn(request: Request): ProfessorRow {
+  const email = demoEmail(request);
   const prof = email ? db.professor.find((p) => p.email === email && p.is_active) : undefined;
   if (!prof) throw fail(401, 'UNAUTHENTICATED', 'Sign in again. No active account matches this login.');
   return prof;
+}
+
+/** Admin endpoints: either demo admin may call them. The admin-only one has no professor row. */
+export function adminAccount(request: Request): void {
+  if (demoEmail(request) === ADMIN_ONLY_DEMO_EMAIL) return;
+  if (signedIn(request).email !== ADMIN_DEMO_EMAIL) throw fail(403, 'FORBIDDEN', 'Only administrators can do this.');
 }
 
 export const isAc = (netid: string) => db.ac_member.some((a) => a.netid === netid && a.is_active);

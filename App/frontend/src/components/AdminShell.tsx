@@ -1,5 +1,5 @@
 import { NavLink, Navigate, Outlet, useLocation } from 'react-router';
-import { useMe } from '../api/hooks/shared';
+import { useAccount } from '../api/hooks/shared';
 import { useAuth } from '../auth/AuthProvider';
 import { initials } from '../lib/format';
 import { Logo } from './ui';
@@ -7,7 +7,7 @@ import { Logo } from './ui';
 export function AdminShell() {
   const { session, ready, signOut } = useAuth();
   const { pathname } = useLocation();
-  const me = useMe({ enabled: ready && Boolean(session) });
+  const me = useAccount({ enabled: ready && Boolean(session) });
 
   if (!ready) {
     return <p role="status" className="p-8">Checking your sign-in...</p>;
@@ -70,9 +70,17 @@ export function AdminShell() {
         </nav>
 
         <div className="mt-auto border-t border-gray-200 pt-4">
-          <NavLink to="/guide" className={navClass}>
-            Process guide
-          </NavLink>
+          {/* The faculty pages and the guide read professor-only data, so an admin who is not a professor gets no link to them. */}
+          {me.data.role !== 'admin' && (
+            <>
+              <NavLink to="/faculty/evaluation" className={navClass}>
+                Faculty pages
+              </NavLink>
+              <NavLink to="/guide" className={navClass}>
+                Process guide
+              </NavLink>
+            </>
+          )}
           <button
             type="button"
             onClick={() => void signOut()}

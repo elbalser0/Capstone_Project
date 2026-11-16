@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey, type UseQueryResult } from '@tanstack/react-query';
 import { api } from '../client';
-import type { Cycle, ImportResult, Me, Notification, TemplateVersion, Term } from '../types';
+import type { Account, Cycle, ImportResult, Me, Notification, TemplateVersion, Term } from '../types';
 
 /** Query options for an endpoint that needs an id: it waits until the id is known. */
 export const withId = <T,>(id: string | undefined, key: (id: string) => QueryKey, fetch: (id: string) => Promise<T>) => ({
@@ -22,15 +22,27 @@ export const sharedKeys = {
   terms: ['terms'] as const,
 };
 
-/** GET /api/me: profile and role ("AC" or "faculty"), verified through the sign-in token. */
-export function useMe(options: { enabled?: boolean } = {}) {
+/**
+ * GET /api/me: whoever is signed in, verified through the sign-in token. This can be an admin
+ * who is not a professor (role "admin", no netid, rank or department). Use it in the shells
+ * and anywhere else that such an admin can reach.
+ */
+export function useAccount(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: sharedKeys.me,
-    queryFn: () => api<Me>('/me'),
+    queryFn: () => api<Account>('/me'),
     staleTime: 5 * 60_000,
     retry: false,
     ...options,
   });
+}
+
+/**
+ * The signed-in professor: profile and role ("AC" or "faculty"). Only for pages under AppShell,
+ * which sends an admin who is not a professor to /admin before any of them render.
+ */
+export function useMe(options: { enabled?: boolean } = {}) {
+  return useAccount(options) as UseQueryResult<Me>;
 }
 
 /** GET /api/me/notifications */

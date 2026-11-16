@@ -47,3 +47,44 @@ it('keeps the term and the signed-in name inside the top bar', async () => {
   expect(await within(banner).findByText(faculty.displayName)).toBeVisible();
   expect(within(banner).getByText(cycle.term.label)).toBeVisible();
 });
+
+// What the backend's GET /api/me returns for an admin who is not a professor.
+const adminOnly = {
+  netid: null, firstName: 'Avery', lastName: 'Admin', displayName: 'Avery Admin', email: 'admin.only@demo.edu',
+  rank: null, department: null, role: 'admin', isAdmin: true,
+};
+
+function renderAs(me: object, email: string) {
+  server.use(
+    http.get('/api/me', () => HttpResponse.json(me)),
+    http.get('/api/cycles/current', () => HttpResponse.json(cycle)),
+    http.get('/api/me/requests/incoming', () => HttpResponse.json([])),
+    http.get('/api/me/assignments', () => HttpResponse.json([])),
+  );
+  sessionStorage.setItem('assessment-helper.session', JSON.stringify({ email, token: `demo:${email}` }));
+  return renderRoutes([
+    {
+      element: <AuthProvider mode="demo"><AppShell /></AuthProvider>,
+      children: [{ path: '/faculty/evaluation', element: <p>Evaluation</p>, handle: { title: 'My evaluation' } }],
+    },
+    { path: '/admin', element: <p>Admin area</p> },
+  ], '/faculty/evaluation');
+}
+
+it('sends an admin who is not a professor to the admin area instead of crashing', async () => {
+  const { router } = renderAs(adminOnly, adminOnly.email);
+  expect(await screen.findByText('Admin area')).toBeVisible();
+  expect(router.state.location.pathname).toBe('/admin');
+});
+
+it('gives a professor who is also an admin a link to the admin area', async () => {
+  const professorAdmin = { ...faculty, email: 'admin@demo.edu', role: 'faculty', department: { deptId: '1', deptName: 'Computer Science' }, isAdmin: true };
+  renderAs(professorAdmin, professorAdmin.email);
+  expect(await screen.findByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+});
+
+it('shows no admin link to a professor who is not an admin', async () => {
+  renderShell();
+  await within(await screen.findByRole('banner')).findByText(faculty.displayName);
+  expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+});

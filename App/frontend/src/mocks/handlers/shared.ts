@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
-import { committeeMember, contact, currentCycleRow, cycle, db, department, fail, isAc, person, signedIn, templateVersion, term } from '../store';
-import { ADMIN_DEMO_EMAIL } from '../store';
-import type { AdminProfessor, ImportResult, Me, Notification } from '../../api/types';
+import { adminAccount, committeeMember, contact, currentCycleRow, cycle, db, demoEmail, department, fail, isAc, person, signedIn, templateVersion, term } from '../store';
+import { ADMIN_DEMO_EMAIL, ADMIN_ONLY_DEMO_EMAIL } from '../store';
+import type { AdminOnlyMe, AdminProfessor, ImportResult, Me, Notification } from '../../api/types';
 import { IMPORT_TABLES, preparePreview } from '../../lib/importCsv';
 import type { ProfessorRow } from '../schema';
 
@@ -25,11 +25,7 @@ function readImportRow(headers: string[], cells: string[], index: number) {
 
 export const sharedHandlers = [
     http.patch('/api/admin/professors/:netid', async ({ request, params }) => {
-    const account = signedIn(request);
-
-    if (account.email !== ADMIN_DEMO_EMAIL) {
-      return fail(403, 'FORBIDDEN', 'Only administrators can do this.');
-    }
+    adminAccount(request);
 
     let body: unknown;
 
@@ -139,11 +135,7 @@ export const sharedHandlers = [
   }),
 
   http.get('/api/admin/departments', ({ request }) => {
-    const account = signedIn(request);
-
-    if (account.email !== ADMIN_DEMO_EMAIL) {
-      return fail(403, 'FORBIDDEN', 'Only administrators can do this.');
-    }
+    adminAccount(request);
 
     return HttpResponse.json(
       [...db.department]
@@ -153,11 +145,7 @@ export const sharedHandlers = [
   }),
 
   http.post('/api/admin/professors', async ({ request }) => {
-    const account = signedIn(request);
-
-    if (account.email !== ADMIN_DEMO_EMAIL) {
-      return fail(403, 'FORBIDDEN', 'Only administrators can do this.');
-    }
+    adminAccount(request);
 
     let body: unknown;
 
@@ -270,11 +258,7 @@ export const sharedHandlers = [
     return HttpResponse.json(professor, { status: 201 });
   }),
     http.get('/api/admin/professors', ({ request }) => {
-    const account = signedIn(request);
-
-    if (account.email !== ADMIN_DEMO_EMAIL) {
-      return fail(403, 'FORBIDDEN', 'Only administrators can do this.');
-    }
+    adminAccount(request);
 
     const professors: AdminProfessor[] = [...db.professor]
       .sort(
@@ -293,6 +277,22 @@ export const sharedHandlers = [
     return HttpResponse.json(professors);
   }),
   http.get('/api/me', ({ request }) => {
+    // Same shape as the backend's meResponse for an admin who is not a professor.
+    if (demoEmail(request) === ADMIN_ONLY_DEMO_EMAIL) {
+      const admin: AdminOnlyMe = {
+        netid: null,
+        firstName: 'Avery',
+        lastName: 'Admin',
+        displayName: 'Avery Admin',
+        email: ADMIN_ONLY_DEMO_EMAIL,
+        rank: null,
+        department: null,
+        role: 'admin',
+        isAdmin: true,
+      };
+      return HttpResponse.json(admin);
+    }
+
     const p = signedIn(request);
 
     const me: Me = {
@@ -332,11 +332,7 @@ export const sharedHandlers = [
   }),
 
     http.post('/api/admin/import', async ({ request }) => {
-    const account = signedIn(request);
-
-    if (account.email !== ADMIN_DEMO_EMAIL) {
-      return fail(403, 'FORBIDDEN', 'Only administrators can do this.');
-    }
+    adminAccount(request);
 
     let form: FormData;
     try {
