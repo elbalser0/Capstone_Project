@@ -11,6 +11,7 @@ export interface ProfessorRow {
   dept_id: string;
   eval_interval_years: number;
   baseline_last_eval_term: string | null;
+  start_term?: string;
   is_active: boolean;
 }
 
@@ -53,7 +54,7 @@ export interface SectionRow {
 
 export interface MeetingTimeRow {
   section_id: string;
-  day_of_week: 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri';
+  day_of_week: 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
   start_time: string;
   end_time: string;
   room: string;

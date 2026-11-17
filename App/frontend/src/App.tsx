@@ -18,9 +18,31 @@ import { SignupsPage } from './pages/committee/SignupsPage';
 import { ProcessGuidePage } from './pages/ProcessGuidePage';
 import { ObservationsPage } from './pages/committee/ObservationsPage';
 import { DraftPage, PreviewPage, TemplatesLayout, TemplatesPage, VersionPage } from './pages/committee/TemplatesPages';
+import { AdminShell } from './components/AdminShell';
+import { ProfessorsPage } from './pages/admin/ProfessorsPage';
+import { DataImportPage } from './pages/admin/DataImportPage';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+    {
+    path: '/admin',
+    element: <AdminShell />,
+    children: [
+      {
+        index: true,
+        element: <Navigate to="/admin/professors" replace />,
+      },
+      {
+        path: 'professors',
+        element: (<ProfessorsPage/>
+        ),
+      },
+      {
+        path: 'import',
+        element: <DataImportPage />,
+      },
+    ],
+  },
   {
     element: <AppShell />,
     children: [

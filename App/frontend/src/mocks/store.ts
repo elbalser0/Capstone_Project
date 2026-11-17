@@ -20,6 +20,37 @@ import { currentTermId, cyclePhase, displayName, meetingOn, surveyOpensDate, ter
 import type { Db, EvalCycleRow, NotificationRow, ObservationRow, ProfessorRow, SignupRow, TemplateVersionRow } from './schema';
 
 export const db: Db = structuredClone(seed as Db);
+
+const importDepartments = [
+  { dept_id: '1', dept_name: 'Computer Science' },
+  { dept_id: '2', dept_name: 'Electrical and Computers' },
+  { dept_id: '3', dept_name: 'Mathematical Science' },
+  { dept_id: '4', dept_name: 'Physics' },
+];
+
+for (const department of importDepartments) {
+  if (!db.department.some((row) => row.dept_id === department.dept_id)) {
+    db.department.push(department);
+  }
+}
+
+//fictional professor-linked admin for local mock development only.
+export const ADMIN_DEMO_EMAIL = 'admin@demo.edu';
+const demoProfessor = db.professor[0];
+
+if (
+  demoProfessor &&
+  !db.professor.some((p) => p.email === ADMIN_DEMO_EMAIL)
+) {
+  db.professor.push({
+    ...demoProfessor,
+    netid: 'demoAdmin',
+    first_name: 'Demo',
+    last_name: 'Admin',
+    email: ADMIN_DEMO_EMAIL,
+    is_active: true,
+  });
+}
 export const today = () => db.meta.today;
 /** "now" for timestamps written by the mock: the data's date at midday UTC. */
 export const now = () => `${db.meta.today}T12:00:00.000Z`;
