@@ -55,7 +55,12 @@ export async function prepareImport(
     filter({ name, originalSize }) {
       if (name.endsWith('/')) return false;
 
-      const filename = name.split('/').pop()?.toLowerCase();
+      const parts = name.toLowerCase().split('/');
+      const filename = parts.pop();
+
+      if (parts.includes('__macosx') || filename?.startsWith('._')) {
+        return false;
+      }
       const table = IMPORT_TABLES.find((option) => filename === `${option}.csv`);
 
       if (!table) {

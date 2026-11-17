@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import type { AdminProfessor } from '../../api/types';
 import { Button, Modal, inputClass, labelClass } from '../../components/ui';
+import { sharedKeys } from '../../api/hooks/shared';
 
 export type ProfessorAction = 'rank' | 'assignAc' | 'deactivateAc'| 'deactivateProfessor';
 
@@ -95,7 +96,14 @@ export function UpdateProfessorModal({
     );
 
     // Rank and membership can affect other views, including account details.
-    void queryClient.invalidateQueries();
+   void queryClient.invalidateQueries({
+    queryKey: ['admin', 'professors'],
+    exact: true,
+  });
+  void queryClient.invalidateQueries({
+    queryKey: sharedKeys.me,
+    exact: true,
+  });
 
     savingRef.current = false;
     setSaving(false);

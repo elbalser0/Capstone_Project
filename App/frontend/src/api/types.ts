@@ -43,7 +43,7 @@ export interface PersonRef {
 }
 
 export interface MeetingTime {
-  dayOfWeek: 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri';
+  dayOfWeek: 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
   /** "08:30" */
   startTime: string;
   endTime: string;

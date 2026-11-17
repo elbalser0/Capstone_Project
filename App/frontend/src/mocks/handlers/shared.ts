@@ -1,10 +1,27 @@
 import { http, HttpResponse } from 'msw';
-//import type { ImportResult, Me, Notification } from '../../api/types';
 import { committeeMember, contact, currentCycleRow, cycle, db, department, fail, isAc, person, signedIn, templateVersion, term } from '../store';
 import { ADMIN_DEMO_EMAIL } from '../store';
 import type { AdminProfessor, ImportResult, Me, Notification } from '../../api/types';
 import { IMPORT_TABLES, preparePreview } from '../../lib/importCsv';
 import type { ProfessorRow } from '../schema';
+
+function readImportRow(headers: string[], cells: string[], index: number) {
+  const values = Object.fromEntries(
+    headers.map((header, column) => [header, cells[column].trim()]),
+  ) as Record<string, string>;
+
+  function invalid(message: string): never {
+    throw new Error(`Data row ${index + 1}: ${message}`);
+  }
+
+  function requireValue(field: string): string {
+    const value = values[field];
+    if (!value) invalid(`${field} is required.`);
+    return value;
+  }
+
+  return { values, invalid, requireValue };
+}
 
 export const sharedHandlers = [
     http.patch('/api/admin/professors/:netid', async ({ request, params }) => {
@@ -328,7 +345,7 @@ export const sharedHandlers = [
       return fail(400, 'INVALID_IMPORT', 'The form data could not be read.');
     }
 
-    const supported = IMPORT_TABLES;
+
     const imported = { department: 0, term: 0, professor: 0, ac_member: 0, course: 0, section: 0, meeting_time: 0,};
     const skipped = { ...imported };
     const updated = { ...imported };
@@ -350,7 +367,7 @@ export const sharedHandlers = [
     );
 
     for (const [name, file] of entries) {
-      const table = supported.find((option) => option === name);
+      const table = IMPORT_TABLES.find((option) => option === name);
 
       if (!table) {
         return fail(400, 'INVALID_IMPORT', `Unsupported import field: ${name}.`);
@@ -370,21 +387,14 @@ export const sharedHandlers = [
           const keys = new Set<string>();
 
           for (const [index, cells] of preview.rows.entries()) {
-            const values = Object.fromEntries(
-              preview.headers.map((header, column) => [
-                header,
-                cells[column].trim(),
-              ]),
-            );
-
-            function invalid(message: string): never {
-              throw new Error(`Data row ${index + 1}: ${message}`);
-            }
+           const importRow = readImportRow(preview.headers, cells, index);
+           const { values } = importRow;
+           const invalid: (message: string) => never = importRow.invalid;
 
             const key =
               table === 'department' ? values.dept_id :
               table === 'term' ? values.term_id :
-              values.netid;
+              values.netid.toLowerCase();
 
             if (!key) invalid('The record ID is required.');
             if (keys.has(key)) invalid(`Duplicate record ID "${key}".`);
@@ -415,8 +425,8 @@ export const sharedHandlers = [
               }
 
               const year = Number(values.year);
-              if (!Number.isInteger(year) || year < 1 || year > 9999) {
-                invalid('Enter a valid year.');
+              if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+                invalid('Year must be from 2000 to 2100.');
               }
 
               for (const field of ['start_date', 'end_date']) {
@@ -431,8 +441,8 @@ export const sharedHandlers = [
                 }
               }
 
-              if (values.start_date >= values.end_date) {
-                invalid('Start date must be before end date.');
+              if (values.start_date > values.end_date) {
+                invalid('End date cannot be before start date.');
               }
 
               const existing = stagedTerms.find((row) => row.term_id === key);
@@ -445,6 +455,34 @@ export const sharedHandlers = [
               };
 
               if (!existing) {
+                const overlap = stagedTerms.find(
+                  (row) =>
+                    row.start_date <= termRow.end_date &&
+                    row.end_date >= termRow.start_date,
+                );
+
+                if (overlap) {
+                  invalid(`Term dates overlap ${overlap.season} ${overlap.year}.`);
+                }
+
+                const termOrder = (row: { year: number; season: string }) =>
+                  row.year * 2 + (row.season === 'fall' ? 1 : 0);
+
+                const newOrder = termOrder(termRow);
+                const outOfOrder = stagedTerms.find((row) => {
+                  const existingOrder = termOrder(row);
+
+                  if (row.start_date < termRow.start_date) {
+                    return existingOrder >= newOrder;
+                  }
+
+                  return existingOrder <= newOrder;
+                });
+
+                if (outOfOrder) {
+                  invalid(`Term dates are out of order with ${outOfOrder.season} ${outOfOrder.year}.`);
+                }
+
                 stagedTerms.push(termRow);
                 imported.term += 1;
               } else if (
@@ -460,9 +498,8 @@ export const sharedHandlers = [
             }
 
             if (table === 'ac_member') {
-              const professor =
-                pending.find((row) => row.netid === key) ??
-                db.professor.find((row) => row.netid === key);
+              const professor = pending.find((row) => row.netid.toLowerCase() === key) ??
+              db.professor.find((row) => row.netid.toLowerCase() === key);
 
               if (!professor) invalid(`Professor "${key}" does not exist.`);
 
@@ -476,9 +513,11 @@ export const sharedHandlers = [
                 invalid('An inactive professor cannot receive active AC membership.');
               }
 
-              const existing = stagedAcMembers.find((row) => row.netid === key);
+              const existing = stagedAcMembers.find(
+                (row) => row.netid.toLowerCase() === key,
+              );
               if (!existing) {
-                stagedAcMembers.push({ netid: key, is_active: isActive });
+                stagedAcMembers.push({ netid: professor.netid, is_active: isActive });
                 imported.ac_member += 1;
               } else if (existing.is_active !== isActive) {
                 existing.is_active = isActive;
@@ -501,22 +540,9 @@ export const sharedHandlers = [
         const keys = new Set<string>();
 
         for (const [index, cells] of preview.rows.entries()) {
-          const values = Object.fromEntries(
-            preview.headers.map((header, column) => [
-              header,
-              cells[column].trim(),
-            ]),
-          );
-
-          function invalid(message: string): never {
-            throw new Error(`Data row ${index + 1}: ${message}`);
-          }
-
-          function requireValue(field: string): string {
-            const value = values[field];
-            if (!value) invalid(`${field} is required.`);
-            return value;
-          }
+          const importRow = readImportRow(preview.headers, cells, index);
+          const { values, requireValue } = importRow;
+          const invalid: (message: string) => never = importRow.invalid;
 
           function checkDuplicate(key: string) {
             if (keys.has(key)) {
@@ -591,10 +617,10 @@ export const sharedHandlers = [
               invalid(`Term "${termId}" does not exist.`);
             }
 
-            const instructorId = requireValue('instructor_id');
+            const instructorId = requireValue('instructor_id').toLowerCase();
             const instructor =
-              pending.find((row) => row.netid === instructorId) ??
-              db.professor.find((row) => row.netid === instructorId);
+              pending.find((row) => row.netid.toLowerCase() === instructorId) ??
+              db.professor.find((row) => row.netid.toLowerCase() === instructorId);
 
             if (!instructor) {
               invalid(`Professor "${instructorId}" does not exist.`);
@@ -614,7 +640,7 @@ export const sharedHandlers = [
               course_id: courseId,
               term_id: termId,
               section_num: requireValue('section_num'),
-              instructor_id: instructorId,
+              instructor_id: instructor.netid,
               class_mode: classMode,
               enrollment: existing?.enrollment ?? null,
             };
@@ -642,12 +668,16 @@ export const sharedHandlers = [
               thursday: 'Thu',
               fri: 'Fri',
               friday: 'Fri',
+              sat: 'Sat',
+              saturday: 'Sat',
+              sun: 'Sun',
+              sunday: 'Sun',
             };
 
             const dayText = requireValue('day_of_week').toLowerCase();
             const day = weekdays[dayText];
             if (!day) {
-              invalid('day_of_week must be Monday through Friday.');
+              invalid('day_of_week must be Monday through Sunday.');
             }
 
             function readTime(field: string): string {
@@ -705,19 +735,15 @@ export const sharedHandlers = [
           .sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
 
         for (const [index, cells] of preview.rows.entries()) {
-          const values = Object.fromEntries(
-            preview.headers.map((header, column) => [
-              header,
-              cells[column].trim(),
-            ]),
-          );
+          const importRow = readImportRow(preview.headers, cells, index);
+          const { values } = importRow;
+          const invalid: (message: string) => never = importRow.invalid;
 
-          function invalid(message: string): never {
-            throw new Error(`Data row ${index + 1}: ${message}`);
+
+          const netid = values.netid.toLowerCase();
+          if (!/^[a-z]{3}\d{6}$/.test(netid)) {
+            invalid('NetID must be three letters followed by six digits, like abc123456.');
           }
-
-          const netid = values.netid;
-          if (!netid) invalid('NetID is required.');
           if (netids.has(netid)) invalid(`Duplicate NetID "${netid}".`);
           netids.add(netid);
 
@@ -749,7 +775,7 @@ export const sharedHandlers = [
             invalid('is_active must be true, false, t, or f.');
           }
 
-          const existing = db.professor.find((p) => p.netid === netid);
+          const existing = db.professor.find((p) => p.netid.toLowerCase() === netid);
           const startTerm =
             values.start_term || existing?.start_term || nextTerm?.term_id;
 
@@ -763,7 +789,7 @@ export const sharedHandlers = [
           }
 
           pending.push({
-            netid,
+            netid: existing?.netid ?? netid,
             first_name: values.first_name,
             last_name: values.last_name,
             email,
@@ -804,6 +830,19 @@ export const sharedHandlers = [
         );
       }
       emailOwners.set(email, row.netid);
+    }
+
+
+    const inactiveNetids = new Set(
+      pending
+        .filter((professor) => !professor.is_active)
+        .map((professor) => professor.netid.toLowerCase()),
+    );
+
+    for (const membership of stagedAcMembers) {
+      if (inactiveNetids.has(membership.netid.toLowerCase())) {
+        membership.is_active = false;
+      }
     }
 
     // Apply changes only after every uploaded row has passed validation.

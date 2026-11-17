@@ -54,7 +54,7 @@ export interface SectionRow {
 
 export interface MeetingTimeRow {
   section_id: string;
-  day_of_week: 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri';
+  day_of_week: 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
   start_time: string;
   end_time: string;
   room: string;

@@ -1,14 +1,10 @@
 import { useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { api } from '../../api/client';
 import type { ImportResult } from '../../api/types';
 import { Button } from '../../components/ui';
 import { COLUMNS, IMPORT_TABLES, type Preview } from '../../lib/importCsv';
-import {
-  prepareImport,
-  type ImportSelection,
-  type PreparedImport,
-} from '../../lib/importFiles';
+import {prepareImport, type ImportSelection, type PreparedImport,} from '../../lib/importFiles';
+import { useImportData } from '../../api/hooks/shared';
+import type { ImportType } from '../../lib/importCsv';
 
 const OPTIONS = [...IMPORT_TABLES, 'zip'] as const;
 
@@ -58,7 +54,7 @@ function CsvPreview({ preview }: { preview: Preview }) {
 }
 
 export function DataImportPage() {
-  const queryClient = useQueryClient();
+  const importData = useImportData();
   const [type, setType] = useState<ImportSelection>('section');
   const [selection, setSelection] = useState<PreparedImport | null>(null);
   const [showPreview, setShowPreview] = useState(false);
@@ -110,15 +106,11 @@ export function DataImportPage() {
     setError('');
 
     try {
-      const form = new FormData();
-      for (const { table, file } of selection.entries) {
-        form.append(table, file, `${table}.csv`);
-      }
+        const files = Object.fromEntries(
+          selection.entries.map(({ table, file }) => [table, file]),
+        ) as Partial<Record<ImportType, File>>;
 
-      const response = await api<ImportResult>('/admin/import', {
-        method: 'POST',
-        body: form,
-      });
+        const response = await importData.mutateAsync(files);
 
       for (const { table } of selection.entries) {
         const imported = response?.imported?.[table];
@@ -133,7 +125,6 @@ export function DataImportPage() {
       }
 
       setResult(response);
-      void queryClient.invalidateQueries();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not import the file.');
     } finally {

@@ -9,7 +9,7 @@ import { addDays, utcDay } from '../../lib/dates';
 
 // E2 sign-up (one course, then preferred class meetings) and E2a "Add a time".
 
-const DAY_INDEX = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5 } as const;
+const DAY_INDEX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 } as const;
 
 /** Class meetings from the day after the sign-up deadline to the observation deadline. */
 function meetingDates(section: CourseSection, cycle: Cycle) {

@@ -79,9 +79,6 @@ export function AddProfessorModal({ onClose, onCreated }: Props) {
           ),
     );
 
-    void queryClient.invalidateQueries({
-      queryKey: ['admin', 'professors'],
-    });
 
     savingRef.current = false;
     setSaving(false);

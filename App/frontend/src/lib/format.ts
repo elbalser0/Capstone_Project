@@ -63,8 +63,8 @@ function formatTimeRange(start: string, end: string) {
 export const formatSlot = (date: string, startTime: string) => `${formatDay(date)}, ${formatTime(startTime)}`;
 
 type Day = MeetingTime['dayOfWeek'];
-const LETTER: Record<Day, string> = { Mon: 'M', Tue: 'T', Wed: 'W', Thu: 'R', Fri: 'F' };
-const ORDER: Day[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+const LETTER: Record<Day, string> = { Mon: 'M', Tue: 'T', Wed: 'W', Thu: 'R', Fri: 'F', Sat: 'S', Sun: 'U' };
+const ORDER: Day[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const days = (meetings: MeetingTime[]) => ORDER.filter((d) => meetings.some((m) => m.dayOfWeek === d));
 
 /** "MW" (UTD style: Thursday is R) */

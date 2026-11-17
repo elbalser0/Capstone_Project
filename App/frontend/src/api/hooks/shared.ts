@@ -57,7 +57,7 @@ export function useActiveTemplate() {
   return useQuery({ queryKey: sharedKeys.activeTemplate, queryFn: () => api<TemplateVersion>('/templates/active') });
 }
 
-/** POST /api/admin/import: CSV files keyed by table name (professor, department, course, section, meeting_time, term). */
+/** POST /api/admin/import: CSV files keyed by table name (professor, department, course, section, meeting_time, term, ac_member). */
 export function useImportData() {
   const qc = useQueryClient();
   return useMutation({
