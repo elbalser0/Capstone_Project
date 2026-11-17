@@ -215,6 +215,30 @@ describe('admin import against the database', { skip }, () => {
       [{ netid: 'abc123456', is_active: true }, { netid: 'ac1', is_active: true }]);
   });
 
+  test('uploading the same files again still adds nothing after a professor on the AC is deactivated', async () => {
+    const files = { department: DEPT, term: TERM, professor: PROF, ac_member: AC };
+    assert.equal((await upload('admin', files)).status, 200);
+    // What PATCH /api/admin/professors does when deactivating a professor who is on the AC.
+    await sql(`UPDATE professor SET is_active = false WHERE netid = 'abc123456'`);
+    await sql(`UPDATE ac_member SET is_active = false WHERE netid = 'abc123456'`);
+    const again = await upload('admin', files);
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.body, {
+      imported: counts(), skipped: counts({ department: 2, term: 1, professor: 2, ac_member: 1 }),
+    });
+    assert.deepEqual((await sql(`SELECT is_active FROM ac_member WHERE netid = 'abc123456'`)).rows, [{ is_active: false }]);
+  });
+
+  test('eval_interval_years may be blank or disagree with the rank; the rank decides', async () => {
+    const result = await upload('admin', {
+      department: DEPT, term: TERM,
+      professor: PROF_HEADER + 'ghi111111,G,H,g@example.edu,50,assistant,,,,true\njkl222222,J,K,j@example.edu,50,full,7,,,true\n',
+    });
+    assert.equal(result.status, 200);
+    assert.deepEqual((await sql(`SELECT netid, eval_interval_years FROM professor WHERE netid IN ('ghi111111', 'jkl222222') ORDER BY netid`)).rows,
+      [{ netid: 'ghi111111', eval_interval_years: 1 }, { netid: 'jkl222222', eval_interval_years: 2 }]);
+  });
+
   test('an inactive professor cannot be an active AC member', async () => {
     const result = await upload('admin', {
       department: DEPT, term: TERM, professor: PROF, ac_member: 'netid,is_active\ndef654321,true\n',

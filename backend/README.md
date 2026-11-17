@@ -124,8 +124,8 @@ department and number, a section by course, term and section number, and a
 meeting by section, day and start time. Uploading the same files again adds
 nothing. NetIDs must look like `abc123456` and are stored in lowercase, so
 `ABC123456` and `abc123456` are the same professor. The rank sets
-`eval_interval_years`. A professor imported as inactive is also inactive on the AC,
-and an inactive professor cannot be an active AC member. A new term may not overlap
+`eval_interval_years`, so that column is not used and may be blank. A new AC member
+must be a professor, and an inactive professor cannot be an active AC member. A new term may not overlap
 another term, and sorting terms by start date must keep season order (spring before
 fall in a year). Every row is checked first and the import runs in one transaction,
 so a bad row saves nothing and returns 400 `INVALID_IMPORT` naming the file and

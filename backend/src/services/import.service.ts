@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
+import { EMAIL } from './forward.service.js';
 
 // POST /api/admin/import loads data from the same CSV layout as Scripts/seed_data. The tables are
 // listed in the order they are imported, so a row can point to a row from an earlier file.
@@ -20,9 +21,8 @@ const COLUMNS: Record<ImportTable, string[]> = {
   meeting_time: ['section_id', 'day_of_week', 'start_time', 'end_time', 'room'],
 };
 const RANKS = ['assistant', 'associate', 'full'];
-// Same netid format and email check as POST /api/admin/professors.
+// Same netid format as POST /api/admin/professors.
 const NETID = /^[a-z]{3}\d{6}$/;
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 export const MAX_ROWS = 20000;
 
@@ -176,17 +176,23 @@ type IdMap = Map<number, number>;
 
 async function importDepartments(client: PoolClient, rows: Row[], imported: ImportCounts, skipped: ImportCounts): Promise<IdMap> {
   const ids: IdMap = new Map();
+  if (!rows.length) return ids;
+  // Every department name, loaded once (lowercase name -> dept_id).
+  const byName = new Map<string, number>();
+  for (const { dept_id, dept_name } of (await client.query<{ dept_id: number; dept_name: string }>(
+    'SELECT dept_id, dept_name FROM department ORDER BY dept_id DESC')).rows) {
+    byName.set(dept_name.toLowerCase(), dept_id);
+  }
   const seen = new Set<string>();
   for (const row of rows) {
     const fileId = positiveInt('department', row, 'dept_id');
     const name = required('department', row, 'dept_name');
     if (seen.has(name.toLowerCase())) throw badRow('department', row, `department ${name} is listed twice.`);
     seen.add(name.toLowerCase());
-    const existing = await client.query<{ dept_id: number }>(
-      'SELECT dept_id FROM department WHERE lower(dept_name) = lower($1) ORDER BY dept_id LIMIT 1', [name]);
-    if (existing.rows[0]) {
+    const existing = byName.get(name.toLowerCase());
+    if (existing !== undefined) {
       skipped.department += 1;
-      ids.set(fileId, existing.rows[0].dept_id);
+      ids.set(fileId, existing);
       continue;
     }
     const added = await client.query<{ dept_id: number }>(
@@ -296,9 +302,18 @@ async function importCourses(
   return ids;
 }
 
+// Every professor, loaded once: lowercase netid -> stored netid and active flag, and the email owners.
+async function loadProfessors(client: PoolClient) {
+  const { rows } = await client.query<{ netid: string; email: string; is_active: boolean }>(
+    'SELECT netid, email, is_active FROM professor');
+  return {
+    byNetid: new Map(rows.map((row) => [row.netid.toLowerCase(), { netid: row.netid, isActive: row.is_active }])),
+    byEmail: new Map(rows.map((row) => [row.email.toLowerCase(), row.netid])),
+  };
+}
+
 // A professor already in the database (matched by netid, ignoring case) is skipped. The rank trigger
-// sets eval_interval_years, so the file's value is only checked. A professor imported as inactive
-// also loses any AC membership, the same as deactivating one with PATCH /api/admin/professors.
+// sets eval_interval_years, so the file's value is not used and may be blank.
 async function importProfessors(
   client: PoolClient, rows: Row[], deptIds: IdMap, termIds: IdMap, imported: ImportCounts, skipped: ImportCounts,
 ) {
@@ -309,8 +324,10 @@ async function importProfessors(
   const terms = await resolveIds(client, termIds, 'term', 'term_id',
     rows.flatMap((row) => [optionalTerm(row, 'baseline_last_eval_term'), optionalTerm(row, 'start_term')])
       .filter((id): id is number => id !== null));
+  const { byNetid, byEmail } = await loadProfessors(client);
   const seenNetids = new Set<string>();
   const seenEmails = new Set<string>();
+  const added: unknown[][] = [];
   for (const row of rows) {
     const id = netid('professor', row, 'netid');
     const firstName = required('professor', row, 'first_name');
@@ -319,7 +336,6 @@ async function importProfessors(
     if (!EMAIL.test(email)) throw badRow('professor', row, 'email must be a valid email address.');
     const rank = row.values.rank.toLowerCase();
     if (!RANKS.includes(rank)) throw badRow('professor', row, 'rank must be assistant, associate or full.');
-    positiveInt('professor', row, 'eval_interval_years');
     const deptFileId = positiveInt('professor', row, 'dept_id');
     const deptId = departments.get(deptFileId);
     if (deptId === undefined) throw badRow('professor', row, `dept_id ${deptFileId} is not in department.csv or the database.`);
@@ -338,45 +354,58 @@ async function importProfessors(
     if (seenEmails.has(email.toLowerCase())) throw badRow('professor', row, `email ${email} is listed twice.`);
     seenEmails.add(email.toLowerCase());
 
-    const existing = await client.query('SELECT 1 FROM professor WHERE lower(netid) = $1', [id]);
-    if (existing.rowCount) {
+    if (byNetid.has(id)) {
       skipped.professor += 1;
       continue;
     }
-    const emailOwner = await client.query<{ netid: string }>(
-      'SELECT netid FROM professor WHERE lower(email) = lower($1)', [email]);
-    if (emailOwner.rows[0]) {
-      throw badRow('professor', row, `email ${email} already belongs to professor ${emailOwner.rows[0].netid}.`);
-    }
-    await client.query(`
-      INSERT INTO professor (netid, first_name, last_name, email, rank, dept_id, eval_interval_years,
-                             baseline_last_eval_term, start_term, is_active)
-      VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, $9)`,
-    [id, firstName, lastName, email, rank, deptId, baseline, startTerm, isActive]);
-    if (!isActive) await client.query('UPDATE ac_member SET is_active = false WHERE netid = $1', [id]);
-    imported.professor += 1;
+    const emailOwner = byEmail.get(email.toLowerCase());
+    if (emailOwner) throw badRow('professor', row, `email ${email} already belongs to professor ${emailOwner}.`);
+    added.push([id, firstName, lastName, email, rank, deptId, baseline, startTerm, isActive]);
   }
+  if (!added.length) return;
+  // One insert for all new professors. eval_interval_years is a placeholder the rank trigger replaces.
+  const column = (i: number) => added.map((values) => values[i]);
+  await client.query(`
+    INSERT INTO professor (netid, first_name, last_name, email, rank, dept_id, eval_interval_years,
+                           baseline_last_eval_term, start_term, is_active)
+    SELECT netid, first_name, last_name, email, rank, dept_id, 1, baseline, start_term, is_active
+    FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[], $8::int[], $9::boolean[])
+      AS f(netid, first_name, last_name, email, rank, dept_id, baseline, start_term, is_active)`,
+  [column(0), column(1), column(2), column(3), column(4), column(5), column(6), column(7), column(8)]);
+  imported.professor += added.length;
 }
 
-// An AC member already in the database is skipped. Only an active professor can be an active AC member.
+// An AC member already in the database is skipped, without checking it. A new AC member must be a
+// professor, and only an active professor can be an active AC member.
 async function importAcMembers(client: PoolClient, rows: Row[], imported: ImportCounts, skipped: ImportCounts) {
+  if (!rows.length) return;
+  const { byNetid } = await loadProfessors(client);
+  const existing = new Set((await client.query<{ netid: string }>('SELECT netid FROM ac_member')).rows
+    .map((row) => row.netid.toLowerCase()));
   const seen = new Set<string>();
+  const added: { netid: string; isActive: boolean }[] = [];
   for (const row of rows) {
     const id = netid('ac_member', row, 'netid');
     const isActive = bool('ac_member', row, 'is_active');
     if (seen.has(id)) throw badRow('ac_member', row, `netid ${id} is listed twice.`);
     seen.add(id);
-    const { rows: [professor] } = await client.query<{ netid: string; is_active: boolean }>(
-      'SELECT netid, is_active FROM professor WHERE lower(netid) = $1', [id]);
+    if (existing.has(id)) {
+      skipped.ac_member += 1;
+      continue;
+    }
+    const professor = byNetid.get(id);
     if (!professor) throw badRow('ac_member', row, `netid ${id} is not in professor.csv or the database.`);
-    if (isActive && !professor.is_active) {
+    if (isActive && !professor.isActive) {
       throw badRow('ac_member', row, `professor ${professor.netid} is inactive, so they cannot be an active AC member.`);
     }
-    const added = await client.query(
-      'INSERT INTO ac_member (netid, is_active) VALUES ($1, $2) ON CONFLICT (netid) DO NOTHING', [professor.netid, isActive]);
-    if (added.rowCount) imported.ac_member += 1;
-    else skipped.ac_member += 1;
+    added.push({ netid: professor.netid, isActive });
   }
+  if (!added.length) return;
+  await client.query(`
+    INSERT INTO ac_member (netid, is_active)
+    SELECT * FROM unnest($1::text[], $2::boolean[])`,
+  [added.map((member) => member.netid), added.map((member) => member.isActive)]);
+  imported.ac_member += added.length;
 }
 
 // Maps each file ID to a database ID: from the uploaded parent file, or else a row already in the database.
