@@ -154,3 +154,14 @@ export async function previewDueProfessors(termId: number, db: Pick<PoolClient, 
       || a.professor.firstName.localeCompare(b.professor.firstName)
       || a.professor.netid.localeCompare(b.professor.netid));
 }
+
+// The term a newly added professor starts in: the earliest term that starts after today.
+export async function findNextTermId(db: Pick<PoolClient, 'query'> = getPool()): Promise<number | null> {
+  const { rows } = await db.query<{ term_id: number }>(`
+    SELECT term_id FROM term
+    WHERE start_date > CURRENT_DATE
+    ORDER BY start_date, term_id
+    LIMIT 1
+  `);
+  return rows[0]?.term_id ?? null;
+}
