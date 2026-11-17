@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { parseNewProfessor } from '../src/routes/admin.routes.js';
+import { parseNewProfessor, parseProfessorChanges } from '../src/routes/admin.routes.js';
 import { mapAdminProfessor } from '../src/services/admin-professor.service.js';
 
 const valid = {
@@ -72,5 +72,39 @@ test('an admin professor row maps to the API shape with string IDs', () => {
     department: { deptId: '3', deptName: 'Mathematics' },
     isAc: true,
     isActive: false,
+  });
+});
+
+describe('parseProfessorChanges', () => {
+  function rejectsChange(body: unknown, field: string) {
+    assert.throws(() => parseProfessorChanges(body), (error: { status: number; code: string; message: string }) => {
+      assert.equal(error.status, 400);
+      assert.equal(error.code, 'INVALID_PROFESSOR');
+      assert.match(error.message, new RegExp(field), `message should name ${field}: ${error.message}`);
+      return true;
+    });
+  }
+
+  test('accepts any combination of rank, isAc and isActive', () => {
+    assert.deepEqual(parseProfessorChanges({ rank: 'full' }), { rank: 'full' });
+    assert.deepEqual(parseProfessorChanges({ isAc: false }), { isAc: false });
+    assert.deepEqual(parseProfessorChanges({ rank: 'assistant', isAc: true, isActive: false }),
+      { rank: 'assistant', isAc: true, isActive: false });
+  });
+
+  test('needs a JSON object with at least one change', () => {
+    for (const body of [undefined, null, 'full', [{ rank: 'full' }]]) rejectsChange(body, 'JSON object');
+    rejectsChange({}, 'at least one');
+  });
+
+  test('rejects fields it does not know', () => {
+    rejectsChange({ rank: 'full', email: 'x@example.edu' }, 'email');
+    rejectsChange({ isac: true }, 'isac');
+  });
+
+  test('rejects bad values', () => {
+    for (const rank of [null, 'Full', 'professor', 2]) rejectsChange({ rank }, 'rank');
+    for (const isAc of [null, 'true', 1]) rejectsChange({ isAc }, 'isAc');
+    for (const isActive of [null, 'false', 0]) rejectsChange({ isActive }, 'isActive');
   });
 });

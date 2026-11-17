@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
+import { REQUEST_HOURS } from './request.service.js';
 import { findNextTermId } from './term.service.js';
 import { displayName, type Rank } from './user.service.js';
 
@@ -104,4 +105,86 @@ export async function createProfessor(professor: NewProfessor): Promise<AdminPro
     }
     throw error;
   }
+}
+
+export interface ProfessorChanges {
+  rank?: Rank;
+  isAc?: boolean;
+  isActive?: boolean;
+}
+
+// A professor cannot be deactivated while they take part in the current cycle: the latest cycle
+// that has started (same rule as getCurrentCycle), counted only until its feedback deadline.
+async function isInCurrentCycle(client: PoolClient, netid: string): Promise<boolean> {
+  const { rows } = await client.query<{ busy: boolean }>(`
+    WITH cycle AS (
+      SELECT cycle_id FROM eval_cycle
+      WHERE start_date <= CURRENT_DATE
+      ORDER BY start_date DESC, cycle_id DESC
+      LIMIT 1
+    ), open_cycle AS (
+      SELECT c.cycle_id FROM cycle JOIN eval_cycle AS c USING (cycle_id)
+      WHERE CURRENT_DATE <= c.feedback_deadline
+    )
+    SELECT EXISTS (SELECT 1 FROM sign_up AS s JOIN open_cycle USING (cycle_id)
+                   WHERE s.observee_netid = $1)
+        OR EXISTS (SELECT 1 FROM observation_request AS r
+                   JOIN sign_up AS s ON s.signup_id = r.signup_id
+                   JOIN open_cycle USING (cycle_id)
+                   WHERE r.observer_netid = $1
+                     AND (r.status = 'accepted'
+                          OR (r.status = 'pending'
+                              AND r.sent_date > now() - make_interval(hours => ${REQUEST_HOURS}))))
+        OR EXISTS (SELECT 1 FROM observation AS o
+                   JOIN sign_up AS s ON s.signup_id = o.signup_id
+                   JOIN open_cycle USING (cycle_id)
+                   WHERE o.observer_netid = $1 AND o.status = 'scheduled') AS busy
+  `, [netid]);
+  return rows[0].busy;
+}
+
+// PATCH /api/admin/professors/:netid. Applies isActive, then rank, then isAc, all in one
+// transaction, so a failed step leaves the professor unchanged.
+export async function updateProfessor(netid: string, changes: ProfessorChanges): Promise<AdminProfessor> {
+  return inTransaction(async (client) => {
+    const { rows } = await client.query<{ is_active: boolean }>(
+      'SELECT is_active FROM professor WHERE netid = $1 FOR UPDATE', [netid],
+    );
+    if (!rows[0]) throw new ApiError(404, 'NOT_FOUND', 'Professor not found.');
+    let isActive = rows[0].is_active;
+
+    if (changes.isActive === false) {
+      if (isActive) {
+        if (await isInCurrentCycle(client, netid)) {
+          throw new ApiError(409, 'IN_CURRENT_CYCLE',
+            'This professor has a sign-up, observation request or scheduled observation in the current cycle.');
+        }
+        await client.query('UPDATE professor SET is_active = false WHERE netid = $1', [netid]);
+        isActive = false;
+      }
+      // Also clears an AC membership left active on a professor who was already inactive.
+      await client.query('UPDATE ac_member SET is_active = false WHERE netid = $1', [netid]);
+    } else if (changes.isActive === true && !isActive) {
+      // AC membership is not restored; add it again with isAc if needed.
+      await client.query('UPDATE professor SET is_active = true WHERE netid = $1', [netid]);
+      isActive = true;
+    }
+
+    if (changes.rank) {
+      // The rank trigger updates eval_interval_years.
+      await client.query('UPDATE professor SET rank = $2 WHERE netid = $1', [netid, changes.rank]);
+    }
+
+    if (changes.isAc === true) {
+      if (!isActive) throw new ApiError(409, 'PROFESSOR_INACTIVE', 'Only an active professor can be on the Assessment Committee.');
+      await client.query(`
+        INSERT INTO ac_member (netid, is_active) VALUES ($1, true)
+        ON CONFLICT (netid) DO UPDATE SET is_active = true
+      `, [netid]);
+    } else if (changes.isAc === false) {
+      await client.query('UPDATE ac_member SET is_active = false WHERE netid = $1', [netid]);
+    }
+
+    return (await getAdminProfessor(netid, client))!;
+  });
 }

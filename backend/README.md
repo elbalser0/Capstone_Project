@@ -113,6 +113,29 @@ department return 400 `INVALID_PROFESSOR`. It returns 409 `NEXT_TERM_MISSING`
 when no term starts after today (import the next term's `term.csv` first), 409 `NETID_TAKEN`, or 409 `EMAIL_TAKEN`
 (emails are compared case-insensitively).
 
+`PATCH /api/admin/professors/:netid` takes any of `{ rank, isAc, isActive }` and
+returns 200 with the updated row. An empty body, another field, or a bad value
+returns 400 `INVALID_PROFESSOR`, as does a netid that is not three letters and six
+digits; an unknown netid returns 404 `NOT_FOUND`. The
+whole change runs in one transaction, applying `isActive`, then `rank`, then
+`isAc`, so a failed step changes nothing.
+- `rank` updates the rank; the rank trigger updates `eval_interval_years`. A
+  change during a cycle takes effect next cycle: the current cycle's `eval_due`
+  roster is not recalculated.
+- `isActive: false` deactivates the professor and their AC membership. It
+  returns 409 `IN_CURRENT_CYCLE` if, in the latest started cycle and before its
+  feedback deadline, they have a sign-up, an accepted observation request, a
+  pending one still within its 48 hours, or a scheduled observation as observer.
+  Deactivating a professor who is already inactive still marks any leftover AC
+  membership inactive.
+- `isActive: true` reactivates the professor only; AC membership is not restored.
+- `isAc: true` adds or reactivates the `ac_member` row; it returns 409
+  `PROFESSOR_INACTIVE` if the professor is inactive after `isActive` is applied.
+  `isAc: false` marks the row inactive. AC rows are never deleted because
+  cycles, notifications, alerts and templates reference them.
+The backend allows removing the last active AC member; the admin page should
+warn when no professor has both `isAc` and `isActive`.
+
 `GET /api/admin/departments` returns `[{ deptId, deptName }]` sorted by name,
 for the Add Professor dropdown.
 

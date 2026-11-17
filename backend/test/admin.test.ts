@@ -15,6 +15,7 @@ test('GET /api/me and admin endpoints require a login', async () => {
       ['GET', '/api/admin/departments'],
       ['GET', '/api/admin/anything'],
       ['POST', '/api/admin/professors'],
+      ['PATCH', '/api/admin/professors/abc123456'],
     ];
     for (const [method, path] of requests) {
       const response = await fetch(`${base}${path}`, { method });
