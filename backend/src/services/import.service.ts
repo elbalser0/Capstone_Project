@@ -1,21 +1,28 @@
 import type { PoolClient } from 'pg';
 import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
+import { EMAIL } from './forward.service.js';
 
-// POST /api/admin/import loads a new semester's teaching data from the same CSV
-// layout as Scripts/seed_data: term, course, section and meeting_time.
-// Professors and departments are added on the admin pages, not here.
-export const IMPORT_TABLES = ['term', 'course', 'section', 'meeting_time'] as const;
+// POST /api/admin/import loads data from the same CSV layout as Scripts/seed_data. The tables are
+// listed in the order they are imported, so a row can point to a row from an earlier file.
+export const IMPORT_TABLES = ['department', 'term', 'professor', 'ac_member', 'course', 'section', 'meeting_time'] as const;
 export type ImportTable = (typeof IMPORT_TABLES)[number];
 export type ImportFiles = Partial<Record<ImportTable, string>>;
 export type ImportCounts = Record<ImportTable, number>;
 
 const COLUMNS: Record<ImportTable, string[]> = {
+  department: ['dept_id', 'dept_name'],
+  professor: ['netid', 'first_name', 'last_name', 'email', 'dept_id', 'rank', 'eval_interval_years',
+    'baseline_last_eval_term', 'start_term', 'is_active'],
+  ac_member: ['netid', 'is_active'],
   term: ['term_id', 'season', 'year', 'start_date', 'end_date'],
   course: ['course_id', 'dept_id', 'course_num', 'title', 'course_level'],
   section: ['section_id', 'course_id', 'term_id', 'section_num', 'instructor_id', 'class_mode'],
   meeting_time: ['section_id', 'day_of_week', 'start_time', 'end_time', 'room'],
 };
+const RANKS = ['assistant', 'associate', 'full'];
+// Same netid format as POST /api/admin/professors.
+const NETID = /^[a-z]{3}\d{6}$/;
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 export const MAX_ROWS = 20000;
 
@@ -108,6 +115,20 @@ function time(table: ImportTable, row: Row, column: string) {
   return `${match[1].padStart(2, '0')}:${match[2]}:${match[3] ?? '00'}`;
 }
 
+function bool(table: ImportTable, row: Row, column: string) {
+  const value = row.values[column].toLowerCase();
+  if (value === 'true' || value === 't') return true;
+  if (value === 'false' || value === 'f') return false;
+  throw badRow(table, row, `${column} must be true or false.`);
+}
+
+// NetIDs are stored in lowercase, so ABC123456 and abc123456 are the same professor.
+function netid(table: ImportTable, row: Row, column: string) {
+  const value = required(table, row, column).toLowerCase();
+  if (!NETID.test(value)) throw badRow(table, row, `${column} must be three letters followed by six digits, like abc123456.`);
+  return value;
+}
+
 // Every file ID must be listed once.
 function uniqueIds(table: ImportTable, rows: Row[], column: string) {
   const seen = new Set<number>();
@@ -119,14 +140,16 @@ function uniqueIds(table: ImportTable, rows: Row[], column: string) {
 }
 
 // The IDs in the files only link the files to each other. The database picks the real IDs and
-// rows are matched on what they are: a term by season and year, a course by department and
-// number, a section by course, term and section number, a meeting by section, day and start.
+// rows are matched on what they are: a department by name, a term by season and year, a
+// professor or AC member by netid, a course by department and number, a section by course, term
+// and section number, a meeting by section, day and start.
 // An ID that is not in the uploaded parent file refers to a row already in the database.
 // Rows already in the database are skipped, so uploading the same files twice changes nothing.
 export async function importData(files: ImportFiles): Promise<{ imported: ImportCounts; skipped: ImportCounts }> {
   const rows = Object.fromEntries(
     IMPORT_TABLES.filter((table) => files[table] !== undefined).map((table) => [table, readTable(table, files[table]!)]),
   ) as Partial<Record<ImportTable, Row[]>>;
+  if (rows.department) uniqueIds('department', rows.department, 'dept_id');
   if (rows.term) uniqueIds('term', rows.term, 'term_id');
   if (rows.course) uniqueIds('course', rows.course, 'course_id');
   if (rows.section) uniqueIds('section', rows.section, 'section_id');
@@ -134,10 +157,14 @@ export async function importData(files: ImportFiles): Promise<{ imported: Import
   return inTransaction(async (client) => {
     // One import at a time: course has no unique key to stop two imports adding it twice.
     await client.query("SELECT pg_advisory_xact_lock(hashtext('admin_import'))");
-    const imported: ImportCounts = { term: 0, course: 0, section: 0, meeting_time: 0 };
-    const skipped: ImportCounts = { term: 0, course: 0, section: 0, meeting_time: 0 };
+    const zero = () => Object.fromEntries(IMPORT_TABLES.map((table) => [table, 0])) as ImportCounts;
+    const imported = zero();
+    const skipped = zero();
+    const deptIds = await importDepartments(client, rows.department ?? [], imported, skipped);
     const termIds = await importTerms(client, rows.term ?? [], imported, skipped);
-    const courseIds = await importCourses(client, rows.course ?? [], imported, skipped);
+    await importProfessors(client, rows.professor ?? [], deptIds, termIds, imported, skipped);
+    await importAcMembers(client, rows.ac_member ?? [], imported, skipped);
+    const courseIds = await importCourses(client, rows.course ?? [], deptIds, imported, skipped);
     const sectionIds = await importSections(client, rows.section ?? [], termIds, courseIds, imported, skipped);
     await importMeetings(client, rows.meeting_time ?? [], sectionIds, imported, skipped);
     return { imported, skipped };
@@ -146,6 +173,35 @@ export async function importData(files: ImportFiles): Promise<{ imported: Import
 
 // file ID -> database ID
 type IdMap = Map<number, number>;
+
+async function importDepartments(client: PoolClient, rows: Row[], imported: ImportCounts, skipped: ImportCounts): Promise<IdMap> {
+  const ids: IdMap = new Map();
+  if (!rows.length) return ids;
+  // Every department name, loaded once (lowercase name -> dept_id).
+  const byName = new Map<string, number>();
+  for (const { dept_id, dept_name } of (await client.query<{ dept_id: number; dept_name: string }>(
+    'SELECT dept_id, dept_name FROM department ORDER BY dept_id DESC')).rows) {
+    byName.set(dept_name.toLowerCase(), dept_id);
+  }
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const fileId = positiveInt('department', row, 'dept_id');
+    const name = required('department', row, 'dept_name');
+    if (seen.has(name.toLowerCase())) throw badRow('department', row, `department ${name} is listed twice.`);
+    seen.add(name.toLowerCase());
+    const existing = byName.get(name.toLowerCase());
+    if (existing !== undefined) {
+      skipped.department += 1;
+      ids.set(fileId, existing);
+      continue;
+    }
+    const added = await client.query<{ dept_id: number }>(
+      'INSERT INTO department (dept_name) VALUES ($1) RETURNING dept_id', [name]);
+    imported.department += 1;
+    ids.set(fileId, added.rows[0].dept_id);
+  }
+  return ids;
+}
 
 async function importTerms(client: PoolClient, rows: Row[], imported: ImportCounts, skipped: ImportCounts): Promise<IdMap> {
   const ids: IdMap = new Map();
@@ -212,14 +268,18 @@ async function checkTermFits(client: PoolClient, row: Row, season: string, year:
   }
 }
 
-async function importCourses(client: PoolClient, rows: Row[], imported: ImportCounts, skipped: ImportCounts): Promise<IdMap> {
+async function importCourses(
+  client: PoolClient, rows: Row[], deptIds: IdMap, imported: ImportCounts, skipped: ImportCounts,
+): Promise<IdMap> {
   const ids: IdMap = new Map();
-  const departments = new Set((await client.query<{ dept_id: number }>('SELECT dept_id FROM department')).rows.map((row) => row.dept_id));
+  const departments = await resolveIds(client, deptIds, 'department', 'dept_id',
+    rows.map((row) => positiveInt('course', row, 'dept_id')));
   const seen = new Set<string>();
   for (const row of rows) {
     const fileId = positiveInt('course', row, 'course_id');
-    const deptId = positiveInt('course', row, 'dept_id');
-    if (!departments.has(deptId)) throw badRow('course', row, `department ${deptId} does not exist. Add it on the admin page first.`);
+    const deptFileId = positiveInt('course', row, 'dept_id');
+    const deptId = departments.get(deptFileId);
+    if (deptId === undefined) throw badRow('course', row, `dept_id ${deptFileId} is not in department.csv or the database.`);
     const courseNum = required('course', row, 'course_num');
     const title = required('course', row, 'title');
     const level = positiveInt('course', row, 'course_level');
@@ -242,6 +302,112 @@ async function importCourses(client: PoolClient, rows: Row[], imported: ImportCo
   return ids;
 }
 
+// Every professor, loaded once: lowercase netid -> stored netid and active flag, and the email owners.
+async function loadProfessors(client: PoolClient) {
+  const { rows } = await client.query<{ netid: string; email: string; is_active: boolean }>(
+    'SELECT netid, email, is_active FROM professor');
+  return {
+    byNetid: new Map(rows.map((row) => [row.netid.toLowerCase(), { netid: row.netid, isActive: row.is_active }])),
+    byEmail: new Map(rows.map((row) => [row.email.toLowerCase(), row.netid])),
+  };
+}
+
+// A professor already in the database (matched by netid, ignoring case) is skipped. The rank trigger
+// sets eval_interval_years, so the file's value is not used and may be blank.
+async function importProfessors(
+  client: PoolClient, rows: Row[], deptIds: IdMap, termIds: IdMap, imported: ImportCounts, skipped: ImportCounts,
+) {
+  if (!rows.length) return;
+  const optionalTerm = (row: Row, column: string) => (row.values[column] ? positiveInt('professor', row, column) : null);
+  const departments = await resolveIds(client, deptIds, 'department', 'dept_id',
+    rows.map((row) => positiveInt('professor', row, 'dept_id')));
+  const terms = await resolveIds(client, termIds, 'term', 'term_id',
+    rows.flatMap((row) => [optionalTerm(row, 'baseline_last_eval_term'), optionalTerm(row, 'start_term')])
+      .filter((id): id is number => id !== null));
+  const { byNetid, byEmail } = await loadProfessors(client);
+  const seenNetids = new Set<string>();
+  const seenEmails = new Set<string>();
+  const added: unknown[][] = [];
+  for (const row of rows) {
+    const id = netid('professor', row, 'netid');
+    const firstName = required('professor', row, 'first_name');
+    const lastName = required('professor', row, 'last_name');
+    const email = required('professor', row, 'email');
+    if (!EMAIL.test(email)) throw badRow('professor', row, 'email must be a valid email address.');
+    const rank = row.values.rank.toLowerCase();
+    if (!RANKS.includes(rank)) throw badRow('professor', row, 'rank must be assistant, associate or full.');
+    const deptFileId = positiveInt('professor', row, 'dept_id');
+    const deptId = departments.get(deptFileId);
+    if (deptId === undefined) throw badRow('professor', row, `dept_id ${deptFileId} is not in department.csv or the database.`);
+    const termId = (column: string) => {
+      const fileId = optionalTerm(row, column);
+      if (fileId === null) return null;
+      const found = terms.get(fileId);
+      if (found === undefined) throw badRow('professor', row, `${column} ${fileId} is not in term.csv or the database.`);
+      return found;
+    };
+    const baseline = termId('baseline_last_eval_term');
+    const startTerm = termId('start_term');
+    const isActive = bool('professor', row, 'is_active');
+    if (seenNetids.has(id)) throw badRow('professor', row, `netid ${id} is listed twice.`);
+    seenNetids.add(id);
+    if (seenEmails.has(email.toLowerCase())) throw badRow('professor', row, `email ${email} is listed twice.`);
+    seenEmails.add(email.toLowerCase());
+
+    if (byNetid.has(id)) {
+      skipped.professor += 1;
+      continue;
+    }
+    const emailOwner = byEmail.get(email.toLowerCase());
+    if (emailOwner) throw badRow('professor', row, `email ${email} already belongs to professor ${emailOwner}.`);
+    added.push([id, firstName, lastName, email, rank, deptId, baseline, startTerm, isActive]);
+  }
+  if (!added.length) return;
+  // One insert for all new professors. eval_interval_years is a placeholder the rank trigger replaces.
+  const column = (i: number) => added.map((values) => values[i]);
+  await client.query(`
+    INSERT INTO professor (netid, first_name, last_name, email, rank, dept_id, eval_interval_years,
+                           baseline_last_eval_term, start_term, is_active)
+    SELECT netid, first_name, last_name, email, rank, dept_id, 1, baseline, start_term, is_active
+    FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[], $8::int[], $9::boolean[])
+      AS f(netid, first_name, last_name, email, rank, dept_id, baseline, start_term, is_active)`,
+  [column(0), column(1), column(2), column(3), column(4), column(5), column(6), column(7), column(8)]);
+  imported.professor += added.length;
+}
+
+// An AC member already in the database is skipped, without checking it. A new AC member must be a
+// professor, and only an active professor can be an active AC member.
+async function importAcMembers(client: PoolClient, rows: Row[], imported: ImportCounts, skipped: ImportCounts) {
+  if (!rows.length) return;
+  const { byNetid } = await loadProfessors(client);
+  const existing = new Set((await client.query<{ netid: string }>('SELECT netid FROM ac_member')).rows
+    .map((row) => row.netid.toLowerCase()));
+  const seen = new Set<string>();
+  const added: { netid: string; isActive: boolean }[] = [];
+  for (const row of rows) {
+    const id = netid('ac_member', row, 'netid');
+    const isActive = bool('ac_member', row, 'is_active');
+    if (seen.has(id)) throw badRow('ac_member', row, `netid ${id} is listed twice.`);
+    seen.add(id);
+    if (existing.has(id)) {
+      skipped.ac_member += 1;
+      continue;
+    }
+    const professor = byNetid.get(id);
+    if (!professor) throw badRow('ac_member', row, `netid ${id} is not in professor.csv or the database.`);
+    if (isActive && !professor.isActive) {
+      throw badRow('ac_member', row, `professor ${professor.netid} is inactive, so they cannot be an active AC member.`);
+    }
+    added.push({ netid: professor.netid, isActive });
+  }
+  if (!added.length) return;
+  await client.query(`
+    INSERT INTO ac_member (netid, is_active)
+    SELECT * FROM unnest($1::text[], $2::boolean[])`,
+  [added.map((member) => member.netid), added.map((member) => member.isActive)]);
+  imported.ac_member += added.length;
+}
+
 // Maps each file ID to a database ID: from the uploaded parent file, or else a row already in the database.
 async function resolveIds(client: PoolClient, fromFile: IdMap, sqlTable: string, idColumn: string, fileIds: number[]): Promise<IdMap> {
   const ids = new Map(fromFile);
@@ -257,21 +423,24 @@ async function importSections(
   client: PoolClient, rows: Row[], termIds: IdMap, courseIds: IdMap, imported: ImportCounts, skipped: ImportCounts,
 ): Promise<IdMap> {
   if (!rows.length) return new Map();
-  const professors = new Set((await client.query<{ netid: string }>('SELECT netid FROM professor')).rows.map((row) => row.netid));
+  // Matched without regard to case; the stored netid is used.
+  const professors = new Map((await client.query<{ netid: string }>('SELECT netid FROM professor')).rows
+    .map((row) => [row.netid.toLowerCase(), row.netid]));
   const courses = await resolveIds(client, courseIds, 'course', 'course_id', rows.map((row) => positiveInt('section', row, 'course_id')));
   const terms = await resolveIds(client, termIds, 'term', 'term_id', rows.map((row) => positiveInt('section', row, 'term_id')));
   const sections = rows.map((row) => {
     const courseFileId = positiveInt('section', row, 'course_id');
     const termFileId = positiveInt('section', row, 'term_id');
-    const instructor = required('section', row, 'instructor_id');
+    const instructorId = required('section', row, 'instructor_id');
+    const instructor = professors.get(instructorId.toLowerCase());
     const mode = row.values.class_mode.toLowerCase();
     if (mode !== 'online' && mode !== 'in-person') throw badRow('section', row, 'class_mode must be online or in-person.');
     const courseId = courses.get(courseFileId);
     if (courseId === undefined) throw badRow('section', row, `course_id ${courseFileId} is not in course.csv or the database.`);
     const termId = terms.get(termFileId);
     if (termId === undefined) throw badRow('section', row, `term_id ${termFileId} is not in term.csv or the database.`);
-    if (!professors.has(instructor)) {
-      throw badRow('section', row, `instructor ${instructor} is not a professor yet. Add them on the admin page first.`);
+    if (instructor === undefined) {
+      throw badRow('section', row, `instructor ${instructorId} is not in professor.csv or the database.`);
     }
     return { fileId: positiveInt('section', row, 'section_id'), courseId, termId, sectionNum: required('section', row, 'section_num'), instructor, mode };
   });

@@ -7,7 +7,8 @@ import type { AuthUser } from './user.service.js';
 
 type Record = Awaited<ReturnType<typeof getObservation>>;
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Also used by the admin import, so both check emails the same way.
+export const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // The email body: the whole signed record as plain text. There is no read-only page for
 // link_token yet, so the record itself goes in the email.

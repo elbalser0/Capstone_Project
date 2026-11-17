@@ -39,6 +39,10 @@ async function upload(who: 'admin' | 'ac1' | 'prof1', files: Record<string, stri
   }
 }
 
+// Full counts as the endpoint returns them: every table, zero unless given.
+const TABLES = ['department', 'term', 'professor', 'ac_member', 'course', 'section', 'meeting_time'];
+const counts = (some: Record<string, number> = {}) => Object.fromEntries(TABLES.map((t) => [t, some[t] ?? 0]));
+
 const count = async (table: string) => Number((await sql(`SELECT count(*) FROM ${table}`)).rows[0].count);
 
 describe('admin import against the database', { skip }, () => {
@@ -61,8 +65,8 @@ describe('admin import against the database', { skip }, () => {
     const result = await upload('admin', { term: TERM, course: COURSE, section: SECTION, meeting_time: MEETING });
     assert.equal(result.status, 200);
     assert.deepEqual(result.body, {
-      imported: { term: 1, course: 1, section: 2, meeting_time: 3 },
-      skipped: { term: 0, course: 0, section: 0, meeting_time: 0 },
+      imported: counts({ term: 1, course: 1, section: 2, meeting_time: 3 }),
+      skipped: counts(),
     });
     const { rows } = await sql(`
       SELECT c.course_num, c.title, s.section_num, s.instructor_id, s.class_mode, t.season, t.year,
@@ -84,8 +88,8 @@ describe('admin import against the database', { skip }, () => {
     const again = await upload('admin', files);
     assert.equal(again.status, 200);
     assert.deepEqual(again.body, {
-      imported: { term: 0, course: 0, section: 0, meeting_time: 0 },
-      skipped: { term: 1, course: 1, section: 2, meeting_time: 3 },
+      imported: counts(),
+      skipped: counts({ term: 1, course: 1, section: 2, meeting_time: 3 }),
     });
     assert.deepEqual([await count('term'), await count('course'), await count('section'), await count('meeting_time')], [2, 2, 2, 3]);
   });
@@ -104,7 +108,7 @@ describe('admin import against the database', { skip }, () => {
     const result = await upload('admin', { term: TERM, course: COURSE, section: sections, meeting_time: MEETING });
     assert.equal(result.status, 400);
     assert.equal(result.body.error.code, 'INVALID_IMPORT');
-    assert.equal(result.body.error.message, 'section.csv line 3: instructor newprof is not a professor yet. Add them on the admin page first.');
+    assert.equal(result.body.error.message, 'section.csv line 3: instructor newprof is not in professor.csv or the database.');
     assert.deepEqual([await count('term'), await count('course'), await count('section')], [1, 1, 0]);
   });
 
@@ -112,7 +116,7 @@ describe('admin import against the database', { skip }, () => {
     const cases: [Record<string, string>, string][] = [
       [{ term: TERM.replace('spring', 'summer') }, 'term.csv line 2: season must be fall or spring.'],
       [{ term: TERM.replace('2027-05-08', '2027-02-30') }, 'term.csv line 2: end_date must be a YYYY-MM-DD date.'],
-      [{ course: COURSE.replace(',1,4390', ',9,4390') }, 'course.csv line 2: department 9 does not exist. Add it on the admin page first.'],
+      [{ course: COURSE.replace(',1,4390', ',9,4390') }, 'course.csv line 2: dept_id 9 is not in department.csv or the database.'],
       [{ term: TERM, course: COURSE, section: SECTION.replace('online', 'hybrid') }, 'section.csv line 3: class_mode must be online or in-person.'],
       [{ term: TERM, section: SECTION.replace(',500,', ',77,') }, 'section.csv line 2: course_id 77 is not in course.csv or the database.'],
       [{ section: 'section_id,course_id,term_id,section_num,instructor_id,class_mode\n1,1,88,001,prof1,online\n' },
@@ -162,11 +166,122 @@ describe('admin import against the database', { skip }, () => {
     assert.equal(again.body.skipped.term, 1);
   });
 
-  test('refuses professors and departments, unknown or empty uploads, and non-admins (faculty and AC)', async () => {
-    const professor = await upload('admin', { professor: 'netid\n' });
-    assert.equal(professor.status, 400);
-    assert.equal(professor.body.error.message, 'professor.csv is not imported here. Add professors on the admin page.');
-    assert.equal((await upload('admin', { rooms: 'a\n' })).body.error.message, 'Unknown file rooms. Send term, course, section or meeting_time.');
+  const DEPT = 'dept_id,dept_name\n50,Mathematics\n51,computer science\n';
+  const PROF_HEADER = 'netid,first_name,last_name,email,dept_id,rank,eval_interval_years,baseline_last_eval_term,start_term,is_active\n';
+  const PROF = PROF_HEADER
+    + 'ABC123456,Ada,Lovelace,ada@example.edu,50,associate,1,,900,True\n'
+    + 'def654321,Alan,Turing,alan@example.edu,51,assistant,1,1,1,false\n';
+  const AC = 'netid,is_active\nabc123456,true\n';
+
+  test('imports departments, professors and AC members, linked to new and existing rows', async () => {
+    const result = await upload('admin', {
+      department: DEPT, term: TERM, professor: PROF, ac_member: AC,
+      section: 'section_id,course_id,term_id,section_num,instructor_id,class_mode\n1,1,900,003,Abc123456,online\n',
+    });
+    assert.equal(result.status, 200);
+    // "computer science" is already there (names match without regard to case), so it is skipped.
+    assert.deepEqual(result.body, {
+      imported: counts({ department: 1, term: 1, professor: 2, ac_member: 1, section: 1 }),
+      skipped: counts({ department: 1 }),
+    });
+    const { rows } = await sql(`
+      SELECT p.netid, d.dept_name, p.rank, p.eval_interval_years, p.baseline_last_eval_term, t.season, t.year, p.is_active
+      FROM professor p JOIN department d USING (dept_id) JOIN term t ON t.term_id = p.start_term
+      WHERE p.netid IN ('abc123456', 'def654321') ORDER BY p.netid`);
+    // NetIDs are lowercased, the rank trigger sets the interval, and dept 51 / term 1 mean the existing rows.
+    assert.deepEqual(rows, [
+      { netid: 'abc123456', dept_name: 'Mathematics', rank: 'associate', eval_interval_years: 2,
+        baseline_last_eval_term: null, season: 'spring', year: 2027, is_active: true },
+      { netid: 'def654321', dept_name: 'Computer Science', rank: 'assistant', eval_interval_years: 1,
+        baseline_last_eval_term: 1, season: 'fall', year: 2026, is_active: false },
+    ]);
+    assert.deepEqual((await sql(`SELECT netid, is_active FROM ac_member ORDER BY netid`)).rows,
+      [{ netid: 'abc123456', is_active: true }, { netid: 'ac1', is_active: true }]);
+    assert.equal((await sql(`SELECT instructor_id FROM section`)).rows[0].instructor_id, 'abc123456');
+  });
+
+  test('skips professors and AC members already there, matching netids without regard to case', async () => {
+    await upload('admin', { department: DEPT, term: TERM, professor: PROF, ac_member: AC });
+    const again = await upload('admin', {
+      professor: PROF_HEADER + 'Abc123456,Changed,Name,other@example.edu,1,full,2,,,false\n',
+      ac_member: 'netid,is_active\nABC123456,false\n',
+    });
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.body, { imported: counts(), skipped: counts({ professor: 1, ac_member: 1 }) });
+    // Nothing changed: skipping never updates a row.
+    assert.deepEqual((await sql(`SELECT first_name, rank, is_active FROM professor WHERE netid = 'abc123456'`)).rows,
+      [{ first_name: 'Ada', rank: 'associate', is_active: true }]);
+    assert.deepEqual((await sql(`SELECT netid, is_active FROM ac_member ORDER BY netid`)).rows,
+      [{ netid: 'abc123456', is_active: true }, { netid: 'ac1', is_active: true }]);
+  });
+
+  test('uploading the same files again still adds nothing after a professor on the AC is deactivated', async () => {
+    const files = { department: DEPT, term: TERM, professor: PROF, ac_member: AC };
+    assert.equal((await upload('admin', files)).status, 200);
+    // What PATCH /api/admin/professors does when deactivating a professor who is on the AC.
+    await sql(`UPDATE professor SET is_active = false WHERE netid = 'abc123456'`);
+    await sql(`UPDATE ac_member SET is_active = false WHERE netid = 'abc123456'`);
+    const again = await upload('admin', files);
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.body, {
+      imported: counts(), skipped: counts({ department: 2, term: 1, professor: 2, ac_member: 1 }),
+    });
+    assert.deepEqual((await sql(`SELECT is_active FROM ac_member WHERE netid = 'abc123456'`)).rows, [{ is_active: false }]);
+  });
+
+  test('eval_interval_years may be blank or disagree with the rank; the rank decides', async () => {
+    const result = await upload('admin', {
+      department: DEPT, term: TERM,
+      professor: PROF_HEADER + 'ghi111111,G,H,g@example.edu,50,assistant,,,,true\njkl222222,J,K,j@example.edu,50,full,7,,,true\n',
+    });
+    assert.equal(result.status, 200);
+    assert.deepEqual((await sql(`SELECT netid, eval_interval_years FROM professor WHERE netid IN ('ghi111111', 'jkl222222') ORDER BY netid`)).rows,
+      [{ netid: 'ghi111111', eval_interval_years: 1 }, { netid: 'jkl222222', eval_interval_years: 2 }]);
+  });
+
+  test('an inactive professor cannot be an active AC member', async () => {
+    const result = await upload('admin', {
+      department: DEPT, term: TERM, professor: PROF, ac_member: 'netid,is_active\ndef654321,true\n',
+    });
+    assert.equal(result.status, 400);
+    assert.equal(result.body.error.message,
+      'ac_member.csv line 2: professor def654321 is inactive, so they cannot be an active AC member.');
+    assert.equal(await count('professor'), 3);
+    // Listed as inactive, the same professor can be an AC member row.
+    const ok = await upload('admin', { department: DEPT, term: TERM, professor: PROF, ac_member: 'netid,is_active\ndef654321,f\n' });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.imported.ac_member, 1);
+  });
+
+  test('a bad department, professor or AC member row saves nothing and names the line', async () => {
+    const prof = (line: string) => ({ department: DEPT, term: TERM, professor: PROF_HEADER + line });
+    const cases: [Record<string, string>, string][] = [
+      [{ department: 'dept_id,dept_name\n1,Math\n2,MATH\n' }, 'department.csv line 3: department MATH is listed twice.'],
+      [{ department: 'dept_id,dept_name\n1,\n' }, 'department.csv line 2: dept_name is required.'],
+      [prof('ab1234567,A,B,a@example.edu,50,full,2,,,true\n'),
+        'professor.csv line 2: netid must be three letters followed by six digits, like abc123456.'],
+      [prof('abc123456,A,B,not-an-email,50,full,2,,,true\n'), 'professor.csv line 2: email must be a valid email address.'],
+      [prof('abc123456,A,B,a@example.edu,50,lecturer,2,,,true\n'), 'professor.csv line 2: rank must be assistant, associate or full.'],
+      [prof('abc123456,A,B,a@example.edu,50,full,2,,,yes\n'), 'professor.csv line 2: is_active must be true or false.'],
+      [prof('abc123456,A,B,a@example.edu,99,full,2,,,true\n'), 'professor.csv line 2: dept_id 99 is not in department.csv or the database.'],
+      [prof('abc123456,A,B,a@example.edu,50,full,2,,77,true\n'), 'professor.csv line 2: start_term 77 is not in term.csv or the database.'],
+      [prof('abc123456,A,B,a@example.edu,50,full,2,,,true\nABC123456,C,D,c@example.edu,50,full,2,,,true\n'),
+        'professor.csv line 3: netid abc123456 is listed twice.'],
+      [prof('abc123456,A,B,PROF1@example.edu,50,full,2,,,true\n'),
+        'professor.csv line 2: email PROF1@example.edu already belongs to professor prof1.'],
+      [{ ac_member: 'netid,is_active\nzzz000000,true\n' }, 'ac_member.csv line 2: netid zzz000000 is not in professor.csv or the database.'],
+    ];
+    for (const [files, message] of cases) {
+      const result = await upload('admin', files);
+      assert.equal(result.status, 400, message);
+      assert.equal(result.body.error.message, message);
+    }
+    assert.deepEqual([await count('department'), await count('term'), await count('professor'), await count('ac_member')], [1, 1, 3, 1]);
+  });
+
+  test('refuses unknown or empty uploads, and non-admins (faculty and AC)', async () => {
+    assert.equal((await upload('admin', { rooms: 'a\n' })).body.error.message,
+      'Unknown file rooms. Send department, term, professor, ac_member, course, section, meeting_time.');
     assert.equal((await upload('admin', {})).body.error.message, 'Send at least one CSV file.');
     const faculty = await upload('prof1', { term: TERM });
     assert.equal(faculty.status, 403);
