@@ -82,7 +82,7 @@ describe('Dashboard pages in the sidebar', () => {
     openApp('/committee/dashboard');
     expect(await screen.findByText('Dashboard page')).toBeVisible();
     const links = within(committeeNav()).getAllByRole('link');
-    expect(links.map((l) => l.textContent)).toEqual(['Dashboard', 'Due or overdue', 'Unmatched', 'Outstanding', 'Notifications', 'Cycle', 'Faculty', 'Sign-ups', 'Survey responses']);
+    expect(links.map((l) => l.textContent)).toEqual(['Dashboard', 'Due or overdue', 'Unmatched', 'Outstanding', 'Notifications', 'Cycle', 'Faculty', 'Sign-ups', 'Template', 'Observations', 'Survey responses']);
     for (const p of PAGES) expect(within(committeeNav()).getByRole('link', { name: p.link })).toHaveAttribute('href', p.path);
     for (const p of PAGES.slice(1)) expect(within(committeeNav()).getByRole('link', { name: p.link })).toHaveClass('pl-[45px]');
     expect(within(committeeNav()).getByRole('link', { name: 'Dashboard' })).not.toHaveClass('pl-[45px]');
@@ -92,7 +92,7 @@ describe('Dashboard pages in the sidebar', () => {
     expect(dashboardItem.parentElement).toBe(top);
     const nested = within(dashboardItem).getByRole('list');
     expect(within(nested).getAllByRole('link').map((l) => l.textContent)).toEqual(PAGES.slice(1).map((p) => p.link));
-    expect([...top.children].map((li) => li.querySelector('a')?.textContent)).toEqual(['Dashboard', 'Cycle', 'Faculty', 'Sign-ups', 'Survey responses']);
+    expect([...top.children].map((li) => li.querySelector('a')?.textContent)).toEqual(['Dashboard', 'Cycle', 'Faculty', 'Sign-ups', 'Template', 'Observations', 'Survey responses']);
   });
 
   it('does not show the dashboard pages in Faculty mode', async () => {
