@@ -3,7 +3,7 @@ import { Link, NavLink, useMatch, useNavigate } from 'react-router';
 import { useCurrentCycle, useMe } from '../api/hooks/shared';
 import { useIncomingRequests } from '../api/hooks/faculty';
 import { useAuth } from '../auth/AuthProvider';
-import { CalendarIcon, ClipboardIcon, DocIcon, EyeIcon, FolderIcon, GridIcon, HelpIcon, ListIcon, LogoutIcon, SendIcon, UsersIcon } from './icons';
+import { CalendarIcon, ClipboardIcon, DocIcon, EyeIcon, FolderIcon, GridIcon, HelpIcon, ListIcon, LockIcon, LogoutIcon, SendIcon, UsersIcon } from './icons';
 import { RoleToggle, type Mode } from './RoleToggle';
 import { Logo } from './ui';
 import { formatShort } from '../lib/format';
@@ -137,6 +137,15 @@ export function Sidebar({ mode, activeNav }: { mode: Mode; activeNav?: string })
       {mode === 'faculty' ? <FacultyNavigation activeNav={activeNav} /> : <CommitteeNavigation activeNav={activeNav} />}
 
       <div className="mx-4 mt-auto border-t border-gray-200 pt-[15px] pb-[17px]">
+        {me?.isAdmin && (
+          <NavLink
+            to="/admin"
+            className="mb-[19px] flex items-center gap-[11px] pl-[13px] text-gray-700 hover:text-gray-900 focus-visible:outline-2 focus-visible:outline-brand"
+          >
+            <span className="flex w-4 justify-center text-gray-600"><LockIcon /></span>
+            Admin
+          </NavLink>
+        )}
         <NavLink
           to="/guide"
           className={({ isActive }) => `mb-[19px] flex items-center gap-[11px] pl-[13px] hover:text-gray-900 focus-visible:outline-2 focus-visible:outline-brand ${isActive ? 'font-bold text-gray-900' : 'text-gray-700'}`}

@@ -73,7 +73,7 @@ export interface ProposedDate {
 
 // ---------- Shared ----------
 
-/** GET /api/me */
+/** GET /api/me for a professor. A professor who is also an admin has isAdmin true. */
 export interface Me {
   netid: string;
   firstName: string;
@@ -84,8 +84,24 @@ export interface Me {
   department: Department;
   /** "AC" means a professor who is also an active Assessment Committee member. */
   role: Role;
-  isAdmin?:boolean;
+  isAdmin?: boolean;
 }
+
+/** GET /api/me for an admin who is not a professor: no netid, rank or department. */
+export interface AdminOnlyMe {
+  netid: null;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  email: string;
+  rank: null;
+  department: null;
+  role: 'admin';
+  isAdmin: true;
+}
+
+/** Everything GET /api/me can return. Check role === 'admin' before reading netid, rank or department. */
+export type Account = Me | AdminOnlyMe;
 
 /** GET /api/me/notifications */
 export interface Notification {

@@ -1,6 +1,6 @@
 import { createContext, useContext, useLayoutEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation, useMatches } from 'react-router';
-import { useCurrentCycle, useMe } from '../api/hooks/shared';
+import { useAccount, useCurrentCycle, useMe } from '../api/hooks/shared';
 import { useAuth } from '../auth/AuthProvider';
 import { RANK_LABEL, initials } from '../lib/format';
 import { CalendarIcon } from './icons';
@@ -64,17 +64,21 @@ function TopBar({ title, mode }: { title: string; mode: Mode }) {
   );
 }
 
-/** Signed-in layout. Pages under /committee need role "AC"; everyone else is sent to their Faculty pages. */
+/**
+ * Signed-in layout for professors. Pages under /committee need role "AC"; other professors are sent
+ * to their Faculty pages. An admin who is not a professor has no pages here and is sent to /admin.
+ */
 export function AppShell() {
   const { session, ready } = useAuth();
   const { pathname } = useLocation();
   const matches = useMatches();
-  const me = useMe({ enabled: Boolean(session) });
+  const me = useAccount({ enabled: Boolean(session) });
   const [override, setOverride] = useState<string | null>(null);
   const [navOverride, setNavOverride] = useState<string | null>(null);
 
   if (!ready) return <p role="status" className="p-8 text-sm text-gray-500">Checking your sign-in…</p>;
   if (!session) return <Navigate to="/login" replace state={{ from: pathname }} />;
+  if (me.data?.role === 'admin') return <Navigate to="/admin" replace />;
   const mode: Mode = pathname.startsWith('/committee') ? 'committee' : 'faculty';
   if (mode === 'committee' && me.data && me.data.role !== 'AC') return <Navigate to={LANDING.faculty} replace />;
   if (mode === 'committee' && !me.data) return null;

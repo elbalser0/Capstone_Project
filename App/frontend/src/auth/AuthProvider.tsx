@@ -4,7 +4,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSign
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ApiError, api, setTokenProvider } from '../api/client';
 import { sharedKeys } from '../api/hooks/shared';
-import type { Me } from '../api/types';
+import type { Account } from '../api/types';
 import { getFirebaseAuth, setTabPersistence } from './firebase';
 
 // One login for everyone. The role is not chosen here: after sign-in the app asks
@@ -111,7 +111,7 @@ export function AuthProvider({ children, mode = AUTH_MODE }: { children: ReactNo
   /** Asks the backend who the current Firebase user is. Resolves to false if superseded meanwhile. */
   const loadProfile = useCallback(
     async (gen: number) => {
-      const me = await api<Me>('/me');
+      const me = await api<Account>('/me');
       if (gen !== generation.current) return false;
       queryClient.setQueryData(sharedKeys.me, me);
       setSession({ email: me.email });
@@ -188,7 +188,7 @@ export function AuthProvider({ children, mode = AUTH_MODE }: { children: ReactNo
       const next = await demoAdapter.signIn(email);
       setTokenProvider(async () => next.token ?? null);
       try {
-        const me = await api<Me>('/me');
+        const me = await api<Account>('/me');
         queryClient.setQueryData(sharedKeys.me, me);
         writeSession(next);
         setSession(next);

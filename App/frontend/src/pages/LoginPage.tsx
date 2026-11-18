@@ -9,6 +9,8 @@ import { Button, Logo, labelClass } from '../components/ui';
 const DEMO_ACCOUNTS = [
   { label: 'Faculty (observee/observer)', emails: ['maya.lin@demo.edu', 'elena.ruiz@demo.edu'] },
   { label: 'Assessment Committee + Faculty', emails: ['linda.chen@demo.edu'] },
+  { label: 'Admin + Faculty', emails: ['admin@demo.edu'] },
+  { label: 'Admin only (not a professor)', emails: ['admin.only@demo.edu'] },
 ];
 
 export function LoginPage() {
