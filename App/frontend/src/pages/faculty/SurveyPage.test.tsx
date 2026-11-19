@@ -69,7 +69,6 @@ it('recovers from a cycle-load error without calling it an empty result', async 
 it.each([
   ['SURVEY_CLOSED', 409, 'closed'],
   ['NOT_A_PARTICIPANT', 403, 'cannot submit as observer'],
-  ['ALREADY_SUBMITTED', 409, 'Already submitted for observer'],
 ])('preserves draft and explains %s backend failure', async (code, status, text) => {
   current(); server.use(http.post('*/api/cycles/4/survey-responses', () => HttpResponse.json({ error: { code, message: 'Server detail' } }, { status })));
   route(); const user = await fillSurvey();
@@ -77,6 +76,30 @@ it.each([
   expect(await screen.findByRole('alert')).toHaveTextContent(text);
   expect(screen.getByRole('textbox', { name: /Difficulties/ })).toHaveValue('Scheduling was hard');
   expect(screen.getByRole('radio', { name: 'observer' })).toBeChecked();
+});
+it('treats ALREADY_SUBMITTED as submitted for that role', async () => {
+  current(); server.use(http.post('*/api/cycles/4/survey-responses', () => HttpResponse.json({ error: { code: 'ALREADY_SUBMITTED', message: 'Server detail' } }, { status: 409 })));
+  route(); const user = await fillSurvey();
+  await user.click(screen.getByRole('button', { name: 'Submit survey' }));
+  expect(await screen.findByText('You already submitted the survey as observer.')).toBeVisible();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByRole('radio', { name: /observer \(submitted\)/ })).toBeDisabled();
+  expect(screen.getByRole('radio', { name: 'observee' })).toBeEnabled();
+});
+it('clears the already-submitted message when the next submit fails differently', async () => {
+  current();
+  let calls = 0;
+  server.use(http.post('*/api/cycles/4/survey-responses', () => (++calls === 1
+    ? HttpResponse.json({ error: { code: 'ALREADY_SUBMITTED', message: 'Server detail' } }, { status: 409 })
+    : HttpResponse.json({ error: { code: 'FAILED', message: 'Server down' } }, { status: 500 }))));
+  route(); const user = await fillSurvey();
+  await user.click(screen.getByRole('button', { name: 'Submit survey' }));
+  expect(await screen.findByText('You already submitted the survey as observer.')).toBeVisible();
+  await user.click(screen.getByRole('radio', { name: 'observee' }));
+  await user.click(screen.getByRole('radio', { name: 'no' }));
+  await user.click(screen.getByRole('button', { name: 'Submit survey' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Server down');
+  expect(screen.queryByText('You already submitted the survey as observer.')).not.toBeInTheDocument();
 });
 it('rejects oversized files before sending and permits retry with a valid attachment', async () => {
   current(); const received = vi.fn();
