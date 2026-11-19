@@ -2,12 +2,13 @@ import { useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useConfirmRequest, useDeclineRequest, useIncomingRequests, useMyAssignments } from '../../api/hooks/faculty';
 import { useCurrentCycle } from '../../api/hooks/shared';
-import type { ObservationRequest } from '../../api/types';
+import type { ObservationRequest, ObservationSummary } from '../../api/types';
 import { usePageTitle } from '../../components/AppShell';
 import { ClockIcon } from '../../components/icons';
 import { Button, Card, Cell, EmptyRow, ErrorNote, InfoLine, Note, Radio, Row, StatCard, Table, Tag, buttonClass, linkClass } from '../../components/ui';
-import { hoursUntil } from '../../lib/dates';
-import { classStart, formatSlot, isLocked, RANK_LABEL } from '../../lib/format';
+import { hoursUntil, todayIso } from '../../lib/dates';
+import { classStart, formatShort, formatSlot, isLocked, RANK_LABEL } from '../../lib/format';
+import { recordStatus } from './observationDisplay';
 
 const LIMIT = 3;
 
@@ -18,6 +19,33 @@ function useThisSemester() {
   const allAssignments = assignments.data ?? [];
   const accepted = termId ? allAssignments.filter((assignment) => assignment.term.termId === termId) : [];
   return { cycle, assignments, accepted, allAssignments };
+}
+
+/** What the observer sees for one of their observations: the real record state, not a fixed label. */
+function confirmationStatus(assignment: ObservationSummary) {
+  if (assignment.status === 'scheduled' && !assignment.observerSignedDate && !assignment.observeeSignedDate) return { tone: 'neutral' as const, text: 'Scheduled' };
+  return recordStatus(assignment, assignment.observer.netid);
+}
+
+/** The form opens on the observation date: the backend refuses an earlier submit with NOT_YET_OBSERVED. */
+function FormAction({ assignment }: { assignment: ObservationSummary }) {
+  const view = isLocked(assignment) || assignment.status === 'not_completed' || Boolean(assignment.observerSignedDate);
+  if (view) return <Link to={`/faculty/observe/${assignment.observationId}`} className={buttonClass('secondary', 'w-28', 'sm')}>View</Link>;
+  if (assignment.scheduledDate > todayIso()) return <span className="text-xs text-gray-500">Form opens {formatShort(assignment.scheduledDate)}</span>;
+  return <Link to={`/faculty/observe/${assignment.observationId}/form`} className={buttonClass('secondary', 'w-28', 'sm')}>Open form</Link>;
+}
+
+function ConfirmationRow({ assignment }: { assignment: ObservationSummary }) {
+  const status = confirmationStatus(assignment);
+  return (
+    <Row>
+      <Cell className="font-bold">{assignment.observee.displayName}</Cell>
+      <Cell>{assignment.section.label}</Cell>
+      <Cell>{formatSlot(assignment.scheduledDate, classStart(assignment.section, assignment.scheduledDate))}</Cell>
+      <Cell><Tag tone={status.tone}>{status.text}</Tag></Cell>
+      <Cell className="pr-0"><FormAction assignment={assignment} /></Cell>
+    </Row>
+  );
 }
 
 function RequestCard({ request, limitReached }: { request: ObservationRequest; limitReached: boolean }) {
@@ -139,44 +167,47 @@ export function ConfirmationsPage() {
   }
 
   const cancelled = incoming.data.filter((request) => request.status === 'cancelled');
+  const earlier = allAssignments.filter((a) => !accepted.includes(a));
+  const waitingForForm = accepted.filter((a) => a.status === 'scheduled' && !a.observerSignedDate).length;
 
   return (
     <div className="flex flex-col pt-8">
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Accepted this semester" value={`${accepted.length} of ${LIMIT}`} />
-        <StatCard label="You are the observer" value={accepted.length} />
+        <StatCard label="Waiting for your form" value={waitingForForm} />
         <StatCard label="Cancelled" value={cancelled.length} />
       </div>
 
       <h2 className="mb-[13px] mt-6 text-base font-bold text-gray-900">My confirmations</h2>
-      <Table label="My confirmations" columns="minmax(120px, 1.1fr) minmax(100px, .8fr) minmax(145px, 1.2fr) minmax(120px, 1fr) 112px" head={['Observee', 'Course', 'Date and time', 'Status', '']}>
-        {allAssignments.map((assignment) => {
-          const closed = isLocked(assignment) || assignment.status === 'not_completed';
-          return (
-            <Row key={assignment.observationId}>
-              <Cell className="font-bold">{assignment.observee.displayName}</Cell>
-              <Cell>{assignment.section.label}</Cell>
-              <Cell>{formatSlot(assignment.scheduledDate, classStart(assignment.section, assignment.scheduledDate))}</Cell>
-              <Cell><Tag tone="signed">You are the observer</Tag></Cell>
-              <Cell className="pr-0">
-                <Link to={`/faculty/observe/${assignment.observationId}${closed ? '' : '/form'}`} className={buttonClass('secondary', 'w-28', 'sm')}>
-                  {closed ? 'View' : 'Open form'}
-                </Link>
-              </Cell>
-            </Row>
-          );
-        })}
-        {cancelled.map((request) => (
-          <Row key={request.signupId}>
-            <Cell className="font-bold">{request.observee.displayName}</Cell>
-            <Cell>{request.section.label}</Cell>
-            <Cell />
-            <Cell><Tag tone="neutral">Cancelled</Tag></Cell>
-            <Cell />
-          </Row>
-        ))}
-        {!assignments.isPending && allAssignments.length + cancelled.length === 0 && <EmptyRow>No confirmations yet this semester.</EmptyRow>}
-      </Table>
+      <div className="overflow-x-auto">
+        <div className="min-w-[640px]">
+          <Table label="My confirmations" columns="minmax(120px, 1.1fr) minmax(100px, .8fr) minmax(145px, 1.2fr) minmax(150px, 1fr) 130px" head={['Observee', 'Course', 'Date and time', 'Status', '']}>
+            {accepted.map((assignment) => <ConfirmationRow key={assignment.observationId} assignment={assignment} />)}
+            {cancelled.map((request) => (
+              <Row key={request.signupId}>
+                <Cell className="font-bold">{request.observee.displayName}</Cell>
+                <Cell>{request.section.label}</Cell>
+                <Cell />
+                <Cell><Tag tone="neutral">Cancelled</Tag></Cell>
+                <Cell />
+              </Row>
+            ))}
+            {!assignments.isPending && allAssignments.length + cancelled.length === 0 && <EmptyRow>No confirmations yet this semester.</EmptyRow>}
+          </Table>
+        </div>
+      </div>
+      {earlier.length > 0 && (
+        <>
+          <h2 className="mb-[13px] mt-8 text-base font-bold text-gray-900">Earlier semesters</h2>
+          <div className="overflow-x-auto">
+            <div className="min-w-[640px]">
+              <Table label="Earlier confirmations" columns="minmax(120px, 1.1fr) minmax(100px, .8fr) minmax(145px, 1.2fr) minmax(150px, 1fr) 130px" head={['Observee', 'Course', 'Date and time', 'Status', '']}>
+                {earlier.map((assignment) => <ConfirmationRow key={assignment.observationId} assignment={assignment} />)}
+              </Table>
+            </div>
+          </div>
+        </>
+      )}
       <InfoLine className="mt-[18px]">If you accept first, you are paired right away. A request shows as cancelled when another colleague accepted first, or when you reached 3 observations.</InfoLine>
     </div>
   );

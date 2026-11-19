@@ -4,11 +4,12 @@ import type { ReactNode } from 'react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { createMemoryRouter, matchRoutes, Navigate, RouterProvider, type RouteObject } from 'react-router';
-import { expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { router } from '../../App';
 import type { Cycle, ObservationRequest, ObservationSummary } from '../../api/types';
 import { AuthProvider } from '../../auth/AuthProvider';
 import { AppShell } from '../../components/AppShell';
+import { setClock } from '../../lib/clock';
 import { cycle, course, faculty, observation, observer } from '../../test/fixtures';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
@@ -177,6 +178,60 @@ it('says Cancelled without claiming someone else accepted first, and explains bo
   expect(await screen.findByText(/A request shows as cancelled when another colleague accepted first, or when you reached 3 observations\./)).toBeVisible();
   expect(screen.queryByText(/someone else accepted|Cancelled: another colleague/i)).not.toBeInTheDocument();
   expect(screen.getAllByText('Cancelled')).toHaveLength(2);
+});
+
+describe('My confirmations status and form button', () => {
+  afterEach(() => setClock(() => Date.now()));
+  const openConfirmations = () => renderRoutes([{ path: '/faculty/observe/confirmations', element: <ConfirmationsPage /> }], '/faculty/observe/confirmations');
+
+  it('lists only this semester, puts other terms under Earlier semesters, and counts only this term', async () => {
+    setClock(() => Date.parse('2026-09-21T12:00:00Z'));
+    const older = { ...observation, observationId: '41', term: { ...cycle.term, termId: 'old', label: 'Spring 2026' }, observee: { ...faculty, displayName: 'Dr. Old Term' }, status: 'completed' as const, observerSignedDate: '2026-03-20', observeeSignedDate: '2026-03-21' };
+    setup({ incoming: [], assignments: [{ ...observation, observationId: '30', term: cycle.term }, older] });
+    openConfirmations();
+    const current = within(await screen.findByRole('table', { name: 'My confirmations' }));
+    expect(current.getAllByRole('row')).toHaveLength(2);
+    expect(current.queryByText('Dr. Old Term')).not.toBeInTheDocument();
+    expect(screen.getByText('1 of 3')).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Earlier semesters' })).toBeVisible();
+    expect(within(screen.getByRole('table', { name: 'Earlier confirmations' })).getByText('Dr. Old Term')).toBeVisible();
+  });
+
+  it('shows each record\'s real status and two different cards', async () => {
+    setClock(() => Date.parse('2026-09-30T12:00:00Z'));
+    setup({ incoming: [], assignments: [
+      { ...observation, observationId: '30', term: cycle.term },
+      { ...observation, observationId: '31', term: cycle.term, observerSignedDate: '2026-09-22' },
+      { ...observation, observationId: '32', term: cycle.term, status: 'completed' as const, observerSignedDate: '2026-09-22', observeeSignedDate: '2026-09-23' },
+      { ...observation, observationId: '33', term: cycle.term, status: 'not_completed' as const },
+    ] });
+    openConfirmations();
+    const table = within(await screen.findByRole('table', { name: 'My confirmations' }));
+    expect(table.getByText('Scheduled')).toBeVisible();
+    expect(table.getByText("Waiting for the observee's signature")).toBeVisible();
+    expect(table.getByText('Signed and locked')).toBeVisible();
+    expect(table.getByText('Observation did not happen')).toBeVisible();
+    expect(table.queryByText('You are the observer')).not.toBeInTheDocument();
+    expect(screen.getByText('Waiting for your form').nextElementSibling).toHaveTextContent('1');
+    expect(table.getAllByRole('link', { name: 'View' })).toHaveLength(3);
+    expect(table.getAllByRole('link', { name: 'Open form' })).toHaveLength(1);
+  });
+
+  it('offers Open form only from the observation date on', async () => {
+    setClock(() => Date.parse('2026-09-20T12:00:00Z'));
+    setup({ incoming: [], assignments: [{ ...observation, observationId: '30', term: cycle.term }] });
+    openConfirmations();
+    expect(await screen.findByText('Form opens Sep 21')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Open form' })).not.toBeInTheDocument();
+  });
+
+  it('offers Open form on the observation date itself', async () => {
+    setClock(() => Date.parse('2026-09-21T12:00:00Z'));
+    setup({ incoming: [], assignments: [{ ...observation, observationId: '30', term: cycle.term }] });
+    openConfirmations();
+    expect(await screen.findByRole('link', { name: 'Open form' })).toHaveAttribute('href', '/faculty/observe/30/form');
+    expect(screen.queryByText(/Form opens/)).not.toBeInTheDocument();
+  });
 });
 
 it('shows the confirmations empty state', async () => {
