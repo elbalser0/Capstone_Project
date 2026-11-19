@@ -299,6 +299,27 @@ test('shows the matched observer with the other requests cancelled', async () =>
   expect(screen.getByRole('link', { name: 'View my evaluation' })).toHaveAttribute('href', '/faculty/evaluation');
 });
 
+test('does not say cancelled colleagues are told while requests are pending', async () => {
+  current.candidates = [candidate(observer, { status: 'pending', sentDate: '2026-09-16T15:00:00Z' })];
+  current.outgoing = [request(observer, 'pending')];
+  renderRequests();
+  expect(await screen.findByText('The system then cancels your other requests. You do not need to choose anyone.')).toBeVisible();
+  expect(screen.queryByText(/lets those colleagues know/)).not.toBeInTheDocument();
+});
+
+test('does not promise notices or forms in the matched view', async () => {
+  current.signup = matchedSignup;
+  current.outgoing = [
+    request(second, 'cancelled'),
+    request(observer, 'accepted', { respondedDate: '2026-09-16T20:00:00Z' }),
+  ];
+  renderRequests();
+  expect(await screen.findByText(/Dr\. Ruiz can open the observation form/)).toBeVisible();
+  expect(screen.getByText(/from their confirmations\./)).toBeVisible();
+  expect(screen.queryByText(/gets the observation form/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/lets those colleagues know/)).not.toBeInTheDocument();
+});
+
 test('an accepted request without the observation yet stays on "sent", not "nobody accepted"', async () => {
   current.outgoing = [request(observer, 'accepted', { respondedDate: '2026-09-16T20:00:00Z' }), request(second, 'cancelled')];
   current.candidates = [candidate(observer, { status: 'accepted', sentDate: '2026-09-16T15:00:00Z' }), candidate(second, { status: 'cancelled', sentDate: '2026-09-16T15:00:00Z' })];

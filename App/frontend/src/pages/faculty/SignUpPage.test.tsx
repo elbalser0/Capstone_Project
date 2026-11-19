@@ -85,6 +85,16 @@ test('shows progress, sends exact course/date input once, and returns to evaluat
   expect(await screen.findByText('Evaluation overview')).toBeVisible();
 });
 
+test('describes how observers are chosen without promising a time match', async () => {
+  server.use(http.get('*/api/me/courses', () => HttpResponse.json([course])));
+  const user = userEvent.setup();
+  renderSignup();
+  await selectMonday(user);
+  expect(screen.getByText('You get a list of up to 5 colleagues from your department who teach at the same course level.')).toBeVisible();
+  expect(screen.getByText('Pick one or more meetings of this class. Observers choose one of these times when they accept.')).toBeVisible();
+  expect(screen.queryByText(/free at the times|matched to these times/i)).not.toBeInTheDocument();
+});
+
 test('keeps course and dates after a failed submission and allows retry', async () => {
   let attempts = 0;
   server.use(

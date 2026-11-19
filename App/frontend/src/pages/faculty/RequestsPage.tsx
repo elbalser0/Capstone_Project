@@ -244,7 +244,7 @@ function RequestsSent({ signup, requests }: { signup: Signup; requests: Observat
       </RequestTable>
       <InfoLine icon={<ClockIcon />} className="mt-[18px]">{EXPIRY_NOTE} {POLL_NOTE}</InfoLine>
       <Note className="mt-6" title="The first colleague to accept becomes your observer automatically.">
-        The system then cancels your other requests and lets those colleagues know. You do not need to choose anyone.
+        The system then cancels your other requests. You do not need to choose anyone.
       </Note>
     </div>
   );
@@ -303,7 +303,7 @@ function Matched({ signup, requests, observation }: { signup: Signup; requests: 
       <Steps
         tone="brand"
         items={[
-          `Dr. ${observer.lastName} gets the observation form${date ? ` for ${formatShort(date)}` : ''}.`,
+          `Dr. ${observer.lastName} can open the observation form${date ? ` for ${formatShort(date)}` : ''} from their confirmations.`,
           'The observation shows under My evaluation.',
           'After the class, you both sign the record.',
         ]}

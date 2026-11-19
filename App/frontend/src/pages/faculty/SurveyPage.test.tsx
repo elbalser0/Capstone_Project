@@ -20,7 +20,14 @@ async function fillSurvey() {
 
 it('gates submission on the current feedback phase', async () => {
   current({ ...cycle, phase: 'closed' }); route();
-  expect(await screen.findByText(/survey is not open/i)).toBeVisible();
+  expect(await screen.findByText('The survey closed on Nov 10, 2026.')).toBeVisible();
+  expect(screen.queryByText(/survey is not open/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Submit survey' })).not.toBeInTheDocument();
+});
+it('says the survey is not open yet before the window starts', async () => {
+  current({ ...cycle, phase: 'observation' }); route();
+  expect(await screen.findByText(/The survey is not open\. It is available from/)).toBeVisible();
+  expect(screen.queryByText(/survey closed on/i)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Submit survey' })).not.toBeInTheDocument();
 });
 it('submits explicitly selected role and negative answer once as multipart, disabling while pending', async () => {
