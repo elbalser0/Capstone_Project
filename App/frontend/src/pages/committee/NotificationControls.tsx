@@ -5,7 +5,7 @@ import { ApiError } from '../../api/client';
 import { useNotifyListsReady, useNotifySurvey, useSendDueReminders } from '../../api/hooks/committee';
 import { sharedKeys, useCurrentCycle, useMe } from '../../api/hooks/shared';
 import { Button, Card, ErrorNote, Modal } from '../../components/ui';
-import { formatClock } from '../../lib/format';
+import { formatClock, formatDate } from '../../lib/format';
 import { errorText } from './DashboardSections';
 
 // The three Assessment Committee sends: POST /api/cycles/{cycleId}/notifications/{due-reminders,lists-ready,survey}.
@@ -94,7 +94,8 @@ function failure(error: unknown): { known: boolean; text: string } {
 }
 
 /** One send: its button, the confirmation dialog and the result line. */
-function SendAction({ id, cycleId, disabled }: { id: ActionId; cycleId: string; disabled: boolean }) {
+/** `offNote` says why a send is off while the cycle is known (the survey send outside the survey window). */
+function SendAction({ id, cycleId, disabled, offNote }: { id: ActionId; cycleId: string; disabled: boolean; offNote?: string }) {
   const copy = ACTIONS[id];
   const qc = useQueryClient();
   const reminders = useSendDueReminders(cycleId);
@@ -128,6 +129,7 @@ function SendAction({ id, cycleId, disabled }: { id: ActionId; cycleId: string; 
       <div className="min-w-0">
         <h3 id={titleId} className="text-sm font-bold text-gray-900">{copy.title}</h3>
         <p className="mt-1 text-[13px] text-gray-500">{copy.describe}</p>
+        {offNote && <p className="mt-1 text-[13px] text-gray-700">{offNote}</p>}
         {/* Polite status for progress and results; the error box below announces itself. */}
         <p role="status" className="mt-1.5 text-[13px] wrap-anywhere text-gray-900 empty:hidden">
           {pending ? 'Sending…' : mutation.isSuccess ? `${copy.sent(mutation.data.sent)} (${formatClock(mutation.submittedAt)})` : ''}
@@ -186,12 +188,22 @@ export function NotificationControls() {
       : !cycleId
         ? `Couldn't read the current cycle, so sending is off: ${errorText(cycle.error)}`
         : null;
+  // The survey notification says the survey is open, so it can be sent only while it is.
+  const c = cycle.data;
+  const surveyOff = !c || c.phase === 'feedback'
+    ? undefined
+    : c.phase === 'closed'
+      ? `Off: the survey closed on ${formatDate(c.feedbackDeadline)}.`
+      : `Off until the survey opens on ${formatDate(c.surveyOpensDate)}.`;
   return (
     <section aria-labelledby="send-notifications">
       <h2 id="send-notifications" className="mt-[30px] mb-3 w-fit text-base font-bold text-gray-900">Send notifications</h2>
       {note && <p className="mb-3 text-sm text-gray-500">{note}</p>}
       <Card className="divide-y divide-gray-200">
-        {ORDER.map((id) => <SendAction key={`${cycleId ?? 'none'}-${id}`} id={id} cycleId={cycleId ?? ''} disabled={!cycleId} />)}
+        {ORDER.map((id) => {
+          const off = id === 'survey' ? surveyOff : undefined;
+          return <SendAction key={`${cycleId ?? 'none'}-${id}`} id={id} cycleId={cycleId ?? ''} disabled={!cycleId || Boolean(off)} offNote={off} />;
+        })}
       </Card>
     </section>
   );

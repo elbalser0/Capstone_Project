@@ -58,9 +58,11 @@ const TAG_LOOK = {
 export type TagTone = keyof typeof TAG_LOOK;
 
 /** Status label. Never clickable, so it stays a flat label rather than a button shape. */
-export function Tag({ tone, icon, children }: { tone: TagTone; icon?: ReactNode; children: ReactNode }) {
+/** `wrap` lets a long tag in a narrow table column break onto a second line instead of running past the cell. */
+export function Tag({ tone, icon, wrap = false, children }: { tone: TagTone; icon?: ReactNode; wrap?: boolean; children: ReactNode }) {
+  const size = wrap ? 'min-h-[22px] max-w-full py-0.5' : 'h-[22px] shrink-0 whitespace-nowrap';
   return (
-    <span className={`inline-flex h-[22px] shrink-0 items-center gap-[7px] rounded px-2.5 text-xs font-bold whitespace-nowrap ${TAG_LOOK[tone]}`}>
+    <span className={`inline-flex ${size} items-center gap-[7px] rounded px-2.5 text-xs font-bold ${TAG_LOOK[tone]}`}>
       {icon}
       {children}
     </span>

@@ -60,12 +60,18 @@ function clearDraft() {
 
 // ---------- Form parts ----------
 
-/** The backend's rule: start date <= sign-up <= observation <= feedback (equal dates allowed). */
+/**
+ * The backend's rule is start date <= sign-up <= observation <= feedback. The survey opens the day after the
+ * observation deadline and closes on the feedback deadline, so here the feedback deadline must be at least a day later.
+ */
 function orderProblem(startDate: string, d: Deadlines): string | null {
   if (!KEYS.every((k) => d[k])) return null;
   if (d.signupDeadline < startDate) return `The sign-up deadline cannot be before the cycle start date, ${formatDate(startDate)}.`;
   if (d.observationDeadline < d.signupDeadline || d.feedbackDeadline < d.observationDeadline) {
     return 'Deadlines must be in order: sign-up, then observation, then feedback.';
+  }
+  if (d.feedbackDeadline === d.observationDeadline) {
+    return 'The feedback deadline must be at least one day after the observation deadline, so the survey has a day to open.';
   }
   return null;
 }
@@ -390,7 +396,11 @@ function EditForm({ cycle }: { cycle: Cycle }) {
   const changes: UpdateCycleInput = {};
   for (const k of KEYS) if (dates[k] !== cycle[k]) changes[k] = dates[k];
   const changed = Object.keys(changes).length > 0;
-  const problem = orderProblem(cycle.startDate, dates);
+  // Once observer selection has run (the observation phase or later), a sign-up deadline of today or later would reopen sign-up.
+  // Before selection runs (matching phase) the committee may still extend sign-up.
+  const reopensSignup = !['signup', 'matching'].includes(cycle.phase) && changes.signupDeadline !== undefined && changes.signupDeadline >= todayIso();
+  const problem = orderProblem(cycle.startDate, dates)
+    ?? (reopensSignup ? `Sign-up closed on ${formatDate(cycle.signupDeadline)}. A sign-up deadline of today or later would reopen sign-up after observer selection, so pick an earlier date.` : null);
   const canSave = changed && KEYS.every((k) => dates[k]) && !problem;
   const onChange = (key: keyof Deadlines) => (v: string) => setDates((d) => ({ ...d, [key]: v }));
   const save = () => {

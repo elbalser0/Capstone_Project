@@ -37,6 +37,10 @@ const CAMPUS_TZ = 'America/Chicago';
 export const formatDateTime = (iso: string) =>
   new Date(iso).toLocaleString('en-US', { timeZone: CAMPUS_TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
+/** "Nov 2, 2024, 9:14 AM", for lists that can hold older items */
+export const formatDateTimeYear = (iso: string) =>
+  new Date(iso).toLocaleString('en-US', { timeZone: CAMPUS_TZ, month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+
 /** "9:41 AM" for a clock time in milliseconds */
 export const formatClock = (ms: number) => new Date(ms).toLocaleTimeString('en-US', { timeZone: CAMPUS_TZ, hour: 'numeric', minute: '2-digit' });
 

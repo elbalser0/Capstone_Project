@@ -273,6 +273,24 @@ describe('Sign-ups after pairing and hand-added observers', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('2 sign-ups need attention: 1 with no observer, 1 with only 1 observer.');
   });
 
+  it('gives the reason Dashboard > Unmatched gives, so a sign-up whose requests expired reads "Nobody accepted"', async () => {
+    serve({ matching: [row('20', faculty, 0, 'insufficient_observers'), row('21', sarah, 0)], signupList: [signupOf('20', faculty), signupOf('21', sarah)] });
+    server.use(http.get('*/api/dashboard/unmatched', () => HttpResponse.json({
+      cycleId: '1', total: 2,
+      items: [{ signupId: '20', observee: faculty, section: course, alertType: 'no_acceptance' }, { signupId: '21', observee: sarah, section: otherCourse, alertType: 'no_acceptance' }],
+    })));
+    openPage();
+    const [expired, alsoExpired] = await waitFor(() => {
+      const rows = dataRows();
+      expect(within(rows[1]).getByText('Nobody accepted')).toBeVisible();
+      return rows;
+    });
+    expect(within(expired).getByText('Nobody accepted')).toBeVisible();
+    expect(within(expired).queryByText('Insufficient')).not.toBeInTheDocument();
+    expect(within(alsoExpired).getByRole('button', { name: /Add an observer/ })).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('2 sign-ups need attention: 2 where nobody accepted.');
+  });
+
   it('holds the attention banner until the sign-ups have loaded', async () => {
     serve({ matching: [row('20', faculty, 1, 'insufficient_observers')] });
     server.use(http.get('*/api/cycles/1/signups', never));
@@ -425,6 +443,15 @@ describe('Add an observer by hand', () => {
     await u.click(within(dialog).getByRole('button', { name: 'Add observer' }));
     expect(within(dialog).getByText("Enter the observer's NetID.")).toBeVisible();
     expect(calls.added).toHaveLength(0);
+  });
+
+  it('sends the NetID in lower case, as the server stores it', async () => {
+    const calls = serveAdd(() => HttpResponse.json(added, { status: 201 }));
+    const { u, dialog, input } = await openForm();
+    await u.type(input, 'ER123');
+    await u.click(within(dialog).getByRole('button', { name: 'Add observer' }));
+    await waitFor(() => expect(calls.added).toHaveLength(1));
+    expect(calls.added).toEqual([{ url: '/api/signups/21/candidates', signupId: '21', body: { observerNetid: 'er123' } }]);
   });
 
   it('sends exactly the trimmed NetID once, then refreshes the table', async () => {

@@ -3,7 +3,7 @@ import { useId, useRef } from 'react';
 import { useNotifications } from '../../api/hooks/shared';
 import type { Notification } from '../../api/types';
 import { Card, EmptyRow, Pagination, usePages } from '../../components/ui';
-import { formatDateTime } from '../../lib/format';
+import { formatDateTimeYear } from '../../lib/format';
 import { TryAgain, errorText, headingFocus } from './DashboardSections';
 
 // The smallest view of GET /api/me/notifications (newest first, at most 100 from the backend), so the
@@ -53,7 +53,7 @@ export function NotificationInbox({ title = 'Your notifications' }: { title?: st
             <li key={n.notificationId} className="px-4 py-3">
               <p className="text-xs text-gray-500">
                 <span className="font-bold text-gray-700">{TYPE_LABEL[n.notifType] ?? n.notifType}</span>
-                {' · '}<time dateTime={n.sentDate}>{formatDateTime(n.sentDate)}</time>
+                {' · '}<time dateTime={n.sentDate}>{formatDateTimeYear(n.sentDate)}</time>
                 {n.sentBy ? ` · from ${n.sentBy.displayName}` : ''}
               </p>
               <p className="mt-1 text-sm wrap-anywhere text-gray-900">{n.subject}</p>

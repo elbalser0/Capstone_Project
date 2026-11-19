@@ -94,6 +94,20 @@ describe('outstanding tab (A6)', () => {
     expect(within(rowOf('Dr. Ed Missed')).getByText('Reported as not done')).toBeVisible();
     expect(screen.queryByText('Dr. Flo Done')).not.toBeInTheDocument();
   });
+  it('gives the reason Dashboard > Unmatched gives for an unpaired sign-up, including too few observers', async () => {
+    serve();
+    server.use(http.get('*/api/dashboard/unmatched', () => HttpResponse.json({
+      cycleId: '1', total: 2,
+      items: [
+        { signupId: '1', observee: person('n1', 'Dr. Ana Unpaired'), section: course, alertType: 'no_acceptance' },
+        { signupId: '2', observee: person('n2', 'Dr. Bo Nobody'), section: course, alertType: 'insufficient_observers' },
+      ],
+    })));
+    open();
+    expect(await within(await screen.findByRole('table', { name: 'Outstanding observations' })).findByText('Nobody accepted, see Sign-ups')).toBeVisible();
+    expect(within(rowOf('Dr. Ana Unpaired')).getByText('Nobody accepted, see Sign-ups')).toBeVisible();
+    expect(within(rowOf('Dr. Bo Nobody')).getByText('Too few observers, see Sign-ups')).toBeVisible();
+  });
   it('shows Scheduled when the observer has not signed, or when only the observee has', async () => {
     serve({ records: {
       o3: () => HttpResponse.json(record({ observationId: 'o3', observerSignedDate: null })),

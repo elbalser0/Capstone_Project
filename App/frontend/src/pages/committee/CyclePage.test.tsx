@@ -101,7 +101,7 @@ describe('Cycle page: starting a cycle', () => {
     expect(screen.queryByText(/Last cycle/)).not.toBeInTheDocument();
   });
 
-  it('blocks out-of-order dates and allows equal dates', async () => {
+  it('blocks out-of-order dates, allows equal sign-up and observation deadlines, and needs a day before feedback', async () => {
     const calls = serve({ current: closedCycle });
     open();
     await screen.findByLabelText('Term');
@@ -113,6 +113,9 @@ describe('Cycle page: starting a cycle', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('The sign-up deadline cannot be before the cycle start date, Dec 20, 2026.');
     expect(screen.getByRole('button', { name: 'Kick off cycle' })).toBeDisabled();
     fillDates('2026-12-20', '2026-12-20', '2026-12-20');
+    expect(screen.getByRole('alert')).toHaveTextContent('The feedback deadline must be at least one day after the observation deadline, so the survey has a day to open.');
+    expect(screen.getByRole('button', { name: 'Kick off cycle' })).toBeDisabled();
+    setDate('Feedback deadline', '2026-12-21');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Kick off cycle' })).toBeEnabled();
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
@@ -291,6 +294,31 @@ describe('Cycle page: an open cycle', () => {
     expect(await screen.findByText('3 professors are due or overdue.')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Save as draft' })).not.toBeInTheDocument();
     expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it('will not move the sign-up deadline to today or later once sign-up has closed, since that reopens sign-up', async () => {
+    setClock(() => new Date('2026-09-18T15:00:00Z').getTime());
+    serve({ current: { ...cycle, phase: 'observation' } });
+    server.use(http.get('*/api/cycles/1/faculty', () => HttpResponse.json(rows)));
+    open();
+    expect(await screen.findByLabelText('Sign-up deadline')).toHaveValue('2026-09-15');
+    setDate('Sign-up deadline', '2026-09-18');
+    expect(screen.getByRole('alert')).toHaveTextContent('Sign-up closed on Sep 15, 2026. A sign-up deadline of today or later would reopen sign-up after observer selection, so pick an earlier date.');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    setDate('Sign-up deadline', '2026-09-14');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+  });
+
+  it('still lets the sign-up deadline move later after it passed but before observer selection ran', async () => {
+    setClock(() => new Date('2026-09-18T15:00:00Z').getTime());
+    serve({ current: { ...cycle, phase: 'matching' } });
+    server.use(http.get('*/api/cycles/1/faculty', () => HttpResponse.json(rows)));
+    open();
+    expect(await screen.findByLabelText('Sign-up deadline')).toHaveValue('2026-09-15');
+    setDate('Sign-up deadline', '2026-09-18');
+    expect(screen.queryByText(/would reopen sign-up/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
   });
 
   it('sends one save request however often Save changes is clicked, and does not retry a failure', async () => {

@@ -114,8 +114,10 @@ export function TemplatesPage() {
           )}
         </div>
       </div>
-      <div className="mt-[10px]">
-        <Table label="Versions" columns="100px 120px 130px 150px 250px 120px 1fr" head={['Version', 'Status', 'Published', 'By', 'What changed', 'Used by', '']}>
+      {/* Columns share the width down to the minimum, then the table scrolls sideways instead of cutting off the last column. */}
+      <div className="mt-[10px] max-w-full overflow-x-auto rounded-lg">
+        <div className="min-w-[760px]">
+        <Table label="Versions" columns="84px 96px minmax(100px,1fr) minmax(120px,1.2fr) minmax(150px,2.4fr) 112px 72px" head={['Version', 'Status', 'Published', 'By', 'What changed', 'Used by', '']}>
           {versions.map((v) => (
             <Row key={v.versionId}>
               <Cell className="font-bold">Version {v.versionNo}</Cell>
@@ -133,6 +135,7 @@ export function TemplatesPage() {
           ))}
           {versions.length === 0 && <p className="px-4 py-4 text-sm text-gray-500">No template versions yet.</p>}
         </Table>
+        </div>
       </div>
       <Note className="mt-6" title="How every form works">
         Each question gets a rating and a comment box, and every form ends with Any other comments. There are no other question types.

@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { useCycleSignups, useForwardObservation, useMatching, useOutstandingObservations } from '../../api/hooks/committee';
+import { useCycleSignups, useForwardObservation, useMatching, useOutstandingObservations, useUnmatchedFaculty } from '../../api/hooks/committee';
 import { ScheduledObservationTag } from './DashboardSections';
 import { useCurrentCycle } from '../../api/hooks/shared';
-import type { MatchingRow, Signup } from '../../api/types';
+import type { AlertType, Signup } from '../../api/types';
 import { CheckIcon, MailIcon, SendIcon } from '../../components/icons';
 import { Button, Cell, buttonClass, EmptyRow, ErrorNote, LockNote, Modal, Pagination, Row, Table, Tabs, Tag, inputClass, labelClass, usePages } from '../../components/ui';
 import { RANK_SHORT, formatDate, ranks } from '../../lib/format';
@@ -20,14 +20,15 @@ const PAGE_SIZE = 7;
 
 const observedOn = (s: Signup) => (s.observation?.scheduledDate ? formatDate(s.observation.scheduledDate) : '');
 
-function OutstandingStatus({ signup, alert }: { signup: Signup; alert: MatchingRow['alert'] | undefined }) {
+function OutstandingStatus({ signup, reason }: { signup: Signup; reason: AlertType | undefined }) {
   const o = signup.observation;
   if (!o) {
-    if (alert?.alertType === 'no_observer') return <Tag tone="overdue">No observer, see Sign-ups</Tag>;
-    if (alert?.alertType === 'no_acceptance') return <Tag tone="overdue">Nobody accepted, see Sign-ups</Tag>;
-    return <Tag tone="neutral">Not paired yet</Tag>;
+    if (reason === 'no_observer') return <Tag wrap tone="overdue">No observer, see Sign-ups</Tag>;
+    if (reason === 'no_acceptance') return <Tag wrap tone="overdue">Nobody accepted, see Sign-ups</Tag>;
+    if (reason === 'insufficient_observers') return <Tag wrap tone="due">Too few observers, see Sign-ups</Tag>;
+    return <Tag wrap tone="neutral">Not paired yet</Tag>;
   }
-  if (o.status === 'not_completed') return <Tag tone="neutral">Reported as not done</Tag>;
+  if (o.status === 'not_completed') return <Tag wrap tone="neutral">Reported as not done</Tag>;
   // Read before the date too. The server refuses a form before its date, so this matters only when the
   // server's date and the campus date differ.
   return <ScheduledObservationTag observationId={o.observationId} scheduledDate={o.scheduledDate} scheduledTone="neutral" readEarly />;
@@ -97,6 +98,7 @@ export function ObservationsPage() {
   const c = cycle.data;
   const signups = useCycleSignups(c?.cycleId);
   const matching = useMatching(c?.cycleId);
+  const unmatched = useUnmatchedFaculty();
   const outstanding = useOutstandingObservations();
   const [tab, setTab] = useState<Tab>('outstanding');
   const [forwarding, setForwarding] = useState<Signup | null>(null);
@@ -108,7 +110,12 @@ export function ObservationsPage() {
   const completedRows = all
     .filter((s) => s.observation?.status === 'completed')
     .sort((a, b) => (a.observation!.scheduledDate ?? '').localeCompare(b.observation!.scheduledDate ?? ''));
-  const alerts = new Map(matching.data?.map((m) => [m.signupId, m.alert]));
+  // Dashboard > Unmatched works out the reason when it is read (it also counts requests that expired with nobody
+  // accepting), so its reason wins over the alert on the matching row, the same way Sign-ups shows it.
+  const reasons = new Map<string, AlertType>([
+    ...(matching.data ?? []).flatMap((m) => (m.alert ? [[m.signupId, m.alert.alertType] as const] : [])),
+    ...(unmatched.data?.items ?? []).map((i) => [i.signupId, i.alertType] as const),
+  ]);
   const outPager = usePages(outstandingRows, PAGE_SIZE);
   const donePager = usePages(completedRows, PAGE_SIZE);
 
@@ -145,8 +152,8 @@ export function ObservationsPage() {
           <>
             <p className="mb-3 text-sm text-gray-500">{OUTSTANDING_TEXT}</p>
             <div className="overflow-x-auto">
-              <div className="min-w-[1040px]">
-                <Table label="Outstanding observations" columns="170px 100px 170px 130px 120px minmax(230px,1fr) 130px" head={['Observee', 'Rank', 'Observer', 'Course', 'Date', 'Status', '']}>
+              <div className="min-w-[860px]">
+                <Table label="Outstanding observations" columns="minmax(130px,1.4fr) 76px minmax(130px,1.4fr) minmax(96px,1fr) minmax(96px,1fr) minmax(170px,1.6fr) 130px" head={['Observee', 'Rank', 'Observer', 'Course', 'Date', 'Status', '']}>
                   {outPager.rows.map((s) => (
                     <Row key={s.signupId}>
                       <Cell className="font-bold">{s.observee.displayName}</Cell>
@@ -154,7 +161,7 @@ export function ObservationsPage() {
                       <Cell className={s.observation ? 'text-gray-700' : 'text-gray-500'}>{s.observation?.observer.displayName ?? 'None yet'}</Cell>
                       <Cell className="text-gray-700">{s.section.label}</Cell>
                       <Cell className="text-gray-700">{observedOn(s)}</Cell>
-                      <Cell><OutstandingStatus signup={s} alert={alerts.get(s.signupId)} /></Cell>
+                      <Cell><OutstandingStatus signup={s} reason={reasons.get(s.signupId)} /></Cell>
                       <Cell className="flex justify-end pr-0">{s.observation && <ViewRecordLink signup={s} />}</Cell>
                     </Row>
                   ))}

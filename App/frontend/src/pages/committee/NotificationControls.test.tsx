@@ -24,7 +24,10 @@ const never = () => new Promise<never>(() => {});
 const failure = (message: string, status = 500, code = 'FAILED') => HttpResponse.json({ error: { code, message } }, { status });
 
 /** Records every POST to the three send endpoints, with its body. */
-function serve({ role = 'AC' as Me['role'], currentCycle = cycle as Cycle | null, sent = 3, inbox = [] as Notification[] } = {}) {
+// In the survey window by default, so all three sends are on.
+const surveyCycle: Cycle = { ...cycle, phase: 'feedback' };
+
+function serve({ role = 'AC' as Me['role'], currentCycle = surveyCycle as Cycle | null, sent = 3, inbox = [] as Notification[] } = {}) {
   const calls: { path: string; body: unknown }[] = [];
   server.use(
     http.get('*/api/me', () => HttpResponse.json(member(role))),
@@ -197,6 +200,24 @@ describe('Committee notification sends', () => {
     expect(await screen.findByRole('dialog')).toHaveTextContent(/Sent from this page at .*\. Sending again creates duplicate notifications\./);
   });
 
+  it('keeps the survey send off until the survey opens, with the date, while the other sends stay on', async () => {
+    const calls = serve({ currentCycle: { ...cycle, phase: 'observation' } });
+    openControls();
+    const survey = await screen.findByRole('group', { name: /End-of-process survey/ });
+    expect(await within(survey).findByText('Off until the survey opens on Sep 22, 2026.')).toBeVisible();
+    expect(within(survey).getByRole('button', { name: 'Send survey notification' })).toBeDisabled();
+    expect(within(group(/Due reminders|due/i)).getAllByRole('button')[0]).toBeEnabled();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('keeps the survey send off after the survey has closed', async () => {
+    serve({ currentCycle: { ...cycle, phase: 'closed' } });
+    openControls();
+    const survey = await screen.findByRole('group', { name: /End-of-process survey/ });
+    expect(await within(survey).findByText('Off: the survey closed on Oct 1, 2026.')).toBeVisible();
+    expect(within(survey).getByRole('button', { name: 'Send survey notification' })).toBeDisabled();
+  });
+
   it('keeps every send off when no cycle has started', async () => {
     const calls = serve({ currentCycle: null });
     openControls();
@@ -234,7 +255,7 @@ describe('Notification inbox', () => {
     serve({ inbox: [note('2', 'reminder', 'Reminder: you are due for a classroom observation.', '2026-11-03T20:00:00Z'), note('1', 'survey_open', 'The survey is open.', '2026-11-02T15:00:00Z')] });
     openControls();
     const items = await screen.findAllByRole('listitem');
-    expect(items[0]).toHaveTextContent(/Due reminder.*Nov 3, 2:00 PM.*from Dr\. Elena Ruiz/);
+    expect(items[0]).toHaveTextContent(/Due reminder.*Nov 3, 2026, 2:00 PM.*from Dr\. Elena Ruiz/);
     expect(items[0]).toHaveTextContent('Reminder: you are due for a classroom observation.');
     expect(items[1]).toHaveTextContent(/Survey open/);
   });

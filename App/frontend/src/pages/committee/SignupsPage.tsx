@@ -1,7 +1,7 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../api/client';
-import { useAddCandidate, useCycleSignups, useMatching, useNotifyListsReady, useRunMatching } from '../../api/hooks/committee';
+import { useAddCandidate, useCycleSignups, useMatching, useNotifyListsReady, useRunMatching, useUnmatchedFaculty } from '../../api/hooks/committee';
 import { sharedKeys, useCurrentCycle } from '../../api/hooks/shared';
 import type { AlertType, MatchingRow } from '../../api/types';
 import { usePageTitle } from '../../components/AppShell';
@@ -10,6 +10,7 @@ import { Banner, Button, Cell, EmptyRow, ErrorNote, Modal, Pagination, Row, Tabl
 import { todayIso } from '../../lib/dates';
 import { countSummary, dayLetters, formatClock, formatDateTime, formatShort, formatTime } from '../../lib/format';
 import { UNMATCHED_TEXT } from '../../lib/statusTerms';
+import { withUnmatchedReason } from './unpairedReason';
 
 // A4. After the sign-up deadline the committee runs observer selection (POST /api/cycles/{cycleId}/matching),
 // checks the sign-ups that need attention, then tells observees their lists are ready.
@@ -47,9 +48,9 @@ function ObserversFound({ row, ran, pairedWith }: { row: MatchingRow; ran: boole
     <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
       {ran ? <span className="font-bold">{n === 0 ? '0' : `${n} of ${LIST_SIZE}`}</span> : <span className="text-gray-500">Not run yet</span>}
       {pairedWith ? (
-        <Tag tone="signed" icon={<CheckIcon width={10} height={8} />}>Paired with {pairedWith}</Tag>
+        <Tag wrap tone="signed" icon={<CheckIcon width={10} height={8} />}>Paired with {pairedWith}</Tag>
       ) : (
-        type && <Tag tone={ALERT_TAG[type][0]} icon={<AlertIcon width={10.5} height={9.5} />}>{ALERT_TAG[type][1]}</Tag>
+        type && <Tag wrap tone={ALERT_TAG[type][0]} icon={<AlertIcon width={10.5} height={9.5} />}>{ALERT_TAG[type][1]}</Tag>
       )}
     </span>
   );
@@ -177,7 +178,8 @@ function AddObserver({ row, cycleId, onAdded, onClose }: { row: MatchingRow; cyc
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const observerNetid = netid.trim();
+    // NetIDs are stored in lower case and the server matches them exactly.
+    const observerNetid = netid.trim().toLowerCase();
     if (!observerNetid) {
       setEmpty(true);
       add.reset();
@@ -239,6 +241,7 @@ export function SignupsPage() {
   const c = cycle.data;
   const matching = useMatching(c?.cycleId);
   const signups = useCycleSignups(c?.cycleId);
+  const unmatched = useUnmatchedFaculty();
   const run = useRunMatching(c?.cycleId ?? '');
   // isPending reaches React a tick after mutate(), so a fast double click would run twice without this.
   const running = useRef(false);
@@ -254,7 +257,7 @@ export function SignupsPage() {
   // Until the sign-ups have loaded, paired sign-ups can't be told apart, so the banner waits instead of flashing a stale
   // count. If they fail to load, the banner stays away and a note says why.
   const signupsSettled = Boolean(signups.data);
-  const all = (matching.data ?? []).map((r) => (pairedWith.has(r.signupId) && r.alert ? { ...r, alert: null } : r));
+  const all = withUnmatchedReason(matching.data ?? [], unmatched.data).map((r) => (pairedWith.has(r.signupId) && r.alert ? { ...r, alert: null } : r));
   const attention = all.filter((r) => r.alert);
   // Once nothing needs attention any more (for example after an observer is added), the full list is shown.
   const filtered = onlyAttention && attention.length > 0;
@@ -354,8 +357,8 @@ export function SignupsPage() {
 
       <p role="status" className="mt-4 text-sm text-gray-900 empty:hidden">{added ?? ''}</p>
       <div className="mt-4 max-w-full overflow-x-auto rounded-lg">
-        <div className="min-w-[900px]">
-          <Table label="Sign-up requests" columns="minmax(96px,150px) 88px 120px 172px 200px 1fr" head={['Course #', 'Section #', 'Days and time', 'Observee', 'Email', 'Observers found']}>
+        <div className="min-w-[840px]">
+          <Table label="Sign-up requests" columns="minmax(96px,150px) 80px 112px minmax(140px,172px) minmax(150px,200px) minmax(150px,1fr)" head={['Course #', 'Section #', 'Days and time', 'Observee', 'Email', 'Observers found']}>
             {pager.rows.map((r) => (
               <Row key={r.signupId}>
                 <Cell className="font-bold">{courseOf(r.section)}</Cell>
