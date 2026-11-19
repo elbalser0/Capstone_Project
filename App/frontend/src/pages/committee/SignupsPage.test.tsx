@@ -46,13 +46,13 @@ const AFTER_DEADLINE = '2026-09-16T15:00:00Z';
 interface Calls { matchingGets: number; runs: number; notify: string[]; added: unknown[] }
 
 /** Answers every request the page makes and records the writes. */
-function serve({ matching = [], currentCycle = cycle }: { matching?: MatchingRow[]; currentCycle?: Cycle | null } = {}) {
+function serve({ matching = [], currentCycle = cycle, signupList = signups }: { matching?: MatchingRow[]; currentCycle?: Cycle | null; signupList?: Signup[] } = {}) {
   const calls: Calls = { matchingGets: 0, runs: 0, notify: [], added: [] };
   server.use(
     http.get('*/api/me', () => HttpResponse.json(committeeMember)),
     http.get('*/api/me/notifications', () => HttpResponse.json([])),
     http.get('*/api/cycles/current', () => HttpResponse.json(currentCycle)),
-    http.get('*/api/cycles/1/signups', () => HttpResponse.json(signups)),
+    http.get('*/api/cycles/1/signups', () => HttpResponse.json(signupList)),
     http.get('*/api/cycles/1/matching', () => { calls.matchingGets += 1; return HttpResponse.json(matching); }),
   );
   return calls;
@@ -234,6 +234,64 @@ describe('Sign-up requests page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('5 of 5')).toBeVisible();
     expect(calls.matchingGets).toBe(2);
+  });
+});
+
+describe('Sign-ups after pairing and hand-added observers', () => {
+  const paired = (signupId: string, observee: PersonRef): Signup => ({
+    ...signupOf(signupId, observee),
+    observation: { observationId: `o${signupId}`, observer, status: 'scheduled', scheduledDate: '2026-09-21' },
+  });
+
+  it('ignores the alert left open on a sign-up that is already paired', async () => {
+    serve({
+      matching: [row('20', faculty, 1, 'insufficient_observers'), row('21', sarah, 1, 'insufficient_observers'), row('22', raj, 0, 'no_observer')],
+      signupList: [paired('20', faculty), signupOf('21', sarah), signupOf('22', raj)],
+    });
+    openPage();
+    expect(await screen.findByText(`Paired with ${observer.displayName}`)).toBeVisible();
+    const [done, few, none] = dataRows();
+    expect(within(done).getByText('1 of 5')).toBeVisible();
+    expect(within(done).queryByText('Insufficient')).not.toBeInTheDocument();
+    expect(within(done).queryByRole('button', { name: /Add an observer/ })).not.toBeInTheDocument();
+    expect(within(few).getByText('Insufficient')).toBeVisible();
+    expect(within(none).getByText('No observer')).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('2 sign-ups need attention: 1 with no observer, 1 with only 1 observer.');
+  });
+
+  it('holds the attention banner until the sign-ups have loaded', async () => {
+    serve({ matching: [row('20', faculty, 1, 'insufficient_observers')] });
+    server.use(http.get('*/api/cycles/1/signups', never));
+    openPage();
+    expect(await screen.findByText('Dr. Maya Lin')).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows no attention banner once every alerting sign-up is paired', async () => {
+    serve({ matching: [row('20', faculty, 1, 'insufficient_observers')], signupList: [paired('20', faculty)] });
+    openPage();
+    expect(await screen.findByText(`Paired with ${observer.displayName}`)).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps the run time when an observer was added by hand later', async () => {
+    serve({ matching: [row('20', faculty, 5), row('21', sarah, 2, 'insufficient_observers', '2026-09-20T18:30:00Z'), row('22', raj, 4)] });
+    openPage();
+    expect(await screen.findByText('Ran Sep 16, 9:00 AM')).toBeVisible();
+    expect(screen.queryByText(/Ran Sep 20/)).not.toBeInTheDocument();
+  });
+
+  it('shows the newest run when selection ran again', async () => {
+    const again = '2026-09-18T15:00:00Z';
+    serve({ matching: [row('20', faculty, 5), row('21', sarah, 5, null, again), row('22', raj, 4, null, again), row('23', person('x1', 'Ana', 'Ortiz'), 3, null, '2026-09-19T15:00:00Z')] });
+    openPage();
+    expect(await screen.findByText('Ran Sep 18, 10:00 AM')).toBeVisible();
+  });
+
+  it('takes the earliest time when no two lists share one', async () => {
+    serve({ matching: [row('20', faculty, 5), row('21', sarah, 2, 'insufficient_observers', '2026-09-20T18:30:00Z')] });
+    openPage();
+    expect(await screen.findByText('Ran Sep 16, 9:00 AM')).toBeVisible();
   });
 });
 

@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useCycleSignups, useForwardObservation, useMatching, useOutstandingObservations } from '../../api/hooks/committee';
-import { useObservation } from '../../api/hooks/faculty';
+import { ScheduledObservationTag } from './DashboardSections';
 import { useCurrentCycle } from '../../api/hooks/shared';
 import type { MatchingRow, Signup } from '../../api/types';
 import { CheckIcon, MailIcon, SendIcon } from '../../components/icons';
@@ -20,17 +20,6 @@ const PAGE_SIZE = 7;
 
 const observedOn = (s: Signup) => (s.observation?.scheduledDate ? formatDate(s.observation.scheduledDate) : '');
 
-/**
- * A scheduled row reads its own record, because the sign-up list has no signature dates: the observer has
- * submitted and signed once observerSignedDate is set. While the record loads, or if it cannot be read, the
- * row simply says Scheduled.
- */
-function ScheduledStatus({ observationId }: { observationId: string }) {
-  const record = useObservation(observationId);
-  const waiting = Boolean(record.data?.observerSignedDate && !record.data.observeeSignedDate);
-  return waiting ? <Tag tone="due">Waiting for the observee to sign</Tag> : <Tag tone="neutral">Scheduled</Tag>;
-}
-
 function OutstandingStatus({ signup, alert }: { signup: Signup; alert: MatchingRow['alert'] | undefined }) {
   const o = signup.observation;
   if (!o) {
@@ -39,7 +28,9 @@ function OutstandingStatus({ signup, alert }: { signup: Signup; alert: MatchingR
     return <Tag tone="neutral">Not paired yet</Tag>;
   }
   if (o.status === 'not_completed') return <Tag tone="neutral">Reported as not done</Tag>;
-  return <ScheduledStatus observationId={o.observationId} />;
+  // Read before the date too. The server refuses a form before its date, so this matters only when the
+  // server's date and the campus date differ.
+  return <ScheduledObservationTag observationId={o.observationId} scheduledDate={o.scheduledDate} scheduledTone="neutral" readEarly />;
 }
 
 function ViewRecordLink({ signup }: { signup: Signup }) {

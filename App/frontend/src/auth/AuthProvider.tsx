@@ -58,6 +58,24 @@ function firebaseMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Sign-in failed.';
 }
 
+/**
+ * Wording for a refused demo sign-in. The mock API answers 401 for an unknown email; the real backend
+ * answers 403 NOT_A_PROFESSOR for that and 401 INVALID_TOKEN for any demo token, because it only
+ * accepts Firebase logins.
+ */
+export function demoMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.code === 'INVALID_TOKEN') {
+      return 'Demo sign-in does not work with the real server. Start the app with VITE_AUTH_MODE=firebase, or with VITE_USE_MOCKS=true for the demo data.';
+    }
+    if (err.status === 401 || err.code === 'NOT_A_PROFESSOR') return 'No account matches that email.';
+    if (err.status >= 500 && err.code === 'HTTP_ERROR') return 'Could not reach the server. Check that it is running and try again.';
+    return err.message;
+  }
+  if (err instanceof TypeError || err instanceof SyntaxError) return 'Could not reach the server. Check that it is running and try again.';
+  return err instanceof Error ? err.message : 'Sign-in failed.';
+}
+
 const STORAGE_KEY = 'assessment-helper.session';
 
 function readSession(): Session | null {
@@ -194,8 +212,7 @@ export function AuthProvider({ children, mode = AUTH_MODE }: { children: ReactNo
         setSession(next);
       } catch (err) {
         setTokenProvider(async () => null);
-        if (err instanceof ApiError && err.status === 401) throw new Error('No account matches that email.');
-        throw err;
+        throw new Error(demoMessage(err));
       }
     },
     [auth, loadProfile, queryClient, resetIdentity],

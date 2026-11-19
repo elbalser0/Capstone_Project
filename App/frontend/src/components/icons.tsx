@@ -207,3 +207,9 @@ export const ChevronIcon = (p: IconProps) => (
     <path d="M0 0L4 4L8 0" />
   </svg>
 );
+
+export const MenuIcon = (p: IconProps) => (
+  <svg {...drawn(16, 12, 1.5, p)}>
+    <path d="M0 1H16M0 6H16M0 11H16" />
+  </svg>
+);
