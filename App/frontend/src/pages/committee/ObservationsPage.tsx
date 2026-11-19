@@ -1,10 +1,11 @@
 import { useCallback, useRef, useState } from 'react';
+import { Link } from 'react-router';
 import { useCycleSignups, useForwardObservation, useMatching, useOutstandingObservations } from '../../api/hooks/committee';
 import { useObservation } from '../../api/hooks/faculty';
 import { useCurrentCycle } from '../../api/hooks/shared';
 import type { MatchingRow, Signup } from '../../api/types';
 import { CheckIcon, MailIcon, SendIcon } from '../../components/icons';
-import { Button, Cell, EmptyRow, ErrorNote, LockNote, Modal, Pagination, Row, Table, Tabs, Tag, inputClass, labelClass, usePages } from '../../components/ui';
+import { Button, Cell, buttonClass, EmptyRow, ErrorNote, LockNote, Modal, Pagination, Row, Table, Tabs, Tag, inputClass, labelClass, usePages } from '../../components/ui';
 import { RANK_SHORT, formatDate, ranks } from '../../lib/format';
 import { OUTSTANDING_TEXT } from '../../lib/statusTerms';
 
@@ -39,6 +40,18 @@ function OutstandingStatus({ signup, alert }: { signup: Signup; alert: MatchingR
   }
   if (o.status === 'not_completed') return <Tag tone="neutral">Reported as not done</Tag>;
   return <ScheduledStatus observationId={o.observationId} />;
+}
+
+function ViewRecordLink({ signup }: { signup: Signup }) {
+  return (
+    <Link
+      to={`/committee/observations/${signup.observation!.observationId}`}
+      className={buttonClass('secondary', '', 'sm')}
+      aria-label={`View ${signup.observee.displayName}'s observation record`}
+    >
+      View record
+    </Link>
+  );
 }
 
 function ForwardModal({ signup, onClose, onSent }: { signup: Signup; onClose: () => void; onSent: (email: string) => void }) {
@@ -141,8 +154,8 @@ export function ObservationsPage() {
           <>
             <p className="mb-3 text-sm text-gray-500">{OUTSTANDING_TEXT}</p>
             <div className="overflow-x-auto">
-              <div className="min-w-[760px]">
-                <Table label="Outstanding observations" columns="170px 100px 170px 130px 120px 1fr" head={['Observee', 'Rank', 'Observer', 'Course', 'Date', 'Status']}>
+              <div className="min-w-[1040px]">
+                <Table label="Outstanding observations" columns="170px 100px 170px 130px 120px minmax(230px,1fr) 130px" head={['Observee', 'Rank', 'Observer', 'Course', 'Date', 'Status', '']}>
                   {outPager.rows.map((s) => (
                     <Row key={s.signupId}>
                       <Cell className="font-bold">{s.observee.displayName}</Cell>
@@ -151,6 +164,7 @@ export function ObservationsPage() {
                       <Cell className="text-gray-700">{s.section.label}</Cell>
                       <Cell className="text-gray-700">{observedOn(s)}</Cell>
                       <Cell><OutstandingStatus signup={s} alert={alerts.get(s.signupId)} /></Cell>
+                      <Cell className="flex justify-end pr-0">{s.observation && <ViewRecordLink signup={s} />}</Cell>
                     </Row>
                   ))}
                   {outstandingRows.length === 0 && <EmptyRow>{all.length === 0 ? 'No one has signed up yet this cycle.' : 'Nothing outstanding.'}</EmptyRow>}
@@ -180,7 +194,8 @@ export function ObservationsPage() {
                       <Cell>{s.section.label}</Cell>
                       <Cell>{observedOn(s)}</Cell>
                       <Cell><Tag tone="signed">Signed and locked</Tag></Cell>
-                      <Cell className="flex justify-end pr-0">
+                      <Cell className="flex justify-end gap-2 pr-0">
+                        <ViewRecordLink signup={s} />
                         <Button variant="secondary" size="sm" aria-label={`Forward ${s.observee.displayName}'s observation`} onClick={() => { setSentTo(null); setForwarding(s); }}>
                           <SendIcon /> Forward
                         </Button>

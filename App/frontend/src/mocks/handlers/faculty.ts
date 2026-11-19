@@ -33,6 +33,7 @@ import {
   db,
   fail,
   found,
+  isAc,
   newId,
   notify,
   now,
@@ -223,6 +224,19 @@ export const facultyHandlers = [
     if (!reason?.trim()) return fail(400, 'REASON_REQUIRED', 'Say why the observation did not happen.');
     Object.assign(o, { status: 'not_completed', reason_not_completed: reason.trim() });
     return HttpResponse.json(observationDetail(o));
+  }),
+
+  // Same rules as the backend: whoever can read the record can download its file; 404 NO_FILE when there is none.
+  http.get('/api/observations/:observationId/issue-file', ({ request, params }) => {
+    const me = signedIn(request);
+    const o = db.observation.find((x) => x.observation_id === params.observationId);
+    const s = o && signupRow(o.signup_id);
+    if (!o || !s || (!isAc(me.netid) && s.observee_netid !== me.netid && o.observer_netid !== me.netid)) return fail(404, 'NOT_FOUND', 'Observation not found.');
+    if (!o.issue_file_key) return fail(404, 'NO_FILE', 'This observation has no attached file.');
+    const name = o.issue_file_key.split('/').pop()!;
+    return new HttpResponse(`Attachment for observation ${o.observation_id}`, {
+      headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}` },
+    });
   }),
 
   http.post('/api/observations/:observationId/issue-file', async ({ request, params }) => {

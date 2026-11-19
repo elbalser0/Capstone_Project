@@ -61,10 +61,10 @@ export async function api<T>(path: string, { method = 'GET', query, body }: Requ
   return data as T;
 }
 
-/** AC-only binary endpoint. Never navigate directly: the bearer token must accompany the request. */
-export async function downloadSurveyTroubleFile(cycleId: string, responseId: string): Promise<void> {
+/** Binary endpoints need the bearer token, so never navigate to them directly. */
+async function downloadFile(path: string, fallbackName: string): Promise<void> {
   const token = await tokenProvider();
-  const res = await fetch(`${BASE}/cycles/${encodeURIComponent(cycleId)}/survey-responses/${encodeURIComponent(responseId)}/trouble-file`, {
+  const res = await fetch(`${BASE}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) {
@@ -78,7 +78,7 @@ export async function downloadSurveyTroubleFile(cycleId: string, responseId: str
   try { name = encoded ? decodeURIComponent(encoded) : ''; } catch { /* Fall back to a known-safe name. */ }
   // Treat the server's header as untrusted: strip path segments, controls and filesystem metacharacters.
   name = name.split(/[\\/]/).pop()?.replace(/[\x00-\x1f\x7f<>:"|?*]/g, '_').trim().replace(/^\.+$/, '') ?? '';
-  name = name.slice(0, 255) || `survey-response-${responseId}-attachment`;
+  name = name.slice(0, 255) || fallbackName;
   const url = URL.createObjectURL(await res.blob());
   try {
     const link = document.createElement('a');
@@ -90,4 +90,17 @@ export async function downloadSurveyTroubleFile(cycleId: string, responseId: str
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/** AC-only binary endpoint. */
+export function downloadSurveyTroubleFile(cycleId: string, responseId: string): Promise<void> {
+  return downloadFile(
+    `/cycles/${encodeURIComponent(cycleId)}/survey-responses/${encodeURIComponent(responseId)}/trouble-file`,
+    `survey-response-${responseId}-attachment`,
+  );
+}
+
+/** The observer, the observee and committee members can download the file attached to an observation. */
+export function downloadObservationIssueFile(observationId: string): Promise<void> {
+  return downloadFile(`/observations/${encodeURIComponent(observationId)}/issue-file`, `observation-${observationId}-attachment`);
 }

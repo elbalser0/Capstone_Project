@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router';
-import { ApiError } from '../../api/client';
+import { Link, useLocation } from 'react-router';
+import { ApiError, downloadObservationIssueFile } from '../../api/client';
 import { useReportMissed, useSignObservation, useUploadObservationFile } from '../../api/hooks/faculty';
 import { Button, Card, Checkbox, ErrorNote, LockNote, Modal, PageError, RatingScale, Tag, TextArea, labelClass, linkClass } from '../../components/ui';
 import { useActiveNav } from '../../components/AppShell';
@@ -81,10 +81,29 @@ function UploadLink({ o }: { o: ObservationDetail }) {
       <button type="button" className={`${linkClass} disabled:text-gray-400 disabled:no-underline`} disabled={upload.isPending} onClick={() => input.current?.click()}>
         <UploadIcon className="text-gray-600" /> Upload a file about the observation
       </button>
-      {o.issueFileName && <p role="status" className="mt-2 pl-[21px] text-xs text-gray-500">Uploaded: {o.issueFileName}</p>}
       {tooBig && <p role="alert" className="mt-2 pl-[21px] text-xs text-red-800">Files can be up to 10 MB.</p>}
       <ErrorNote error={upload.error} className="mt-2" />
     </>
+  );
+}
+
+function AttachedFile({ o }: { o: ObservationDetail }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const download = async () => {
+    setBusy(true);
+    setError(null);
+    try { await downloadObservationIssueFile(o.observationId); } catch (e) { setError(e); } finally { setBusy(false); }
+  };
+  return (
+    <Card className="screen-only min-w-0 px-5 py-4">
+      <h3 className="text-sm font-bold">Attached file</h3>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <p role="status" className="min-w-0 text-sm text-gray-700">{o.issueFileName}</p>
+        <Button variant="secondary" size="sm" disabled={busy} onClick={() => void download()}>{busy ? 'Downloading…' : 'Download'}</Button>
+      </div>
+      <ErrorNote error={error} className="mt-2" />
+    </Card>
   );
 }
 
@@ -96,12 +115,13 @@ export function ObservationRecordPage() {
   const [signedNow, setSignedNow] = useState(false);
   const [reporting, setReporting] = useState(false);
   const closeReport = useCallback(() => setReporting(false), []);
+  const committeeView = useLocation().pathname.startsWith('/committee/');
   const viewer = profile.data?.netid;
   const o = record.data;
   const observer = Boolean(o && o.observer.netid === viewer);
   const observee = Boolean(o && o.observee.netid === viewer);
   // The sidebar item that led here: assignments for the observer, My evaluation for the observee, neither for others.
-  useActiveNav(viewer && o ? (observer ? '/faculty/observe' : observee ? '/faculty/evaluation' : '') : null);
+  useActiveNav(committeeView ? null : viewer && o ? (observer ? '/faculty/observe' : observee ? '/faculty/evaluation' : '') : null);
   if (profile.error) return <PageError error={profile.error} />;
   if (record.error && (!record.data || staleRefresh !== 'failed')) return <PageError error={record.error} />;
   if (!profile.data || !o) return <p role="status" className="pt-8">Loading observation record…</p>;
@@ -127,7 +147,7 @@ export function ObservationRecordPage() {
   };
   return (
     <div className="observation-record-page min-w-0 space-y-5 pt-8 text-gray-900 [overflow-wrap:anywhere]">
-      <Link to={observer ? '/faculty/observe/confirmations' : '/faculty/evaluation'} className={`${linkClass} screen-only`}>Back to {observer ? 'confirmations' : 'evaluation'}</Link>
+      <Link to={committeeView ? '/committee/observations' : observer ? '/faculty/observe/confirmations' : '/faculty/evaluation'} className={`${linkClass} screen-only`}>Back to {committeeView ? 'observations' : observer ? 'confirmations' : 'evaluation'}</Link>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <h2 className="text-base font-bold">{o.section.label} {o.section.title}, {whenLong(o)}</h2>
@@ -190,6 +210,7 @@ export function ObservationRecordPage() {
             <LockNote>{isLocked(o) ? 'Signed and locked. Nobody can change this record.' : 'Once both of you sign, nobody can change this record.'}</LockNote>
           </div>
         </Card>
+        {o.issueFileName && <AttachedFile o={o} />}
         {(observer || observee) && !isLocked(o) && (
           <Card className="screen-only min-w-0 px-5 py-4">
             <h3 className="text-sm font-bold">Something went wrong?</h3>

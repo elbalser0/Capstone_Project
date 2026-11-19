@@ -8,6 +8,7 @@ import { course, cycle, faculty, observation, observer } from '../../test/fixtur
 import type { ObservationDetail } from '../../api/types';
 import { AuthProvider } from '../../auth/AuthProvider';
 import { AppShell } from '../../components/AppShell';
+import { setTokenProvider } from '../../api/client';
 import { ObservationRecordPage } from './ObservationRecordPage';
 
 afterEach(() => vi.restoreAllMocks());
@@ -117,6 +118,105 @@ it('highlights no sidebar item for a viewer who is neither participant', async (
   sessionStorage.removeItem('assessment-helper.session');
 });
 
+function committeeShell(role: 'AC' | 'faculty') {
+  sessionStorage.setItem('assessment-helper.session', JSON.stringify({ email: 'test@example.edu', token: 'demo:test' }));
+  serveRecord(detail, 'zz999');
+  server.use(
+    http.get('*/api/me', () => HttpResponse.json({ ...faculty, netid: 'zz999', email: 'test@example.edu', role, department: { deptId: '1', deptName: 'CS' } })),
+    http.get('*/api/cycles/current', () => HttpResponse.json(cycle)),
+    http.get('*/api/me/requests/incoming', () => HttpResponse.json([])),
+  );
+  renderRoutes([{ element: <AuthProvider mode="demo"><AppShell /></AuthProvider>, children: [
+    { path: '/committee/observations', element: <p>Committee observations list</p>, handle: { title: 'Observations' } },
+    { path: '/committee/observations/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/committee/observations' } },
+    { path: '/faculty/evaluation', element: <p>Faculty evaluation page</p>, handle: { title: 'My evaluation' } },
+  ] }], '/committee/observations/30');
+}
+it('opens a record for a committee member who is neither party, read only, with a way back to Observations', async () => {
+  committeeShell('AC');
+  expect(await screen.findByText('Read-only record.')).toBeVisible();
+  expect(screen.getByText('Clear examples')).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Upload a file about the observation/ })).not.toBeInTheDocument();
+  const back = screen.getByRole('link', { name: 'Back to observations' });
+  expect(back).toHaveAttribute('href', '/committee/observations');
+  expect(screen.queryByRole('link', { name: 'Back to evaluation' })).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Observations' })).toHaveClass('font-bold');
+  sessionStorage.removeItem('assessment-helper.session');
+});
+it('sends a faculty-only account away from the committee record route', async () => {
+  committeeShell('faculty');
+  expect(await screen.findByText('Faculty evaluation page')).toBeVisible();
+  expect(screen.queryByText('Read-only record.')).not.toBeInTheDocument();
+  sessionStorage.removeItem('assessment-helper.session');
+});
+
+const lockedRecord: Partial<ObservationDetail> = { status: 'completed', observerSignedDate: '2026-09-22', observeeSignedDate: '2026-09-23' };
+it.each([
+  ['the observer', observer.netid, {}],
+  ['the observee', faculty.netid, {}],
+  ['a committee viewer', 'zz999', {}],
+  ['the observer after locking', observer.netid, lockedRecord],
+  ['the observee after locking', faculty.netid, lockedRecord],
+  ['a committee viewer after locking', 'zz999', lockedRecord],
+])('shows the attached file with a Download button to %s', async (_who, netid, extra) => {
+  serveRecord({ ...detail, ...extra, issueFileName: 'notes.pdf' }, netid); openRecord();
+  expect(await screen.findByRole('heading', { name: 'Attached file' })).toBeVisible();
+  expect(screen.getByText('notes.pdf')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Download' })).toBeVisible();
+});
+it('shows no attached file card when the record has no file', async () => {
+  serveRecord({ ...detail, issueFileName: null }); openRecord();
+  await screen.findByText('Clear examples');
+  expect(screen.queryByRole('heading', { name: 'Attached file' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+});
+it('downloads the file with the bearer token and a cleaned file name, and revokes the object URL', async () => {
+  setTokenProvider(async () => 'test-token');
+  const auth = vi.fn();
+  serveRecord({ ...detail, issueFileName: 'notes.pdf' });
+  server.use(http.get('*/api/observations/30/issue-file', ({ request }) => {
+    auth(request.headers.get('authorization'));
+    return new HttpResponse(new Blob(['file']), { headers: { 'Content-Disposition': "attachment; filename*=UTF-8''..%2Fprivate%3Anotes.pdf" } });
+  }));
+  const create = vi.fn(() => 'blob:test'); const revoke = vi.fn();
+  const originalCreate = URL.createObjectURL, originalRevoke = URL.revokeObjectURL;
+  URL.createObjectURL = create; URL.revokeObjectURL = revoke;
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    expect(this.download).toBe('private_notes.pdf');
+    expect(this.href).toBe('blob:test');
+  });
+  try {
+    openRecord();
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Download' }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith('blob:test'));
+    expect(auth).toHaveBeenCalledWith('Bearer test-token');
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Download' })).toBeEnabled();
+  } finally { URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; setTokenProvider(async () => null); }
+});
+it('shows Downloading and disables the button while the file is being fetched', async () => {
+  setTokenProvider(async () => 'test-token');
+  let finish!: () => void;
+  const gate = new Promise<void>((r) => { finish = r; });
+  serveRecord({ ...detail, issueFileName: 'notes.pdf' });
+  server.use(http.get('*/api/observations/30/issue-file', async () => { await gate; return apiError(404, 'NO_FILE', 'This observation has no attached file.'); }));
+  openRecord();
+  await userEvent.setup().click(await screen.findByRole('button', { name: 'Download' }));
+  expect(await screen.findByRole('button', { name: 'Downloading…' })).toBeDisabled();
+  finish();
+  expect(await screen.findByRole('button', { name: 'Download' })).toBeEnabled();
+  setTokenProvider(async () => null);
+});
+it('shows the error message when the download fails', async () => {
+  setTokenProvider(async () => 'test-token');
+  serveRecord({ ...detail, issueFileName: 'notes.pdf' });
+  server.use(http.get('*/api/observations/30/issue-file', () => apiError(404, 'NO_FILE', 'This observation has no attached file.')));
+  openRecord();
+  await userEvent.setup().click(await screen.findByRole('button', { name: 'Download' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('This observation has no attached file.');
+  setTokenProvider(async () => null);
+});
 it('lets only the observee sign after observer submission and sends the exact saved revision', async () => {
   let current: ObservationDetail = { ...detail, observerSignedDate: '2026-09-22', observeeSignedDate: null, status: 'scheduled' };
   let signBodies: unknown[] = [];
@@ -271,7 +371,7 @@ it('uploads a file as multipart field "file" and shows its name from the returne
   openRecord();
   await screen.findByText(lockNote);
   await user.upload(fileInput(), new File(['what happened'], 'notes.txt', { type: 'text/plain' }));
-  expect(await screen.findByText('Uploaded: notes.txt')).toBeVisible();
+  expect(await screen.findByText('notes.txt')).toBeVisible();
   expect(bodies).toHaveLength(1);
   expect(bodies[0]).toContain('name="file"');
   expect(bodies[0]).toContain('what happened');
@@ -295,7 +395,7 @@ it('accepts a file of exactly 10 MB', async () => {
   openRecord();
   await screen.findByText(lockNote);
   await user.upload(fileInput(), new File([new Uint8Array(10 * 1024 * 1024)], 'edge.bin'));
-  expect(await screen.findByText('Uploaded: edge.bin')).toBeVisible();
+  expect(await screen.findByText('edge.bin')).toBeVisible();
   expect(upload).toHaveBeenCalledOnce();
 });
 it('shows the server message when the upload is refused', async () => {
@@ -342,7 +442,7 @@ it('disables the upload link while a file is being sent', async () => {
   await user.upload(fileInput(), new File(['y'], 'b.txt'));
   expect(upload).toHaveBeenCalledOnce();
   finish(HttpResponse.json({ ...detail, issueFileName: 'a.txt' }));
-  expect(await screen.findByText('Uploaded: a.txt')).toBeVisible();
+  expect(await screen.findByText('a.txt')).toBeVisible();
 });
 
 it('blocks an empty reason, then reports with exactly { reason } and shows the record as not done', async () => {
@@ -424,7 +524,7 @@ it('clears the size message once a valid file is chosen', async () => {
   await user.upload(fileInput(), new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'big.bin'));
   expect(await screen.findByRole('alert')).toHaveTextContent('Files can be up to 10 MB.');
   await user.upload(fileInput(), new File(['x'], 'ok.txt'));
-  expect(await screen.findByText('Uploaded: ok.txt')).toBeVisible();
+  expect(await screen.findByText('ok.txt')).toBeVisible();
   expect(screen.queryByText('Files can be up to 10 MB.')).not.toBeInTheDocument();
 });
 it('closes the report dialog on Escape without sending anything', async () => {
