@@ -20,16 +20,19 @@ interface KpiMeta {
   name: string;
   format: 'rate' | 'count' | 'average';
   describe: (k: KpiResult) => string;
+  /** Said instead of `describe` when the KPI has no value: a rate or average with nothing to divide by. */
+  empty?: string;
 }
 
+// The sentences follow how the backend counts each KPI (backend/src/services/kpi-rules.ts).
 const KPI_META: Record<KpiCode, KpiMeta> = {
-  '1.1': { group: 'Faculty evaluation', name: 'Evaluation Eligibility Accuracy', format: 'rate', describe: (k) => `Observers who met every matching rule (${k.denominator - k.numerator} wrong).` },
+  '1.1': { group: 'Faculty evaluation', name: 'Evaluation Eligibility Accuracy', format: 'rate', describe: (k) => `Observers who met every matching rule (${k.denominator - k.numerator} wrong).`, empty: 'No confirmed observations to check.' },
   '1.2': { group: 'Faculty evaluation', name: 'Overdue Evaluation Count', format: 'count', describe: () => 'Due semester ended with no signed observation.' },
-  '2.1': { group: 'Participation', name: 'Assessment Participation Rate', format: 'rate', describe: (k) => `${k.numerator} of the ${k.denominator} professors who were due signed up.` },
-  '2.2': { group: 'Participation', name: 'Observer Utilization Rate', format: 'rate', describe: (k) => `${k.numerator} of the ${k.denominator} signed-up professors also observed a colleague.` },
-  '3.1': { group: 'Observer recommendations', name: 'List Sufficiency Rate', format: 'average', describe: () => 'Observers found per sign-up, on average. The target is 5.' },
-  '4.1': { group: 'Completion', name: 'Missing Observation Count', format: 'count', describe: () => 'Confirmed observations that did not happen.' },
-  '4.2': { group: 'Completion', name: 'Survey Completion Rate', format: 'rate', describe: (k) => `${k.numerator} of the ${k.denominator} signed-up professors finished the survey.` },
+  '2.1': { group: 'Participation', name: 'Assessment Participation Rate', format: 'rate', describe: (k) => `${k.numerator} of the ${k.denominator} professors who were due signed up.`, empty: 'Nobody was due this cycle.' },
+  '2.2': { group: 'Participation', name: 'Observer Utilization Rate', format: 'rate', describe: (k) => `${k.numerator} confirmed ${k.numerator === 1 ? 'observer' : 'observers'} for ${k.denominator} ${k.denominator === 1 ? 'sign-up' : 'sign-ups'}.`, empty: 'No sign-ups this cycle.' },
+  '3.1': { group: 'Observer recommendations', name: 'List Sufficiency Rate', format: 'average', describe: () => 'Observers found per sign-up, on average. The target is 5.', empty: 'No sign-ups this cycle.' },
+  '4.1': { group: 'Completion', name: 'Missing Observation Count', format: 'count', describe: () => 'Confirmed observations reported as not done, or not signed by both by the observation deadline.' },
+  '4.2': { group: 'Completion', name: 'Survey Completion Rate', format: 'rate', describe: (k) => `${k.numerator} of the ${k.denominator} sign-ups ended with a record signed by both and the observee's survey.`, empty: 'No sign-ups this cycle.' },
 };
 const ROW_1: KpiCode[] = ['1.1', '1.2', '2.1', '2.2'];
 const ROW_2: KpiCode[] = ['3.1', '4.1', '4.2'];
@@ -41,6 +44,11 @@ const value = (k: KpiResult | undefined, meta: KpiMeta) => {
   return String(k.kpiValue);
 };
 
+const describeKpi = (k: KpiResult | undefined, meta: KpiMeta) => {
+  if (!k) return 'Generated after the feedback deadline.';
+  return k.kpiValue === null && meta.empty ? meta.empty : meta.describe(k);
+};
+
 /** `missing` stands in for the value while the KPIs are loading or failed, so the card never reads N/A for them. */
 function KpiCard({ code, kpi, missing, className = '' }: { code: KpiCode; kpi: KpiResult | undefined; missing?: string; className?: string }) {
   const meta = KPI_META[code];
@@ -49,7 +57,7 @@ function KpiCard({ code, kpi, missing, className = '' }: { code: KpiCode; kpi: K
       <p className="text-xs text-gray-500"><span className="font-bold text-gray-900">{code}</span> {meta.group}</p>
       <h3 className="mt-[3px] text-sm font-bold text-gray-900">{meta.name}</h3>
       <p className="mt-auto text-[28px] leading-[34px] font-bold text-gray-900">{missing ? '–' : value(kpi, meta)}</p>
-      <p className="mt-1 min-h-8 text-xs text-gray-500">{missing ?? (kpi ? meta.describe(kpi) : 'Generated after the feedback deadline.')}</p>
+      <p className="mt-1 min-h-8 text-xs text-gray-500">{missing ?? describeKpi(kpi, meta)}</p>
     </Card>
   );
 }
