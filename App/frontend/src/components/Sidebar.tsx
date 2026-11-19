@@ -122,7 +122,7 @@ export const SIDEBAR_ID = 'app-sidebar';
  * From the md breakpoint up the sidebar sits beside the page. Below it the sidebar is a drawer
  * that slides in over the page when `open` is true, and is hidden (and out of the tab order) otherwise.
  */
-export function Sidebar({ mode, activeNav, open = false }: { mode: Mode; activeNav?: string; open?: boolean }) {
+export function Sidebar({ mode, activeNav, open = false, onLinkClick }: { mode: Mode; activeNav?: string; open?: boolean; onLinkClick?: () => void }) {
   const { data: me } = useMe();
   const { signOut } = useAuth();
   const navigate = useNavigate();
@@ -131,6 +131,8 @@ export function Sidebar({ mode, activeNav, open = false }: { mode: Mode; activeN
   return (
     <aside
       id={SIDEBAR_ID}
+      // A tap on any link, the page already open included, lets the phone menu close.
+      onClick={(e) => { if (onLinkClick && e.target instanceof Element && e.target.closest('a')) onLinkClick(); }}
       className={`app-shell-sidebar sticky top-0 flex h-screen w-[220px] shrink-0 flex-col overflow-y-auto border-r border-gray-200 bg-gray-100 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:h-dvh max-md:transition-[transform,visibility] ${drawer}`}
     >
       <div className="relative h-24 shrink-0">

@@ -69,6 +69,18 @@ describe('Phone menu', () => {
     expect(isClosed()).toBe(true);
   });
 
+  it('closes when the link to the page already open is tapped, and hands focus back to the menu button', async () => {
+    openApp('/committee/cycle');
+    await screen.findByText('Cycle page');
+    const open = screen.getByRole('button', { name: 'Open menu' });
+    await userEvent.click(open);
+    expect(isClosed()).toBe(false);
+    await userEvent.click(within(sidebar()).getByRole('link', { name: 'Cycle' }));
+    expect(screen.getByText('Cycle page')).toBeVisible();
+    expect(isClosed()).toBe(true);
+    expect(open).toHaveFocus();
+  });
+
   it('moves focus into the open menu, keeps the page out of reach, and hands focus back on close', async () => {
     openApp();
     await screen.findByText('Dashboard page');

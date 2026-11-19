@@ -75,6 +75,8 @@ function selectionRanAt(rows: MatchingRow[]): string | null {
   return [...times].sort(byTime)[0];
 }
 
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : '');
+
 /**
  * Same rules as the dashboard sends: a send the backend answered with its own error body did not happen;
  * anything else (no connection, a proxy timeout, a reply that is not the API's) may have, so it is unknown.
@@ -249,8 +251,9 @@ export function SignupsPage() {
   // A sign-up that already has its observation is paired. The backend leaves the alert it raised before
   // the pairing open, so it is ignored here, the same way Dashboard > Unmatched leaves paired sign-ups out.
   const pairedWith = new Map(signups.data?.flatMap((s) => (s.observation ? [[s.signupId, s.observation.observer.displayName] as const] : [])));
-  // Until the sign-ups have loaded, paired sign-ups can't be told apart, so the banner waits instead of flashing a stale count.
-  const signupsSettled = !signups.isPending;
+  // Until the sign-ups have loaded, paired sign-ups can't be told apart, so the banner waits instead of flashing a stale
+  // count. If they fail to load, the banner stays away and a note says why.
+  const signupsSettled = Boolean(signups.data);
   const all = (matching.data ?? []).map((r) => (pairedWith.has(r.signupId) && r.alert ? { ...r, alert: null } : r));
   const attention = all.filter((r) => r.alert);
   // Once nothing needs attention any more (for example after an observer is added), the full list is shown.
@@ -263,7 +266,7 @@ export function SignupsPage() {
   // A run that found no observer for anyone leaves every ranAt empty, but it does raise alerts.
   const ran = ranOn !== null || (matching.data ?? []).some((r) => r.alert);
 
-  // The sign-ups read only fills the Email column, so its failure leaves that column empty.
+  // The sign-ups read fills the Email column and tells paired sign-ups apart, so its failure gets its own note below.
   const failed = [cycle, matching].filter((q) => q.error);
   if (failed.length) {
     const busy = failed.some((q) => q.isFetching);
@@ -287,6 +290,17 @@ export function SignupsPage() {
 
   return (
     <div className="flex flex-col pt-8">
+      {signups.error && !signups.data && (
+        <div className="mb-5 flex flex-col items-start gap-3">
+          <ErrorNote
+            error={new Error(`Couldn't load the sign-ups, so a paired sign-up may still show its old status and the Email column is empty. ${errorMessage(signups.error)}`.trim())}
+            className="self-stretch"
+          />
+          <Button type="button" variant="secondary" size="sm" aria-disabled={signups.isFetching || undefined} onClick={() => { if (!signups.isFetching) void signups.refetch(); }}>
+            {signups.isFetching ? 'Trying again…' : 'Try again'}
+          </Button>
+        </div>
+      )}
       {signupsSettled && attention.length > 0 && (
         <div className="mb-5">
           <Banner
