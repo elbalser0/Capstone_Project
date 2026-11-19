@@ -145,7 +145,7 @@ export function ConfirmationsPage() {
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Accepted this semester" value={`${accepted.length} of ${LIMIT}`} />
         <StatCard label="You are the observer" value={accepted.length} />
-        <StatCard label="Cancelled, someone else accepted first" value={cancelled.length} />
+        <StatCard label="Cancelled" value={cancelled.length} />
       </div>
 
       <h2 className="mb-[13px] mt-6 text-base font-bold text-gray-900">My confirmations</h2>
@@ -171,13 +171,13 @@ export function ConfirmationsPage() {
             <Cell className="font-bold">{request.observee.displayName}</Cell>
             <Cell>{request.section.label}</Cell>
             <Cell />
-            <Cell><Tag tone="neutral">Cancelled: another colleague accepted first</Tag></Cell>
+            <Cell><Tag tone="neutral">Cancelled</Tag></Cell>
             <Cell />
           </Row>
         ))}
         {!assignments.isPending && allAssignments.length + cancelled.length === 0 && <EmptyRow>No confirmations yet this semester.</EmptyRow>}
       </Table>
-      <InfoLine className="mt-[18px]">If you accept first, you are paired right away. If another colleague accepted first, the request shows as cancelled.</InfoLine>
+      <InfoLine className="mt-[18px]">If you accept first, you are paired right away. A request shows as cancelled when another colleague accepted first, or when you reached 3 observations.</InfoLine>
     </div>
   );
 }

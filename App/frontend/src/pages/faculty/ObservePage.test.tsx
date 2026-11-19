@@ -168,7 +168,15 @@ it('shows accepted confirmations with form or record links and lists cancelled r
   renderRoutes([{ path: '/faculty/observe/confirmations', element: <ConfirmationsPage /> }], '/faculty/observe/confirmations');
   expect(await screen.findByRole('link', { name: 'Open form' })).toHaveAttribute('href', '/faculty/observe/30/form');
   expect(screen.getAllByRole('link', { name: 'View' })).toHaveLength(2);
-  expect(screen.getByText('Cancelled: another colleague accepted first')).toBeVisible();
+  expect(screen.getAllByText('Cancelled')).toHaveLength(2);
+});
+
+it('says Cancelled without claiming someone else accepted first, and explains both reasons', async () => {
+  setup({ incoming: [{ ...request, status: 'cancelled' }], assignments: [] });
+  renderRoutes([{ path: '/faculty/observe/confirmations', element: <ConfirmationsPage /> }], '/faculty/observe/confirmations');
+  expect(await screen.findByText(/A request shows as cancelled when another colleague accepted first, or when you reached 3 observations\./)).toBeVisible();
+  expect(screen.queryByText(/someone else accepted|Cancelled: another colleague/i)).not.toBeInTheDocument();
+  expect(screen.getAllByText('Cancelled')).toHaveLength(2);
 });
 
 it('shows the confirmations empty state', async () => {

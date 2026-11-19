@@ -134,7 +134,9 @@ export function SurveyPage() {
       <p className="mt-1 text-sm text-gray-600">{TIMING_NOTE}</p>
       <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,720px)_minmax(0,20.5rem)] lg:items-start">
         {cycle.data.phase === 'feedback' ? <SurveyForm key={cycle.data.cycleId} cycleId={cycle.data.cycleId} /> :
-          <p className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm">The survey is not open. It is available from {formatDate(cycle.data.surveyOpensDate)} through {formatDate(cycle.data.feedbackDeadline)}.</p>}
+          <p className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm">{cycle.data.phase === 'closed'
+            ? `The survey closed on ${formatDate(cycle.data.feedbackDeadline)}.`
+            : `The survey is not open. It is available from ${formatDate(cycle.data.surveyOpensDate)} through ${formatDate(cycle.data.feedbackDeadline)}.`}</p>}
         <SurveySummary cycle={cycle.data} />
       </div>
     </>}

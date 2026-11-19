@@ -134,10 +134,10 @@ describe('outstanding tab (A6)', () => {
     expect(screen.queryByText(/By hire level/)).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
-  it('has no Forward a link button', async () => {
+  it('has no Forward button', async () => {
     serve(); open();
     await screen.findByRole('table', { name: 'Outstanding observations' });
-    expect(screen.queryByRole('button', { name: /Forward a link/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Forward/ })).not.toBeInTheDocument();
   });
   it('says when nothing is outstanding and when nobody has signed up', async () => {
     serve({ signups: [rows[5]] });
@@ -173,7 +173,7 @@ describe('states', () => {
 });
 
 describe('completed tab (A6a)', () => {
-  it('lists the signed and locked observations, oldest first, each with Forward a link', async () => {
+  it('lists the signed and locked observations, oldest first, each with Forward', async () => {
     serve(); open();
     await user().click(await screen.findByRole('tab', { name: 'Completed (2)' }));
     const table = screen.getByRole('table', { name: 'Completed observations' });
@@ -181,7 +181,8 @@ describe('completed tab (A6a)', () => {
     expect(within(rowOf('Dr. Flo Done')).getByText('Dr. Gus Observer')).toBeVisible();
     expect(within(rowOf('Dr. Flo Done')).getByText('Sep 18, 2026')).toBeVisible();
     expect(within(rowOf('Dr. Flo Done')).getByText('Signed and locked')).toBeVisible();
-    expect(within(table).getAllByRole('button', { name: /Forward a link/ })).toHaveLength(2);
+    expect(within(table).getAllByRole('button', { name: /Forward/ })).toHaveLength(2);
+    expect(within(table).queryByRole('button', { name: /link|read-only/i })).not.toBeInTheDocument();
     expect(screen.queryByText(OUTSTANDING_TEXT)).not.toBeInTheDocument();
   });
   it('shows the empty state', async () => {
@@ -191,13 +192,13 @@ describe('completed tab (A6a)', () => {
   });
 });
 
-describe('forward a link (A6b)', () => {
+describe('forward a record by email (A6b)', () => {
   async function openForward(u = user()) {
     const log = serve();
     open();
     await u.click(await screen.findByRole('tab', { name: 'Completed (2)' }));
-    await u.click(screen.getByRole('button', { name: "Forward a link to Dr. Flo Done's observation" }));
-    return { log, u, dialog: within(await screen.findByRole('dialog', { name: 'Forward a link to this observation' })) };
+    await u.click(screen.getByRole('button', { name: "Forward Dr. Flo Done's observation" }));
+    return { log, u, dialog: within(await screen.findByRole('dialog', { name: 'Forward this observation' })) };
   }
   function forwardsTo(log: Log, respond: () => Response | Promise<Response> = () => HttpResponse.json({ forwardId: 'f1', sharedDate: '2026-09-25T10:00:00Z' }, { status: 201 })) {
     server.use(http.post('*/api/observations/:id/forward', async ({ request, params }) => {
@@ -210,10 +211,10 @@ describe('forward a link (A6b)', () => {
     const { log, u, dialog } = await openForward();
     forwardsTo(log);
     expect(dialog.getByText(/Dr. Flo Done, observed by Dr. Gus Observer, Sep 18, 2026/)).toBeVisible();
-    expect(dialog.getByRole('button', { name: 'Send link' })).toBeDisabled();
+    expect(dialog.getByRole('button', { name: 'Send' })).toBeDisabled();
     await u.type(dialog.getByLabelText('Email'), '  chair@demo.edu ');
-    await u.click(dialog.getByRole('button', { name: 'Send link' }));
-    expect(await screen.findByText('Link sent to chair@demo.edu. The forward is recorded.')).toBeVisible();
+    await u.click(dialog.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText('Sent to chair@demo.edu. The forward is recorded.')).toBeVisible();
     expect(log.forwards).toEqual([{ id: 'o6', body: { email: 'chair@demo.edu' } }]);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -221,7 +222,7 @@ describe('forward a link (A6b)', () => {
     const { log, u, dialog } = await openForward();
     forwardsTo(log, never);
     await u.type(dialog.getByLabelText('Email'), 'chair@demo.edu');
-    await u.dblClick(dialog.getByRole('button', { name: 'Send link' }));
+    await u.dblClick(dialog.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(dialog.getByRole('button', { name: 'Sending…' })).toBeDisabled());
     expect(log.forwards).toHaveLength(1);
   });
@@ -232,26 +233,32 @@ describe('forward a link (A6b)', () => {
     const { log, u, dialog } = await openForward();
     forwardsTo(log, () => failure(status, code, message));
     await u.type(dialog.getByLabelText('Email'), 'chair@demo');
-    await u.click(dialog.getByRole('button', { name: 'Send link' }));
+    await u.click(dialog.getByRole('button', { name: 'Send' }));
     expect(await dialog.findByText(message)).toHaveAttribute('role', 'alert');
     expect(dialog.getByLabelText('Email')).toHaveValue('chair@demo');
-    expect(screen.queryByText(/Link sent to/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sent to/)).not.toBeInTheDocument();
   });
-  it('says forwarding is not available yet when the backend has no such route', async () => {
+  it('shows a missing-endpoint 404 as the normal error, not as unavailable', async () => {
     const { log, u, dialog } = await openForward();
     forwardsTo(log, () => failure(404, 'NOT_FOUND', 'The requested endpoint does not exist.'));
     await u.type(dialog.getByLabelText('Email'), 'chair@demo.edu');
-    await u.click(dialog.getByRole('button', { name: 'Send link' }));
-    expect(await dialog.findByText('Forwarding a link is not available yet. Nothing was sent.')).toBeVisible();
-    expect(dialog.queryByText('The requested endpoint does not exist.')).not.toBeInTheDocument();
+    await u.click(dialog.getByRole('button', { name: 'Send' }));
+    expect(await dialog.findByText('The requested endpoint does not exist.')).toHaveAttribute('role', 'alert');
+    expect(dialog.queryByText(/not available yet/)).not.toBeInTheDocument();
     expect(dialog.getByLabelText('Email')).toHaveValue('chair@demo.edu');
     expect(screen.getByRole('tab', { name: 'Completed (2)' })).toBeVisible();
+  });
+  it('describes the forward as an email of the record, without a link or a read-only view', async () => {
+    const { dialog } = await openForward();
+    expect(dialog.getByText('The record is sent as text in an email. This forward is recorded.')).toBeVisible();
+    expect(dialog.queryByText(/link|read-only/i)).not.toBeInTheDocument();
+    expect(dialog.queryByRole('button', { name: /link/i })).not.toBeInTheDocument();
   });
   it('shows another 404 as an ordinary error', async () => {
     const { log, u, dialog } = await openForward();
     forwardsTo(log, () => failure(404, 'NOT_FOUND', 'Observation not found.'));
     await u.type(dialog.getByLabelText('Email'), 'chair@demo.edu');
-    await u.click(dialog.getByRole('button', { name: 'Send link' }));
+    await u.click(dialog.getByRole('button', { name: 'Send' }));
     expect(await dialog.findByText('Observation not found.')).toHaveAttribute('role', 'alert');
     expect(dialog.queryByText(/not available yet/)).not.toBeInTheDocument();
   });
@@ -291,27 +298,27 @@ describe('review follow-ups', () => {
     const u = user();
     serve(); open();
     await u.click(await screen.findByRole('tab', { name: 'Completed (2)' }));
-    await u.click(screen.getByRole('button', { name: "Forward a link to Dr. Flo Done's observation" }));
+    await u.click(screen.getByRole('button', { name: "Forward Dr. Flo Done's observation" }));
     server.use(http.post('*/api/observations/:id/forward', () => never()));
     const dialog = within(await screen.findByRole('dialog'));
     await u.type(dialog.getByLabelText('Email'), 'chair@demo.edu');
-    await u.click(dialog.getByRole('button', { name: 'Send link' }));
+    await u.click(dialog.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(dialog.getByRole('button', { name: 'Sending…' })).toBeDisabled());
     await u.keyboard('{Escape}');
     expect(screen.getByRole('dialog')).toBeVisible();
     expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDisabled();
   });
-  it('clears the "Link sent" note when the tab changes', async () => {
+  it('clears the "Sent" note when the tab changes', async () => {
     const u = user();
     serve(); open();
     await u.click(await screen.findByRole('tab', { name: 'Completed (2)' }));
-    await u.click(screen.getByRole('button', { name: "Forward a link to Dr. Flo Done's observation" }));
+    await u.click(screen.getByRole('button', { name: "Forward Dr. Flo Done's observation" }));
     server.use(http.post('*/api/observations/:id/forward', () => HttpResponse.json({ forwardId: 'f1', sharedDate: '2026-09-25T10:00:00Z' }, { status: 201 })));
     await u.type(within(screen.getByRole('dialog')).getByLabelText('Email'), 'chair@demo.edu');
-    await u.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Send link' }));
-    expect(await screen.findByText(/Link sent to chair@demo.edu/)).toBeVisible();
+    await u.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText(/Sent to chair@demo.edu/)).toBeVisible();
     await u.click(screen.getByRole('tab', { name: /Outstanding/ }));
     await u.click(screen.getByRole('tab', { name: 'Completed (2)' }));
-    expect(screen.queryByText(/Link sent to/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sent to/)).not.toBeInTheDocument();
   });
 });

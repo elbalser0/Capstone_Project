@@ -125,7 +125,7 @@ function BeforeYouSubmit({ status, cycle }: { status: EvaluationStatus; cycle: C
         <Steps
           items={[
             `After ${formatShort(cycle.signupDeadline)} the Assessment Committee runs observer selection.`,
-            'You get a list of up to 5 colleagues who are free at the times you pick.',
+            'You get a list of up to 5 colleagues from your department who teach at the same course level.',
             'You send requests to the ones you pick.',
           ]}
         />
@@ -199,7 +199,7 @@ export function SignUpPage() {
         </fieldset>
 
         <h2 className="mt-7 text-base font-bold text-gray-900">Preferred days and times for the observation</h2>
-        <p className="mt-[7px] text-sm text-gray-500">Pick one or more meetings of this class. Observers are matched to these times.</p>
+        <p className="mt-[7px] text-sm text-gray-500">Pick one or more meetings of this class. Observers choose one of these times when they accept.</p>
         <div className="mt-4 flex flex-wrap gap-2">
           {section &&
             dates.map((d) => (

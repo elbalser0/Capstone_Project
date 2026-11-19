@@ -308,15 +308,15 @@ it('shows the server message when the upload is refused', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent('Choose a file to upload.');
   expect(screen.queryByText(/not available yet/)).not.toBeInTheDocument();
 });
-it('says uploading is not available yet when the backend has no such route', async () => {
+it('shows a missing-endpoint 404 from the upload as the normal error, not as unavailable', async () => {
   serveRecord();
   server.use(http.post('*/api/observations/30/issue-file', () => apiError(404, 'NOT_FOUND', 'The requested endpoint does not exist.')));
   const user = userEvent.setup();
   openRecord();
   await screen.findByText(lockNote);
   await user.upload(fileInput(), new File(['x'], 'a.txt'));
-  expect(await screen.findByText('Uploading a file is not available yet. Nothing was uploaded.')).toBeVisible();
-  expect(screen.queryByText('The requested endpoint does not exist.')).not.toBeInTheDocument();
+  expect(await screen.findByRole('alert')).toHaveTextContent('The requested endpoint does not exist.');
+  expect(screen.queryByText(/not available yet/)).not.toBeInTheDocument();
   expect(screen.getByText('Read only')).toBeVisible();
 });
 it('shows another 404 from the upload as an ordinary error', async () => {

@@ -53,6 +53,20 @@ describe('My evaluation page', () => {
     expect(screen.getByText('Loading sign-up…')).toBeVisible();
   });
 
+  it.each([
+    ['completed', 'Completed (signature status unavailable)'],
+    ['scheduled', 'Scheduled (date unavailable)'],
+  ] as const)('shows the %s sign-up tag with parentheses and no dash', async (status, label) => {
+    serve({
+      status: { ...evaluationStatus, status: 'NOT_DUE', canSignUp: false }, observations: [],
+      currentSignup: { ...signup, observation: { observationId: '30', observer: observation.observer, status } },
+    });
+    openPage();
+    const tag = await screen.findByText(label);
+    expect(tag).toBeVisible();
+    expect(tag.textContent).not.toContain('\u2014');
+  });
+
   it('shows an explicit loading state while evaluation status is pending', async () => {
     server.use(http.get('*/api/me/evaluation-status', async () => new Promise<never>(() => {})));
     openPage();
@@ -134,7 +148,7 @@ describe('My evaluation page', () => {
   });
 
   it.each([
-    ['completed', 'Completed — signature status unavailable'],
+    ['completed', 'Completed (signature status unavailable)'],
     ['not_completed', 'Did not happen'],
   ] as const)('shows signup-only %s without guessing signature state', async (state, label) => {
     serve({ observations: [], currentSignup: { ...signup, observation: { observationId: '30', observer: observation.observer, status: state } } });
