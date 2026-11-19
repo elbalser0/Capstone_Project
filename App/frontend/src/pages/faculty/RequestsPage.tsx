@@ -61,7 +61,9 @@ const Scroll = ({ min, children }: { min: string; children: ReactNode }) => (
 function FreeAt({ candidate, signup }: { candidate: Candidate; signup: Signup }) {
   if (candidate.freeAtProposedTimes === undefined) return null;
   if (!candidate.freeAtProposedTimes) return <span className="text-gray-500">No</span>;
-  const days = [...new Set(signup.proposedDates.map((d) => weekday(d.date)))];
+  // Monday first, whatever order the dates were picked in.
+  const byWeekday = [...signup.proposedDates].sort((a, b) => (new Date(`${a.date}T12:00:00Z`).getUTCDay() + 6) % 7 - (new Date(`${b.date}T12:00:00Z`).getUTCDay() + 6) % 7);
+  const days = [...new Set(byWeekday.map((d) => weekday(d.date)))];
   const times = [...new Set(signup.proposedDates.map((d) => formatTime(d.startTime)))];
   return (
     <span className="flex items-center gap-[11px]">
@@ -78,7 +80,20 @@ function teachesLabel(candidate: Candidate, level: number) {
   return atLevel ? `${atLevel}, ${level} level` : (courses[0] ?? '');
 }
 
-function ChooseObservers({ signup, candidates, signupDeadline }: { signup: Signup; candidates: Candidate[]; signupDeadline: string }) {
+/** "Dr. A and Dr. B declined. Dr. C did not answer within 48 hours." for requests that ended without an observer. */
+function endedText(requests: ObservationRequest[]) {
+  const names = (status: RequestStatus) => requests.filter((r) => r.status === status).map((r) => r.observer.displayName);
+  const declined = names('declined');
+  const expired = names('expired');
+  const cancelled = names('cancelled');
+  return [
+    declined.length ? `${joinAnd(declined)} declined.` : '',
+    expired.length ? `${joinAnd(expired)} did not answer within 48 hours.` : '',
+    cancelled.length ? `The system cancelled the request to ${joinAnd(cancelled)}.` : '',
+  ].filter(Boolean).join(' ');
+}
+
+function ChooseObservers({ signup, candidates, signupDeadline, ended }: { signup: Signup; candidates: Candidate[]; signupDeadline: string; ended: ObservationRequest[] }) {
   const navigate = useNavigate();
   const notifications = useNotifications();
   const send = useSendRequests(signup.signupId);
@@ -105,7 +120,13 @@ function ChooseObservers({ signup, candidates, signupDeadline }: { signup: Signu
 
   return (
     <div className="flex flex-col pt-8">
-      {ready && <Banner tone="info">Your observer list is ready (sent by the Assessment Committee, {formatShort(ready.sentDate)})</Banner>}
+      {ended.length > 0 ? (
+        <Callout tone="warning" title={`None of the ${ended.length === 1 ? 'request' : `${ended.length} requests`} you sent found an observer.`}>
+          {endedText(ended)} You can send a request to the other observers on your list below.
+        </Callout>
+      ) : (
+        ready && <Banner tone="info">Your observer list is ready (sent by the Assessment Committee, {formatShort(ready.sentDate)})</Banner>
+      )}
       <div className="mt-5 flex items-baseline justify-between">
         <h2 className="text-base font-bold text-gray-900">Recommended observers</h2>
         <span className="text-sm font-bold text-gray-900">{chosen.length} of {open.length} selected</span>
@@ -291,33 +312,49 @@ function Matched({ signup, requests, observation }: { signup: Signup; requests: 
   const time = date ? classStart(signup.section, date) : '';
   const room = signup.section.meetings[0]?.room;
   const accepted = requests.find((r) => r.status === 'accepted');
+  // The record was reported as "could not be done": there is no form to sign, and this cycle has no second pairing.
+  const missed = signup.observation!.status === 'not_completed' || observation?.status === 'not_completed';
   return (
     <div className="flex flex-col pt-8">
-      <Callout tone="success" title={`${observer.displayName} accepted first and is your observer.`}>
-        {date && `${formatDayYear(date)}, ${formatTime(time)}. `}
-        {signup.section.label} {signup.section.title}
-        {room ? `, ${room}.` : '.'}
-      </Callout>
+      {missed ? (
+        <Callout tone="warning" title={`The observation with ${observer.displayName} did not happen.`}>
+          It was reported as not done{date ? ` (planned for ${formatDayYear(date)})` : ''}. There is no form to sign, and this sign-up cannot get another observer in the app this semester. The Assessment Committee can tell you what happens next.
+        </Callout>
+      ) : (
+        <Callout tone="success" title={`${observer.displayName} accepted first and is your observer.`}>
+          {date && `${formatDayYear(date)}, ${formatTime(time)}. `}
+          {signup.section.label} {signup.section.title}
+          {room ? `, ${room}.` : '.'}
+        </Callout>
+      )}
       <RequestTable requests={requests} columns="280px 240px 260px 1fr" min="min-w-[900px]" head={['Time they picked', 'Status', 'When']}>
         {(r) => (
           <>
             <Cell className="text-gray-700">{r.status === 'accepted' && date ? formatSlot(date, time) : ''}</Cell>
             <Cell>{statusTag(r)}</Cell>
             <Cell className="text-gray-700">
-              {r.respondedDate ? formatDateTime(r.respondedDate) : r.status === 'cancelled' && accepted?.respondedDate ? formatDateTime(accepted.respondedDate) : ''}
+              {r.respondedDate
+                ? formatDateTime(r.respondedDate)
+                : r.status === 'expired'
+                  ? `${formatDateTime(r.expiresAt)} (no answer in 48 hours)`
+                  : r.status === 'cancelled' && accepted?.respondedDate ? formatDateTime(accepted.respondedDate) : ''}
             </Cell>
           </>
         )}
       </RequestTable>
-      <h2 className="mt-8 mb-[13px] text-sm font-bold text-gray-900">What happens next</h2>
-      <Steps
-        tone="brand"
-        items={[
-          `Dr. ${observer.lastName} can open the observation form${date ? ` for ${formatShort(date)}` : ''} from their confirmations.`,
-          'The observation shows under My evaluation.',
-          'After the class, you both sign the record.',
-        ]}
-      />
+      {!missed && (
+        <>
+          <h2 className="mt-8 mb-[13px] text-sm font-bold text-gray-900">What happens next</h2>
+          <Steps
+            tone="brand"
+            items={[
+              `Dr. ${observer.lastName} can open the observation form${date ? ` for ${formatShort(date)}` : ''} from their confirmations.`,
+              'The observation shows under My evaluation.',
+              'After the class, you both sign the record.',
+            ]}
+          />
+        </>
+      )}
       <div className="mt-7">
         <Link to="/faculty/evaluation" className={buttonClass('primary')}>View my evaluation</Link>
       </div>
@@ -413,7 +450,7 @@ function renderView(
       </div>
     );
   }
-  if (view === 'choose') return <ChooseObservers signup={s} candidates={candidates!} signupDeadline={status.cycle?.signupDeadline ?? ''} />;
+  if (view === 'choose') return <ChooseObservers signup={s} candidates={candidates!} signupDeadline={status.cycle?.signupDeadline ?? ''} ended={requests} />;
   if (view === 'sent') return <RequestsSent signup={s} requests={requests} observations={observations} />;
   if (view === 'nobody') return <NobodyAccepted signup={s} requests={requests} />;
   return <Matched signup={s} requests={requests} observation={observations?.find((o) => o.observationId === s.observation!.observationId)} />;
