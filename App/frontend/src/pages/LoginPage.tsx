@@ -129,7 +129,8 @@ export function LoginPage() {
             </div>
           )}
         </section>
-        <p className="mt-6 text-center text-xs text-gray-500">CS 4485 capstone, Team 06, proof of concept</p>
+        {/* "Proof of concept" belongs to the demo accounts only, not to the real sign-in. */}
+        <p className="mt-6 text-center text-xs text-gray-500">CS 4485 capstone, Team 06{AUTH_MODE === 'demo' ? ', proof of concept' : ''}</p>
       </main>
     </div>
   );
