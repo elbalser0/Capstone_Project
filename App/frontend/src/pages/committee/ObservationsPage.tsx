@@ -3,22 +3,19 @@ import { useCycleSignups, useForwardObservation, useMatching, useOutstandingObse
 import { useObservation } from '../../api/hooks/faculty';
 import { useCurrentCycle } from '../../api/hooks/shared';
 import type { MatchingRow, Signup } from '../../api/types';
-import { CheckIcon, LinkIcon, MailIcon, SendIcon } from '../../components/icons';
+import { CheckIcon, MailIcon, SendIcon } from '../../components/icons';
 import { Button, Cell, EmptyRow, ErrorNote, LockNote, Modal, Pagination, Row, Table, Tabs, Tag, inputClass, labelClass, usePages } from '../../components/ui';
 import { RANK_SHORT, formatDate, ranks } from '../../lib/format';
-import { isMissingEndpoint } from '../../lib/missingEndpoint';
 import { OUTSTANDING_TEXT } from '../../lib/statusTerms';
 
-// A6 outstanding, A6a completed, A6b forward a link to a signed record.
+// A6 outstanding, A6a completed, A6b forward a signed record by email.
 // The lists come from the current cycle's sign-ups with the dashboard's rule: a sign-up is outstanding until
 // its observation is completed, and the observation is completed once the observee signs, so a completed row
-// is signed by both people and locked. Forwarding a link (POST /api/observations/{id}/forward) is not in the
-// backend yet; until it is, the forward dialog says so.
+// is signed by both people and locked.
 
 type Tab = 'outstanding' | 'completed';
 
 const PAGE_SIZE = 7;
-const FORWARD_MISSING = 'Forwarding a link is not available yet. Nothing was sent.';
 
 const observedOn = (s: Signup) => (s.observation?.scheduledDate ? formatDate(s.observation.scheduledDate) : '');
 
@@ -49,7 +46,6 @@ function ForwardModal({ signup, onClose, onSent }: { signup: Signup; onClose: ()
   const [email, setEmail] = useState('');
   const busy = useRef(false);
   const o = signup.observation!;
-  const missing = isMissingEndpoint(forward.error);
   // Closing while the send is in flight would lose its result, so ignore Escape and the backdrop until it ends.
   const close = useCallback(() => { if (!forward.isPending) onClose(); }, [forward.isPending, onClose]);
   const send = () => {
@@ -63,7 +59,7 @@ function ForwardModal({ signup, onClose, onSent }: { signup: Signup; onClose: ()
   };
   return (
     <Modal
-      title="Forward a link to this observation"
+      title="Forward this observation"
       subtitle={
         <span className="text-sm">
           {signup.observee.displayName}, observed by {o.observer.displayName}
@@ -76,7 +72,7 @@ function ForwardModal({ signup, onClose, onSent }: { signup: Signup; onClose: ()
         <>
           <Button variant="secondary" disabled={forward.isPending} onClick={close}>Cancel</Button>
           <Button disabled={!email.trim() || forward.isPending} onClick={send}>
-            <SendIcon width={13} height={13} /> {forward.isPending ? 'Sending…' : 'Send link'}
+            <SendIcon width={13} height={13} /> {forward.isPending ? 'Sending…' : 'Send'}
           </Button>
         </>
       }
@@ -86,8 +82,8 @@ function ForwardModal({ signup, onClose, onSent }: { signup: Signup; onClose: ()
         <input id="forward-email" type="email" autoComplete="email" className={`${inputClass} w-full pr-10`} value={email} onChange={(e) => setEmail(e.target.value)} />
         <MailIcon className="pointer-events-none absolute top-[14px] right-3.5 text-gray-500" />
       </span>
-      {missing ? <p role="status" className="mt-3 text-sm text-gray-700">{FORWARD_MISSING}</p> : <ErrorNote error={forward.error} className="mt-3" />}
-      <LockNote className="mt-5 py-[11px]">The link opens a read-only view. This forward is recorded.</LockNote>
+      <ErrorNote error={forward.error} className="mt-3" />
+      <LockNote className="mt-5 py-[11px]">The record is sent as text in an email. This forward is recorded.</LockNote>
     </Modal>
   );
 }
@@ -171,7 +167,7 @@ export function ObservationsPage() {
             <p className="mb-3 text-sm text-gray-500">Observations signed by both people. These records are locked.</p>
             {sentTo && (
               <p role="status" className="mb-3 flex items-center gap-2 text-sm text-gray-700">
-                <CheckIcon width={10} height={8} className="text-green-800" /> Link sent to {sentTo}. The forward is recorded.
+                <CheckIcon width={10} height={8} className="text-green-800" /> Sent to {sentTo}. The forward is recorded.
               </p>
             )}
             <div className="overflow-x-auto">
@@ -185,8 +181,8 @@ export function ObservationsPage() {
                       <Cell>{observedOn(s)}</Cell>
                       <Cell><Tag tone="signed">Signed and locked</Tag></Cell>
                       <Cell className="flex justify-end pr-0">
-                        <Button variant="secondary" size="sm" aria-label={`Forward a link to ${s.observee.displayName}'s observation`} onClick={() => { setSentTo(null); setForwarding(s); }}>
-                          <LinkIcon /> Forward a link
+                        <Button variant="secondary" size="sm" aria-label={`Forward ${s.observee.displayName}'s observation`} onClick={() => { setSentTo(null); setForwarding(s); }}>
+                          <SendIcon /> Forward
                         </Button>
                       </Cell>
                     </Row>
