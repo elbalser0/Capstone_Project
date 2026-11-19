@@ -291,6 +291,15 @@ describe('forward a record by email (A6b)', () => {
     expect(log.forwards).toEqual([{ id: 'o6', body: { email: 'chair@demo.edu' } }]);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+  it('refuses an address longer than an email address can be, without sending it', async () => {
+    const { log, u, dialog } = await openForward();
+    forwardsTo(log);
+    await u.click(dialog.getByLabelText('Email'));
+    await u.paste(`${'b'.repeat(65)}@example.edu`);
+    expect(dialog.getByRole('alert')).toHaveTextContent('That address is too long');
+    expect(dialog.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(log.forwards).toHaveLength(0);
+  });
   it('sends once under repeated clicks', async () => {
     const { log, u, dialog } = await openForward();
     forwardsTo(log, never);

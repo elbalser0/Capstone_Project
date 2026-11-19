@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import userEvent from '@testing-library/user-event';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
@@ -578,4 +578,20 @@ it('reloads the record when the report is refused because the observer signed me
   expect(await screen.findByRole('button', { name: 'Sign' })).toBeVisible();
   expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
   expect(reportLink()).not.toBeInTheDocument();
+});
+
+it('a fast double click on Report sends one report', async () => {
+  const bodies: unknown[] = [];
+  serveRecord();
+  server.use(http.post('*/api/observations/30/report-missed', async ({ request }) => { bodies.push(await request.json()); return new Promise<never>(() => {}); }));
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'The observation could not be done' }));
+  const dialog = await screen.findByRole('dialog', { name: 'The observation could not be done' });
+  await user.type(within(dialog).getByLabelText('What happened?'), 'Room was locked');
+  // Two clicks in one event-loop turn, before React re-renders with isPending.
+  const report = within(dialog).getByRole('button', { name: 'Report' });
+  act(() => { fireEvent.click(report); fireEvent.click(report); });
+  await within(dialog).findByRole('button', { name: 'Reporting…' });
+  expect(bodies).toHaveLength(1);
 });

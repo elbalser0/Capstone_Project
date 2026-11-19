@@ -53,9 +53,11 @@ function ForwardModal({ signup, onClose, onSent }: { signup: Signup; onClose: ()
   const o = signup.observation!;
   // Closing while the send is in flight would lose its result, so ignore Escape and the backdrop until it ends.
   const close = useCallback(() => { if (!forward.isPending) onClose(); }, [forward.isPending, onClose]);
+  // Email addresses allow 64 characters before the @ and 254 in all; the server does not check the length yet.
+  const to = email.trim();
+  const tooLong = to.length > 254 || to.split('@')[0].length > 64;
   const send = () => {
-    const to = email.trim();
-    if (!to || busy.current) return;
+    if (!to || tooLong || busy.current) return;
     busy.current = true;
     forward.mutate(
       { observationId: o.observationId, email: to },
@@ -76,7 +78,7 @@ function ForwardModal({ signup, onClose, onSent }: { signup: Signup; onClose: ()
       footer={
         <>
           <Button variant="secondary" disabled={forward.isPending} onClick={close}>Cancel</Button>
-          <Button disabled={!email.trim() || forward.isPending} onClick={send}>
+          <Button disabled={!to || tooLong || forward.isPending} onClick={send}>
             <SendIcon width={13} height={13} /> {forward.isPending ? 'Sending…' : 'Send'}
           </Button>
         </>
@@ -87,6 +89,7 @@ function ForwardModal({ signup, onClose, onSent }: { signup: Signup; onClose: ()
         <input id="forward-email" type="email" autoComplete="email" className={`${inputClass} w-full pr-10`} value={email} onChange={(e) => setEmail(e.target.value)} />
         <MailIcon className="pointer-events-none absolute top-[14px] right-3.5 text-gray-500" />
       </span>
+      {tooLong && <p role="alert" className="mt-2 text-sm text-red-800">That address is too long: an email address has at most 64 characters before the @ and 254 in all.</p>}
       <ErrorNote error={forward.error} className="mt-3" />
       <LockNote className="mt-5 py-[11px]">The record is sent as text in an email. This forward is recorded.</LockNote>
     </Modal>

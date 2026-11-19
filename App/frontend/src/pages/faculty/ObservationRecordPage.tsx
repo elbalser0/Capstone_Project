@@ -30,9 +30,13 @@ const MAX_ISSUE_FILE_BYTES = 10 * 1024 * 1024;
 function ReportMissedModal({ o, onClose, onStale }: { o: ObservationDetail; onClose: () => void; onStale: () => void }) {
   const report = useReportMissed();
   const [reason, setReason] = useState('');
+  // isPending reaches React a tick after mutate(), so a fast double click would report twice without this.
+  const sending = useRef(false);
   const send = () => {
-    if (!reason.trim() || report.isPending) return;
+    if (!reason.trim() || report.isPending || sending.current) return;
+    sending.current = true;
     report.mutate({ observationId: o.observationId, reason: reason.trim() }, {
+      onSettled: () => { sending.current = false; },
       onSuccess: onClose,
       // 409 means the record changed since it was loaded (for example the observer signed): show the current one.
       onError: (error) => { if (error instanceof ApiError && error.status === 409) onStale(); },

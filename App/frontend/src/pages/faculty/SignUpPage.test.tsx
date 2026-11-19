@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { beforeEach, expect, test } from 'vitest';
@@ -205,4 +205,20 @@ test('returns to the real evaluation screen with refreshed signup/course data', 
   expect(await screen.findByText('CS 1337.002', { exact: true })).toBeVisible();
   expect(screen.queryByText('Not signed up yet')).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: 'Sign up to be observed' })).not.toBeInTheDocument();
+});
+
+test('a fast double click submits one sign-up', async () => {
+  const bodies: unknown[] = [];
+  server.use(
+    http.get('*/api/me/courses', () => HttpResponse.json([course])),
+    http.post('*/api/signups', async ({ request }) => { bodies.push(await request.json()); return new Promise<never>(() => {}); }),
+  );
+  const user = userEvent.setup();
+  renderSignup();
+  await selectMonday(user);
+  // Two clicks in one event-loop turn, before React re-renders with isPending.
+  const submit = screen.getByRole('button', { name: 'Submit sign-up' });
+  act(() => { fireEvent.click(submit); fireEvent.click(submit); });
+  await screen.findByRole('button', { name: 'Submitting sign-up…' });
+  expect(bodies).toHaveLength(1);
 });

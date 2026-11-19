@@ -124,7 +124,7 @@ export function TemplatesPage() {
               <Cell><StatusTag status={v.status} /></Cell>
               <Cell className="text-gray-700">{v.publishedDate ? formatDate(v.publishedDate) : 'Not yet'}</Cell>
               <Cell className="text-gray-700">{v.createdBy.displayName}</Cell>
-              <Cell className="text-gray-700">{v.changeNote}</Cell>
+              <Cell className="text-gray-700 [overflow-wrap:anywhere]">{v.changeNote}</Cell>
               <Cell className="text-gray-700">{v.observationsCount} {v.observationsCount === 1 ? 'observation' : 'observations'}</Cell>
               <Cell className="pr-0">
                 {v.status === 'draft'
@@ -180,7 +180,7 @@ function VersionView({ v }: { v: TemplateVersion }) {
           {v.observationsCount === 1 ? ' observation' : ' observations'}. It cannot be edited.
         </p>
       </div>
-      {v.changeNote && <p className="mt-3 text-sm text-gray-700">What changed: {v.changeNote}</p>}
+      {v.changeNote && <p className="mt-3 text-sm text-gray-700 [overflow-wrap:anywhere]">What changed: {v.changeNote}</p>}
       <div className="mt-[18px] overflow-x-auto"><div className="min-w-[760px]"><QuestionsTable questions={v.questions} label={`Version ${v.versionNo} questions`} /></div></div>
       <div className="mt-9">
         <Link to="/committee/templates" className={buttonClass('secondary')}>Back to templates</Link>
@@ -257,8 +257,10 @@ export function describeChanges(live: TemplateVersion | undefined, questions: Qu
 const MAX_QUESTIONS = 100;
 const MAX_TEXT = 2000;
 
-function EditQuestionModal({ question, isNew, draftNo, liveNo, onClose, onSave, onDelete }: {
+function EditQuestionModal({ question, isNew, draftNo, liveNo, otherTitles, onClose, onSave, onDelete }: {
   question: Question;
+  /** Titles of the draft's other questions: changes are matched to the live version by title, so each must be unique. */
+  otherTitles: string[];
   isNew: boolean;
   draftNo: number;
   liveNo: number | undefined;
@@ -271,7 +273,8 @@ function EditQuestionModal({ question, isNew, draftNo, liveNo, onClose, onSave, 
   const wholeNumbers = Number.isInteger(q.ratingMin) && Number.isInteger(q.ratingMax);
   const rangeOk = wholeNumbers && q.ratingMin < q.ratingMax && Math.abs(q.ratingMin) <= 100 && Math.abs(q.ratingMax) <= 100;
   const textOk = [q.title, q.wording, q.minLabel, q.maxLabel].every((t) => t.length <= MAX_TEXT);
-  const valid = Boolean(q.title.trim() && q.wording.trim() && rangeOk && textOk);
+  const duplicate = otherTitles.some((t) => t.trim().toLowerCase() === q.title.trim().toLowerCase());
+  const valid = Boolean(q.title.trim() && q.wording.trim() && rangeOk && textOk && !duplicate);
   return (
     <Modal
       title={isNew ? 'Add question' : 'Edit question'}
@@ -288,6 +291,7 @@ function EditQuestionModal({ question, isNew, draftNo, liveNo, onClose, onSave, 
     >
       <label htmlFor="q-title" className={labelClass}>Question</label>
       <input id="q-title" className={`${inputClass} w-full`} value={q.title} onChange={(e) => set({ title: e.target.value })} />
+      {duplicate && <p role="alert" className="mt-1.5 text-xs text-red-800">Another question on this form already has this title.</p>}
       <label htmlFor="q-wording" className={`${labelClass} mt-3`}>Wording observers see</label>
       <TextArea id="q-wording" className="h-[60px]" value={q.wording} onChange={(e) => set({ wording: e.target.value })} />
       <fieldset className="mt-3">
@@ -321,8 +325,11 @@ function WhatChangedModal({ draft, live, onClose }: { draft: Draft; live: Templa
   const changes = describeChanges(live, draft.questions);
   // Closing while the save is in flight would lose its result, so ignore Escape and the backdrop until it ends.
   const close = useCallback(() => { if (!create.isPending) onClose(); }, [create.isPending, onClose]);
+  // isPending reaches React a tick after mutate(), so a fast double click would save two drafts without this.
+  const sending = useRef(false);
   const save = () => {
-    if (create.isPending) return;
+    if (create.isPending || sending.current) return;
+    sending.current = true;
     create.mutate(
       { changeNote: note.trim(), questions: draft.questions.map(({ key: _key, ...q }, i) => ({ ...q, orderNo: i + 1 })) },
       {
@@ -330,6 +337,7 @@ function WhatChangedModal({ draft, live, onClose }: { draft: Draft; live: Templa
           setEdits(null);
           navigate('/committee/templates');
         },
+        onError: () => { sending.current = false; },
       },
     );
   };
@@ -523,6 +531,7 @@ export function DraftPage() {
           isNew={editing.index === draft.questions.length}
           draftNo={draft.versionNo}
           liveNo={live?.versionNo}
+          otherTitles={draft.questions.filter((_, j) => j !== editing.index).map((x) => x.title)}
           onClose={closeEditing}
           onSave={(q) => {
             const next = [...draft.questions];
@@ -545,7 +554,9 @@ export function DraftPage() {
 // ---------- A5d ----------
 
 export function PreviewPage() {
-  const { templates, live, draft } = useDraft();
+  // With unsaved edits, seeded like the editor, so the first draft (no live version, nothing saved yet) can be previewed too.
+  const { edits } = useContext(DraftContext);
+  const { templates, live, draft } = useDraft({ seed: edits !== null });
   const [ratings, setRatings] = useState<Record<string, number>>({});
   usePageTitle(draft ? `Preview: version ${draft.versionNo} (draft)` : null);
 
@@ -566,7 +577,7 @@ export function PreviewPage() {
               <div className="min-w-0">
                 <p className="flex flex-wrap items-center gap-[5px] text-sm font-bold text-gray-900">
                   {q.title}
-                  {changedFromLive(q, live) && <Tag tone="due">Changed in v{draft.versionNo}</Tag>}
+                  {changedFromLive(q, live) && <Tag tone="due">{live?.questions.some((x) => x.title === q.title) ? 'Changed' : 'New'} in v{draft.versionNo}</Tag>}
                 </p>
                 <p className="mt-[3px] text-xs text-gray-500">{q.wording}</p>
                 <p className="mt-[3px] text-xs text-gray-500">{scaleLabel(q)}</p>

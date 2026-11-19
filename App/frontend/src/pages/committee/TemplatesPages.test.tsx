@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CreateTemplateInput, Me, TemplateQuestion, TemplateVersion } from '../../api/types';
@@ -257,6 +257,16 @@ describe('draft editing (A5b, A5c)', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled());
     expect(posts).toHaveBeenCalledOnce();
   });
+  it('sends the save once when two clicks land before the page re-renders', async () => {
+    const { u } = await openDraft();
+    const posts = vi.fn();
+    server.use(http.post('*/api/templates', () => { posts(); return never(); }));
+    await u.click(screen.getByRole('button', { name: 'Save and exit' }));
+    const save = within(screen.getByRole('dialog')).getByRole('button', { name: 'Save and exit' });
+    act(() => { fireEvent.click(save); fireEvent.click(save); });
+    await screen.findByRole('button', { name: 'Saving…' });
+    expect(posts).toHaveBeenCalledOnce();
+  });
 });
 
 describe('what changed (A5e)', () => {
@@ -460,6 +470,38 @@ describe('review follow-ups', () => {
     await screen.findByRole('table', { name: 'Versions' });
     expect(log.posts).toHaveLength(1);
     expect(log.posts[0].questions).toEqual([{ orderNo: 1, title: 'Clarity', wording: 'Was it clear?', ratingMin: 1, ratingMax: 5, minLabel: 'Poor', maxLabel: 'Excellent', isRequired: true }]);
+  });
+  it('previews the first, never-saved draft without asking to leave', async () => {
+    serve([]);
+    const u = user();
+    open();
+    await u.click(await screen.findByRole('link', { name: 'Start a new draft' }));
+    await u.click(await screen.findByRole('button', { name: 'Add question' }));
+    await u.type(within(editDialog()).getByLabelText('Question'), 'Clarity');
+    await u.type(within(editDialog()).getByLabelText('Wording observers see'), 'Was it clear?');
+    await u.click(within(editDialog()).getByRole('button', { name: 'Okay' }));
+    await u.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByRole('radiogroup', { name: 'Clarity' })).toBeVisible();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
+  });
+  it('tags a question added in the draft as new, not changed', async () => {
+    const { u } = await openDraft();
+    await u.click(screen.getByRole('button', { name: 'Add question' }));
+    await u.type(within(editDialog()).getByLabelText('Question'), 'Preparation');
+    await u.type(within(editDialog()).getByLabelText('Wording observers see'), 'Was the class prepared?');
+    await u.click(within(editDialog()).getByRole('button', { name: 'Okay' }));
+    await u.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByText('New in v4')).toBeVisible();
+    expect(screen.queryByText('Changed in v4')).not.toBeInTheDocument();
+  });
+  it('refuses a second question with a title already on the form', async () => {
+    const { u } = await openDraft();
+    await u.click(screen.getByRole('button', { name: 'Add question' }));
+    const dialog = within(editDialog());
+    await u.type(dialog.getByLabelText('Question'), 'pacing ');
+    await u.type(dialog.getByLabelText('Wording observers see'), 'Again?');
+    expect(dialog.getByRole('alert')).toHaveTextContent('Another question on this form already has this title.');
+    expect(dialog.getByRole('button', { name: 'Okay' })).toBeDisabled();
   });
   it('ignores Escape and Cancel while a save is in flight', async () => {
     const { u } = await openDraft();
