@@ -416,3 +416,39 @@ test('keeps the last data on screen when a poll fails, with a way to retry', asy
   expect(screen.getByText('Expires in 31 hours')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
 });
+
+test('lists the free weekdays Monday first, whatever order the dates were picked in', async () => {
+  // Thu Sep 24, then Tue Sep 22.
+  current.signup = { ...signup, proposedDates: [{ date: '2026-09-24', startTime: '08:30' }, { date: '2026-09-22', startTime: '08:30' }] };
+  current.candidates = [candidate(observer)];
+  renderRequests();
+  expect(await screen.findByText('Yes, Tue and Thu 8:30 AM')).toBeVisible();
+});
+
+test('says which requests were declined before offering the rest of the list', async () => {
+  current.candidates = [candidate(observer, { status: 'declined', sentDate: '2026-09-16T15:00:00Z' }), candidate(second, { status: 'expired', sentDate: '2026-09-16T15:00:00Z' }), candidate(third)];
+  current.outgoing = [request(observer, 'declined', { respondedDate: '2026-09-16T18:00:00Z' }), request(second, 'expired')];
+  renderRequests();
+  expect(await screen.findByText('None of the 2 requests you sent found an observer.')).toBeVisible();
+  expect(screen.getByText(/Dr\. Elena Ruiz declined\. Dr\. Jon Kim did not answer within 48 hours\./)).toBeVisible();
+  expect(within(screen.getByRole('table', { name: 'Recommended observers' })).getByText('Dr. Ana Park')).toBeVisible();
+});
+
+test('after the observation is reported as not done, says it did not happen and drops the next steps', async () => {
+  current.signup = { ...matchedSignup, observation: { ...matchedSignup.observation!, status: 'not_completed' } };
+  current.outgoing = [request(observer, 'accepted', { respondedDate: '2026-09-16T20:00:00Z' })];
+  server.use(http.get('*/api/me/observations', () => HttpResponse.json([{ ...observation, status: 'not_completed' }])));
+  renderRequests();
+  expect(await screen.findByText('The observation with Dr. Elena Ruiz did not happen.')).toBeVisible();
+  expect(screen.queryByText(/accepted first and is your observer/)).not.toBeInTheDocument();
+  expect(screen.queryByText('What happens next')).not.toBeInTheDocument();
+  expect(screen.queryByText(/you both sign the record/)).not.toBeInTheDocument();
+});
+
+test('the matched view gives an expired request its expiry time', async () => {
+  current.signup = matchedSignup;
+  current.outgoing = [request(observer, 'accepted', { respondedDate: '2026-09-16T20:00:00Z' }), request(second, 'expired')];
+  renderRequests();
+  const table = within(await screen.findByRole('table', { name: 'My requests' }));
+  expect(table.getByText(/\(no answer in 48 hours\)/)).toBeVisible();
+});

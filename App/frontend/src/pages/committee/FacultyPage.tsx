@@ -18,6 +18,8 @@ import { errorText } from './DashboardSections';
 // no due semester and no NOT DUE rows.
 
 const PAGE_SIZE = 7;
+/** Same words as the dashboard's due list. */
+const NOT_OBSERVED = 'Not observed yet';
 const ALL: DueStatus[] = ['DUE', 'OVERDUE', 'NOT_DUE'];
 const DUE_ONLY: DueStatus[] = ['DUE', 'OVERDUE'];
 const FALLBACK_BANNER = 'The full faculty list is not available yet, so only due and overdue professors are shown.';
@@ -98,11 +100,11 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
   const all: FacultyRow[] = faculty.data
     ? faculty.data.map((r) => ({
       netid: r.professor.netid, name: r.professor.displayName, email: r.professor.email, rank: r.professor.rank,
-      department: r.department.deptName, lastObserved: r.lastObservedTerm?.label ?? 'Never', dueSemester: r.dueTerm.label, status: r.dueStatus,
+      department: r.department.deptName, lastObserved: r.lastObservedTerm?.label ?? NOT_OBSERVED, dueSemester: r.dueTerm.label, status: r.dueStatus,
     }))
     : (fallback.data ?? []).map((r) => ({
       netid: r.professor.netid, name: r.professor.displayName, email: null, rank: r.professor.rank,
-      department: r.department.deptName, lastObserved: r.lastObservedTerm?.label ?? 'Never', dueSemester: null, status: r.dueStatus,
+      department: r.department.deptName, lastObserved: r.lastObservedTerm?.label ?? NOT_OBSERVED, dueSemester: null, status: r.dueStatus,
     }));
   const visible = shown.filter((s) => statuses.includes(s));
   // Every word typed must appear in the name, so "dr linda" finds "Dr. Linda Chen".
@@ -112,6 +114,8 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
   const remindable = rows.filter((r) => r.status !== 'NOT_DUE').map((r) => r.netid);
   const picked = selected.filter((n) => remindable.includes(n));
   const allPicked = remindable.length > 0 && picked.length === remindable.length;
+  // Picks hidden by the search or a status chip stay selected but are not sent, so say how many.
+  const hidden = selected.length - picked.length;
 
   const error = missing ? fallback.error : faculty.error;
   const retry = missing ? fallback.refetch : faculty.refetch;
@@ -174,10 +178,13 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
       </div>
 
       <div className="mt-6 overflow-x-auto">
-        <div className={full ? 'min-w-[880px]' : 'min-w-[740px]'}>
+        <div className={full ? 'min-w-[800px]' : 'min-w-[700px]'}>
           <Table
             label="Faculty"
-            columns={full ? '56px 200px 120px 200px 140px 140px 1fr' : '56px 220px 120px 220px 140px 1fr'}
+            // Columns share the width down to these minimums (the last one fits OVERDUE), then the table scrolls sideways.
+            columns={full
+              ? '56px minmax(140px,2fr) minmax(90px,1fr) minmax(140px,2fr) minmax(110px,1.2fr) minmax(110px,1.2fr) minmax(96px,1fr)'
+              : '56px minmax(150px,2fr) minmax(90px,1fr) minmax(150px,2fr) minmax(110px,1.2fr) minmax(96px,1fr)'}
             head={[
               <Checkbox
                 key="all"
@@ -185,7 +192,8 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
                 checked={allPicked}
                 indeterminate={!allPicked && picked.length > 0}
                 disabled={remindable.length === 0}
-                onChange={() => setSelected(allPicked ? [] : remindable)}
+                // Only the rows shown change; picks hidden by the search or a filter stay as they are.
+                onChange={() => setSelected((x) => (allPicked ? x.filter((n) => !remindable.includes(n)) : [...new Set([...x, ...remindable])]))}
               />,
               'Name',
               'Rank',
@@ -238,6 +246,11 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
       <p role="status" className="mt-3 text-[13px] text-gray-900 empty:hidden">
         {pending ? 'Sending…' : remind.isSuccess ? `${sentText(remind.data.sent, sentTo)} (${formatClock(remind.submittedAt)})` : ''}
       </p>
+      {hidden > 0 && !pending && (
+        <p className="mt-3 text-[13px] text-gray-500">
+          {hidden} more {hidden === 1 ? 'professor is' : 'professors are'} selected but hidden by the search or filter, and not included. Clear the search to include them.
+        </p>
+      )}
       {failed && !pending && <ErrorNote key={remind.submittedAt} error={new Error(failed.text)} className="mt-3" />}
 
       {confirming && (

@@ -199,7 +199,7 @@ describe('Committee dashboard detail sections', () => {
   });
 
   it('lists sign-ups without a completed observation as outstanding', async () => {
-    // Before Laura's Oct 29 observation, so her record is not read and she stays Scheduled.
+    // Before Laura's Oct 29 observation. Her record is read anyway (as on Observations), and with no signature she stays Scheduled.
     setClock(() => new Date('2026-10-20T15:00:00Z').getTime());
     const reads: string[] = [];
     server.use(http.get('*/api/observations/:id', ({ params }) => { reads.push(String(params.id)); return HttpResponse.json({}); }));
@@ -218,7 +218,16 @@ describe('Committee dashboard detail sections', () => {
     expect(within(scheduled).getByText('Scheduled')).toBeVisible();
     expect(within(missed).getByText('Reported as not done')).toBeVisible();
     expect(within(region).queryByText('Dr. Dana Price')).not.toBeInTheDocument();
-    expect(reads).toEqual([]);
+    expect(reads).toEqual(['o22']);
+  });
+
+  it('shows "Waiting for the observee to sign" before the date when the observer already signed, as Observations does', async () => {
+    setClock(() => new Date('2026-10-20T15:00:00Z').getTime());
+    server.use(http.get('*/api/observations/:id', () => HttpResponse.json({ observerSignedDate: '2026-10-19', observeeSignedDate: null })));
+    serve();
+    openPage(OUTSTANDING_PAGE);
+    const region = await waitFor(() => section(/Outstanding observations/));
+    expect(await within(region).findByText('Waiting for the observee to sign')).toBeVisible();
   });
 
   it.each([

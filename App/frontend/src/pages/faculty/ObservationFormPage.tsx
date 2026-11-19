@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { Banner, Button, Card, PageError, RatingScale, TextArea, linkClass } from '../../components/ui';
 import { nowMs } from '../../lib/clock';
-import { formatClock, isLocked } from '../../lib/format';
+import { formatClock, formatDate, isLocked } from '../../lib/format';
 import type { ObservationDetail } from '../../api/types';
 import { readDraft, rememberDraft, saveDraft, type Draft } from './observationDraft';
 import { whenShort } from './observationDisplay';
@@ -32,7 +32,11 @@ function Editor({ o, user }: { o: ObservationDetail; user: string }) {
     <Link to={`/faculty/observe/${o.observationId}`} className={linkClass}>Back to read-only record</Link>
     <h2 className="text-base font-bold">Observation: {o.observee.displayName}, {o.section.label}, {whenShort(o)}</h2>
     <Banner tone="info">This is your copy of Observation Template v{o.templateVersion.versionNo}. Questions and rating ranges are set by the Assessment Committee.</Banner>
-    <p className="text-sm text-gray-700">This form is a local draft on this device. It has not been submitted or signed.</p>
+    <p className="text-sm text-gray-700">
+      {o.observerSignedDate
+        ? `You submitted and signed this form on ${formatDate(o.observerSignedDate)}. Changes here stay on this device until you submit again, and the observee then reviews the new version before signing.`
+        : 'This form is a local draft on this device. It has not been submitted or signed.'}
+    </p>
     {stale && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">The server record has changed while this form was open. Your edits are preserved as a draft of the earlier revision. Go to signatures to review the saved server responses before submitting; these older local edits will not be included.</p>}
     {o.answers.length === 0 && <p role="status">No questions are available for this observation.</p>}
     {o.answers.length > 0 && <Card className="min-w-0">

@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import { screen, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Me } from '../api/types';
@@ -24,6 +24,8 @@ function openApp(path = '/committee/dashboard') {
     children: [
       { path: '/committee/dashboard', element: <p>Dashboard page</p>, handle: { title: 'Dashboard' } },
       { path: '/committee/cycle', element: <p>Cycle page</p>, handle: { title: 'Cycle' } },
+      { path: '/faculty/evaluation', element: <p>Evaluation page</p>, handle: { title: 'My evaluation' } },
+      { path: '/guide', element: <p>Guide page</p>, handle: { title: 'Process guide' } },
     ],
   }], path);
 }
@@ -91,6 +93,19 @@ describe('Phone menu', () => {
     await userEvent.keyboard('{Escape}');
     expect(open).toHaveFocus();
     expect(screen.getByRole('main').closest('.app-shell-content')).not.toHaveAttribute('inert');
+  });
+
+  it('keeps the view the Process guide was opened from', async () => {
+    const { router } = openApp('/committee/cycle');
+    await screen.findByText('Cycle page');
+    await userEvent.click(within(sidebar()).getByRole('link', { name: 'Process guide' }));
+    expect(await screen.findByText('Guide page')).toBeVisible();
+    expect(within(sidebar()).getByRole('navigation', { name: 'Assessment Committee' })).toBeInTheDocument();
+    await act(() => router.navigate('/faculty/evaluation'));
+    await screen.findByText('Evaluation page');
+    await act(() => router.navigate('/guide'));
+    await screen.findByText('Guide page');
+    expect(within(sidebar()).getByRole('navigation', { name: 'Faculty' })).toBeInTheDocument();
   });
 
   it('uses narrower page padding on small screens', async () => {

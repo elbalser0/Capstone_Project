@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { useCreateSignup, useEvaluationStatus, useMyCourses } from '../../api/hooks/faculty';
 import type { CourseSection, Cycle, EvaluationStatus } from '../../api/types';
@@ -140,6 +140,8 @@ export function SignUpPage() {
   const cycle = status.data?.cycle ?? null;
   const courses = useMyCourses(cycle?.term.termId);
   const create = useCreateSignup();
+  // isPending reaches React a tick after mutate(), so a fast double click would send two sign-ups without this.
+  const sending = useRef(false);
   const [chosen, setChosen] = useState<string | null>(null);
   const [dates, setDates] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
@@ -157,9 +159,11 @@ export function SignUpPage() {
     if (id !== sectionId) setDates([]);
     setChosen(id);
   };
-  const submit = () =>
-    sectionId &&
-    create.mutate({ sectionId, proposedDates: dates }, { onSuccess: () => navigate('/faculty/evaluation') });
+  const submit = () => {
+    if (!sectionId || sending.current) return;
+    sending.current = true;
+    create.mutate({ sectionId, proposedDates: dates }, { onSuccess: () => navigate('/faculty/evaluation'), onError: () => { sending.current = false; } });
+  };
 
   return (
     <div className="grid grid-cols-1 gap-8 pt-8 xl:grid-cols-[minmax(0,620px)_minmax(0,344px)]">

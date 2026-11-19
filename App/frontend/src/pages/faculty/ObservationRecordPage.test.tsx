@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import userEvent from '@testing-library/user-event';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
@@ -311,6 +311,13 @@ it('does not offer observee signing to the observer', async () => {
   expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();
 });
 
+it('offers the observer a change to the submitted form once they signed, and a local draft before', async () => {
+  serveRecord({ ...detail, observer, observerSignedDate: '2026-09-22' }, observer.netid);
+  openRecord();
+  expect(await screen.findByRole('link', { name: /Change the submitted form/ })).toHaveAttribute('href', '/faculty/observe/30/form');
+  expect(screen.queryByRole('link', { name: /Edit local draft/ })).not.toBeInTheDocument();
+});
+
 const lockNote = /Locked until your observer submits and signs the form/;
 const reportLink = () => screen.queryByRole('button', { name: 'The observation could not be done' });
 const uploadButton = () => screen.queryByRole('button', { name: 'Upload a file about the observation' });
@@ -347,10 +354,16 @@ it('shows no problem card and no lock note on a locked record', async () => {
 });
 it('shows no lock note and no report when the observation did not happen, but still allows a file', async () => {
   serveRecord({ ...detail, status: 'not_completed', reasonNotCompleted: 'Class cancelled' }); openRecord();
-  await screen.findByText('Read only');
+  expect(await screen.findByRole('heading', { name: 'This observation did not happen' })).toBeVisible();
+  expect(screen.getByText('Reason given: Class cancelled')).toBeVisible();
   expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
+  expect(screen.getByText('Reported as not done. Nobody signs this record.')).toBeVisible();
   expect(reportLink()).not.toBeInTheDocument();
   expect(uploadButton()).toBeVisible();
+  // Nothing to rate or print.
+  expect(screen.queryByRole('heading', { name: 'Ratings and comments' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Print record' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: /Edit local draft|Change the submitted form/ })).not.toBeInTheDocument();
 });
 it('shows nothing to a viewer who is neither participant', async () => {
   serveRecord(detail, 'zz999'); openRecord();
@@ -367,14 +380,18 @@ it('uploads a file as multipart field "file" and shows its name from the returne
     bodies.push(await request.text());
     return HttpResponse.json({ ...detail, issueFileName: 'notes.txt' });
   }));
+  // Node 24's fetch drops the contents of a jsdom File when it encodes the body, so the file itself is checked where the app adds it.
+  const append = vi.spyOn(FormData.prototype, 'append');
   const user = userEvent.setup();
   openRecord();
   await screen.findByText(lockNote);
-  await user.upload(fileInput(), new File(['what happened'], 'notes.txt', { type: 'text/plain' }));
+  const file = new File(['what happened'], 'notes.txt', { type: 'text/plain' });
+  await user.upload(fileInput(), file);
   expect(await screen.findByText('notes.txt')).toBeVisible();
   expect(bodies).toHaveLength(1);
   expect(bodies[0]).toContain('name="file"');
-  expect(bodies[0]).toContain('what happened');
+  expect(append.mock.calls.filter(([name]) => name === 'file').map(([, value]) => value)).toEqual([file]);
+  append.mockRestore();
 });
 it('sends nothing for a file over 10 MB and says so', async () => {
   const upload = vi.fn();
@@ -565,4 +582,20 @@ it('reloads the record when the report is refused because the observer signed me
   expect(await screen.findByRole('button', { name: 'Sign' })).toBeVisible();
   expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
   expect(reportLink()).not.toBeInTheDocument();
+});
+
+it('a fast double click on Report sends one report', async () => {
+  const bodies: unknown[] = [];
+  serveRecord();
+  server.use(http.post('*/api/observations/30/report-missed', async ({ request }) => { bodies.push(await request.json()); return new Promise<never>(() => {}); }));
+  const user = userEvent.setup();
+  openRecord();
+  await user.click(await screen.findByRole('button', { name: 'The observation could not be done' }));
+  const dialog = await screen.findByRole('dialog', { name: 'The observation could not be done' });
+  await user.type(within(dialog).getByLabelText('What happened?'), 'Room was locked');
+  // Two clicks in one event-loop turn, before React re-renders with isPending.
+  const report = within(dialog).getByRole('button', { name: 'Report' });
+  act(() => { fireEvent.click(report); fireEvent.click(report); });
+  await within(dialog).findByRole('button', { name: 'Reporting…' });
+  expect(bodies).toHaveLength(1);
 });

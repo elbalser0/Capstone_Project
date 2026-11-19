@@ -85,7 +85,7 @@ describe('Faculty page: full list', () => {
     expect(names()).toEqual(['Dr. Cy Test']);
     // Every column, with the due semester.
     const row = screen.getAllByRole('row')[1];
-    expect(row).toHaveTextContent(/Dr\. Cy Test.*Assistant.*Computer Science.*Never.*Spring 2026.*OVERDUE/);
+    expect(row).toHaveTextContent(/Dr\. Cy Test.*Assistant.*Computer Science.*Not observed yet.*Spring 2026.*OVERDUE/);
     expect(screen.getByRole('columnheader', { name: 'Due semester' })).toBeVisible();
     expect(log.fallbackReads).toBe(0);
   });
@@ -118,6 +118,27 @@ describe('Faculty page: full list', () => {
     await u.clear(screen.getByLabelText('Search by name'));
     await u.type(screen.getByLabelText('Search by name'), 'Test, Cy');
     expect(names()).toEqual(['Dr. Cy Test']);
+  });
+
+  it('keeps picks hidden by the search when the header box selects or clears the rows shown', async () => {
+    serve();
+    open();
+    await screen.findByText('Dr. Ana Test');
+    const u = user();
+    await u.click(screen.getByRole('checkbox', { name: 'Select Dr. Ana Test' }));
+    await u.click(screen.getByRole('checkbox', { name: 'Select Dr. Ben Test' }));
+    await u.type(screen.getByLabelText('Search by name'), 'cy');
+    await u.click(screen.getByRole('checkbox', { name: 'Select everyone due' }));
+    expect(screen.getByRole('button', { name: 'Send reminder to selected (1)' })).toBeEnabled();
+    expect(screen.getByText('2 more professors are selected but hidden by the search or filter, and not included. Clear the search to include them.')).toBeVisible();
+    await u.clear(screen.getByLabelText('Search by name'));
+    expect(screen.getByRole('button', { name: 'Send reminder to selected (3)' })).toBeEnabled();
+    expect(screen.queryByText(/hidden by the search or filter/)).not.toBeInTheDocument();
+    await u.type(screen.getByLabelText('Search by name'), 'cy');
+    await u.click(screen.getByRole('checkbox', { name: 'Select everyone due' }));
+    await u.clear(screen.getByLabelText('Search by name'));
+    expect(screen.getByRole('button', { name: 'Send reminder to selected (2)' })).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: 'Select Dr. Ana Test' })).toBeChecked();
   });
 
   it('shows a due semester that has no term row yet', async () => {
@@ -154,8 +175,8 @@ describe('Faculty page: full list', () => {
     expect(downloadCsv).toHaveBeenCalledWith('faculty', 'Fall 2026', [
       ['name', 'email', 'rank', 'department', 'last_observed', 'due_semester', 'status'],
       ['Dr. Ana Test', 'a1@demo.edu', 'Assistant', 'Computer Science', 'Fall 2025', 'Fall 2026', 'DUE'],
-      ['Dr. Ben Test', 'b1@demo.edu', 'Assistant', 'Computer Science', 'Never', 'Fall 2026', 'DUE'],
-      ['Dr. Cy Test', 'c1@demo.edu', 'Assistant', 'Computer Science', 'Never', 'Spring 2026', 'OVERDUE'],
+      ['Dr. Ben Test', 'b1@demo.edu', 'Assistant', 'Computer Science', 'Not observed yet', 'Fall 2026', 'DUE'],
+      ['Dr. Cy Test', 'c1@demo.edu', 'Assistant', 'Computer Science', 'Not observed yet', 'Spring 2026', 'OVERDUE'],
     ]);
   });
 
@@ -191,8 +212,8 @@ describe('Faculty page: fallback while the full list is missing', () => {
     await user().click(screen.getByRole('button', { name: /Export/ }));
     expect(downloadCsv).toHaveBeenCalledWith('faculty', 'Fall 2026', [
       ['name', 'rank', 'department', 'last_observed', 'status'],
-      ['Dr. Maya Lin', 'Assistant', 'Computer Science', 'Never', 'DUE'],
-      ['Dr. Elena Ruiz', 'Associate', 'Mathematics', 'Never', 'OVERDUE'],
+      ['Dr. Maya Lin', 'Assistant', 'Computer Science', 'Not observed yet', 'DUE'],
+      ['Dr. Elena Ruiz', 'Associate', 'Mathematics', 'Not observed yet', 'OVERDUE'],
     ]);
   });
 

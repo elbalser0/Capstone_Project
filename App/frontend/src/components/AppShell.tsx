@@ -77,6 +77,12 @@ export function AppShell() {
   const [override, setOverride] = useState<string | null>(null);
   const [navOverride, setNavOverride] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The Process guide is shared by both views, so it keeps the view it was opened from.
+  const [lastMode, setLastMode] = useState<Mode>('faculty');
+  useEffect(() => {
+    if (pathname.startsWith('/committee')) setLastMode('committee');
+    else if (pathname.startsWith('/faculty')) setLastMode('faculty');
+  }, [pathname]);
   const menuButton = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
@@ -109,7 +115,8 @@ export function AppShell() {
   if (!ready) return <p role="status" className="p-8 text-sm text-gray-500">Checking your sign-in…</p>;
   if (!session) return <Navigate to="/login" replace state={{ from: pathname }} />;
   if (me.data?.role === 'admin') return <Navigate to="/admin" replace />;
-  const mode: Mode = pathname.startsWith('/committee') ? 'committee' : 'faculty';
+  const sharedPage = !pathname.startsWith('/committee') && !pathname.startsWith('/faculty');
+  const mode: Mode = pathname.startsWith('/committee') || (sharedPage && lastMode === 'committee' && me.data?.role === 'AC') ? 'committee' : 'faculty';
   if (mode === 'committee' && me.data && me.data.role !== 'AC') return <Navigate to={LANDING.faculty} replace />;
   if (mode === 'committee' && !me.data) {
     if (!me.error) return <p role="status" className="p-8 text-sm text-gray-500">Loading…</p>;

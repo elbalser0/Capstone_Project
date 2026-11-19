@@ -235,7 +235,7 @@ export function Unmatched() {
         { head: 'Rank', width: 'minmax(80px,1fr)', cell: (r) => <Cell>{RANK_SHORT[r.observee.rank]}</Cell> },
         { head: 'Course', width: 'minmax(100px,1.3fr)', cell: (r) => <Cell>{r.section.label}</Cell> },
         { head: 'Days and time', width: 'minmax(100px,1.3fr)', cell: (r) => <Cell>{classTime(r.section)}</Cell> },
-        { head: 'Reason', width: 'minmax(168px,1.6fr)', cell: (r) => <Cell><Tag tone={ALERT_TAG[r.alertType][0]} icon={<AlertIcon width={11} height={10} />}>{ALERT_TAG[r.alertType][1]}</Tag></Cell> },
+        { head: 'Reason', width: 'minmax(168px,1.6fr)', cell: (r) => <Cell><Tag wrap tone={ALERT_TAG[r.alertType][0]} icon={<AlertIcon width={11} height={10} />}>{ALERT_TAG[r.alertType][1]}</Tag></Cell> },
       ]}
       minWidth="min-w-[610px]"
       rows={unmatched.data?.items}
@@ -278,18 +278,18 @@ export function ScheduledObservationTag({ observationId, scheduledDate, schedule
   const deadline = useCurrentCycle().data?.observationDeadline;
   const record = useObservation(reached || readEarly ? observationId : undefined);
   const r = record.data;
-  if (r?.observerSignedDate && !r.observeeSignedDate) return <Tag tone="due">Waiting for the observee to sign</Tag>;
+  if (r?.observerSignedDate && !r.observeeSignedDate) return <Tag wrap tone="due">Waiting for the observee to sign</Tag>;
   if (passed && r && !r.observerSignedDate) {
-    return deadline && today > deadline ? <Tag tone="overdue">Form overdue</Tag> : <Tag tone="due">Form not signed yet</Tag>;
+    return deadline && today > deadline ? <Tag wrap tone="overdue">Form overdue</Tag> : <Tag wrap tone="due">Form not signed yet</Tag>;
   }
-  return <Tag tone={scheduledTone}>Scheduled</Tag>;
+  return <Tag wrap tone={scheduledTone}>Scheduled</Tag>;
 }
 
 function OutstandingTag({ signup }: { signup: Signup }) {
   const o = signup.observation;
-  if (o?.status === 'scheduled') return <ScheduledObservationTag observationId={o.observationId} scheduledDate={o.scheduledDate} scheduledTone={OBSERVATION_TAG.scheduled[0]} />;
+  if (o?.status === 'scheduled') return <ScheduledObservationTag observationId={o.observationId} scheduledDate={o.scheduledDate} scheduledTone={OBSERVATION_TAG.scheduled[0]} readEarly />;
   const [tone, label] = OBSERVATION_TAG[o?.status ?? 'none'];
-  return <Tag tone={tone}>{label}</Tag>;
+  return <Tag wrap tone={tone}>{label}</Tag>;
 }
 
 export function Outstanding() {

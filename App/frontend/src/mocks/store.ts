@@ -244,7 +244,8 @@ export function observationDetail(o: ObservationRow): ObservationDetail {
       };
     }),
     otherComments: o.other_comments,
-    lastSavedDate: o.last_saved_date ?? new Date().toISOString(),
+    // Stable between reads: a new value on every read made each local draft look out of date, so the observer could never sign.
+    lastSavedDate: o.last_saved_date ?? `${o.scheduled_date}T00:00:00.000Z`,
     reasonNotCompleted: o.reason_not_completed,
     issueFileName: o.issue_file_key ? o.issue_file_key.split('/').pop()! : null,
   };

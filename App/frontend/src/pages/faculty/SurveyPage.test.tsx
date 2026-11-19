@@ -108,11 +108,15 @@ it('rejects oversized files before sending and permits retry with a valid attach
   await user.upload(screen.getByLabelText(/Trouble file/), new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'big.txt'));
   expect(screen.getByRole('alert')).toHaveTextContent('10 MiB');
   expect(screen.getByRole('button', { name: 'Submit survey' })).toBeDisabled();
-  await user.upload(screen.getByLabelText(/Trouble file/), new File(['details'], 'details.txt'));
+  // Node 24's fetch drops the contents of a jsdom File when it encodes the body, so the file itself is checked where the app adds it.
+  const append = vi.spyOn(FormData.prototype, 'append');
+  const details = new File(['details'], 'details.txt');
+  await user.upload(screen.getByLabelText(/Trouble file/), details);
   await user.click(screen.getByRole('button', { name: 'Submit survey' }));
   await screen.findByText('Your observer response was submitted.');
-  // MSW's jsdom File bridge serializes the filename as "blob"; native-browser QA checks the filename.
-  expect(received.mock.calls[0][0]).toContain('details');
+  expect(received).toHaveBeenCalledTimes(1);
+  expect(append.mock.calls.filter(([name]) => name === 'troubleFile').map(([, value]) => value)).toEqual([details]);
+  append.mockRestore();
   expect(received.mock.calls[0][0]).toContain('name="troubleFile"');
 });
 
