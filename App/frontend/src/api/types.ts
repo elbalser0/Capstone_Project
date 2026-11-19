@@ -150,7 +150,8 @@ export interface FacultyStatus {
   dueStatus: DueStatus;
   /** Last signed observation before this term. */
   lastObservedTerm: Term | null;
-  dueTerm: Term;
+  /** A due semester with no term row yet has no termId and no calendar dates. */
+  dueTerm: Omit<Term, 'termId' | 'startDate' | 'endDate'> & { termId: string | null; startDate: IsoDate | null; endDate: IsoDate | null };
 }
 
 /** GET /api/cycles/{cycleId}/due-professors */

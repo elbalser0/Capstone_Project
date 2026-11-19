@@ -99,7 +99,7 @@ function DateFields({ dates, onChange }: { dates: Deadlines; onChange: (key: key
   return (
     <>
       <DateRow id="signup-deadline" label="Sign-up deadline" hint="Faculty choose one course by this date." value={dates.signupDeadline} onChange={onChange('signupDeadline')} />
-      <DateRow id="observation-deadline" label="Observation-period deadline" hint="Last day to observe and sign." value={dates.observationDeadline} onChange={onChange('observationDeadline')} />
+      <DateRow id="observation-deadline" label="Observation-period deadline" hint="Observers should observe and sign by this day. A late form or signature is still accepted." value={dates.observationDeadline} onChange={onChange('observationDeadline')} />
       <DateRow id="feedback-deadline" label="Feedback deadline" hint="Survey closes, then KPIs are generated." value={dates.feedbackDeadline} onChange={onChange('feedbackDeadline')} />
     </>
   );
@@ -142,7 +142,7 @@ function usePreviewCounts(termId: string): Counts {
   return { state: 'loading' };
 }
 
-/** An open cycle: the full faculty list, or the due-professors list while that endpoint is missing. */
+/** An open cycle: the full faculty list, or the due-professors list from a server that does not have it. */
 function useCycleCounts(cycleId: string): Counts {
   const faculty = useCycleFaculty(cycleId);
   const missing = isMissingEndpoint(faculty.error);

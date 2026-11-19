@@ -48,7 +48,8 @@ export function useCreateCycle() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateCycleInput) => api<Cycle>('/cycles', { method: 'POST', body: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: sharedKeys.currentCycle }),
+    // A new cycle changes every cycle list, the dashboard and each professor's own status.
+    onSuccess: () => invalidate(qc, ['cycles'], ['dashboard'], ['me']),
   });
 }
 
@@ -57,7 +58,11 @@ export function useUpdateCycle(cycleId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: UpdateCycleInput) => api<Cycle>(`/cycles/${cycleId}`, { method: 'PATCH', body: input }),
-    onSuccess: (cycle) => qc.setQueryData(sharedKeys.currentCycle, cycle),
+    // New deadlines can move the phase, which decides what the dashboard and each professor's pages offer.
+    onSuccess: (cycle) => {
+      qc.setQueryData(sharedKeys.currentCycle, cycle);
+      invalidate(qc, ['cycles', cycleId], ['dashboard'], ['me']);
+    },
   });
 }
 
@@ -123,7 +128,8 @@ export function useAddCandidate(cycleId: string) {
       api<{ signupId: string; observer: PersonRef; roundNo: number }>(
         `/signups/${signupId}/candidates`, { method: 'POST', body: { observerNetid } },
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: committeeKeys.matching(cycleId) }),
+    // An added observer can clear the sign-up's alert, so Unmatched and the sign-ups list change too.
+    onSuccess: () => invalidate(qc, committeeKeys.matching(cycleId), committeeKeys.signups(cycleId), committeeKeys.unmatched),
   });
 }
 

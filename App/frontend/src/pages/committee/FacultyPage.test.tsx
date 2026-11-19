@@ -89,6 +89,16 @@ describe('Faculty page: full list', () => {
     expect(log.fallbackReads).toBe(0);
   });
 
+  it('shows a due semester that has no term row yet', async () => {
+    serve({ list: () => HttpResponse.json([
+      facultyStatus('e1', 'Eve', 'NOT_DUE', { dueTerm: { termId: null, season: 'fall', year: 2029, label: 'Fall 2029', startDate: null, endDate: null } }),
+    ]) });
+    open();
+    await screen.findByText(/NOT DUE \(1\)/);
+    await user().click(chip(/^NOT DUE/));
+    expect(screen.getAllByRole('row')[1]).toHaveTextContent(/Dr\. Eve Test.*Fall 2029.*NOT DUE/);
+  });
+
   it('searches by name and pages through long lists', async () => {
     serve({ list: () => HttpResponse.json(Array.from({ length: 9 }, (_, i) => facultyStatus(`p${i}`, `Prof${i}`, 'DUE'))) });
     open();

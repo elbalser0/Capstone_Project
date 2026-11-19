@@ -13,9 +13,9 @@ import { DUE_OR_OVERDUE_TEXT } from '../../lib/statusTerms';
 import { errorText } from './DashboardSections';
 
 // A3. Every professor's status this cycle, with filters, search, CSV export and reminders to the
-// selected due or overdue professors. The full list (GET /api/cycles/{cycleId}/faculty) is not in
-// the backend yet; until it is, the page shows the due-professors list, which has no email, no due
-// semester and no NOT DUE rows.
+// selected due or overdue professors. The full list is GET /api/cycles/{cycleId}/faculty. A server
+// without that route answers 404, and then the page shows the due-professors list, which has no email,
+// no due semester and no NOT DUE rows.
 
 const PAGE_SIZE = 7;
 const ALL: DueStatus[] = ['DUE', 'OVERDUE', 'NOT_DUE'];
