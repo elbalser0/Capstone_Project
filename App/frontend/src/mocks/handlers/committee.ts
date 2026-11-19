@@ -300,7 +300,7 @@ export const committeeHandlers = [
     return HttpResponse.json({ cycleId: c.cycle_id, total: items.length, items } satisfies UnmatchedFaculty);
   }),
 
-  // Email a read-only link to a signed and locked record; every forward is a Forwarded_observation row.
+  // Forward a signed and locked record by email; every forward is a Forwarded_observation row.
   http.post('/api/observations/:observationId/forward', async ({ request, params }) => {
     const me = committeeMember(request);
     const o = found(db.observation.find((x) => x.observation_id === params.observationId), 'Observation not found.');

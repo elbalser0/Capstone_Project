@@ -183,7 +183,7 @@ export interface SurveyResponseRow {
   submitted_date: string;
 }
 
-/** Forwarded_observation: A6b "Forward a link", each forward recorded. */
+/** Forwarded_observation: A6b "Forward", each forward recorded. */
 export interface ForwardedObservationRow {
   forward_id: string;
   observation_id: string;
