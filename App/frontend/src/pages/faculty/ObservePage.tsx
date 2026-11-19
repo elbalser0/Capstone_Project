@@ -1,13 +1,14 @@
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { useConfirmRequest, useDeclineRequest, useIncomingRequests, useMyAssignments } from '../../api/hooks/faculty';
+import { ApiError } from '../../api/client';
+import { requestClosed, useConfirmRequest, useDeclineRequest, useIncomingRequests, useMyAssignments, useMyCourses } from '../../api/hooks/faculty';
 import { useCurrentCycle } from '../../api/hooks/shared';
-import type { ObservationRequest, ObservationSummary } from '../../api/types';
+import type { CourseSection, ObservationRequest, ObservationSummary, ProposedDate } from '../../api/types';
 import { usePageTitle } from '../../components/AppShell';
 import { ClockIcon } from '../../components/icons';
 import { Button, Card, Cell, EmptyRow, ErrorNote, InfoLine, Note, Radio, Row, StatCard, Table, Tag, buttonClass, linkClass } from '../../components/ui';
 import { campusTodayIso, hoursUntil } from '../../lib/dates';
-import { classStart, formatShort, formatSlot, isLocked, RANK_LABEL } from '../../lib/format';
+import { classStart, formatShort, formatSlot, isLocked, RANK_LABEL, weekday } from '../../lib/format';
 import { recordStatus } from './observationDisplay';
 
 const LIMIT = 3;
@@ -48,7 +49,17 @@ function ConfirmationRow({ assignment }: { assignment: ObservationSummary }) {
   );
 }
 
-function RequestCard({ request, limitReached }: { request: ObservationRequest; limitReached: boolean }) {
+/**
+ * The observer's own class that meets while the observed class meets on that date, if any. The server refuses
+ * such a date (SCHEDULE_CONFLICT), so the card marks it instead of letting every pick fail.
+ */
+function clashOn(proposed: ProposedDate, request: ObservationRequest, mine: CourseSection[]) {
+  const day = weekday(proposed.date);
+  const observed = request.section.meetings.filter((m) => m.dayOfWeek === day);
+  return mine.find((own) => own.meetings.some((m) => m.dayOfWeek === day && observed.some((o) => m.startTime < o.endTime && o.startTime < m.endTime)));
+}
+
+function RequestCard({ request, limitReached, mine, onClosed }: { request: ObservationRequest; limitReached: boolean; mine: CourseSection[]; onClosed: (message: string) => void }) {
   const [date, setDate] = useState<string | null>(null);
   const confirm = useConfirmRequest();
   const decline = useDeclineRequest();
@@ -59,13 +70,19 @@ function RequestCard({ request, limitReached }: { request: ObservationRequest; l
   const accept = () => {
     if (!date || limitReached || busy || submitting.current) return;
     submitting.current = true;
-    confirm.mutate({ ...requestTarget, date }, { onError: () => { submitting.current = false; } });
+    confirm.mutate({ ...requestTarget, date }, { onError: failed });
   };
   const declineRequest = () => {
     if (busy || submitting.current) return;
     submitting.current = true;
-    decline.mutate(requestTarget, { onError: () => { submitting.current = false; } });
+    decline.mutate(requestTarget, { onError: failed });
   };
+  // A request answered elsewhere leaves the list when it is read again, so the page keeps the reason after the card goes.
+  function failed(error: Error) {
+    submitting.current = false;
+    // At the limit the request stays open for others, so the card stays (with Accept off) and its own error explains it.
+    if (requestClosed(error) && !(error instanceof ApiError && error.code === 'LIMIT_REACHED')) onClosed(`${request.observee.displayName}, ${request.section.label}: ${error.message}`);
+  }
   const hours = hoursUntil(request.expiresAt);
   // The backend refuses a date that has passed (DATE_PASSED), so only offer today and later.
   const today = campusTodayIso();
@@ -82,12 +99,21 @@ function RequestCard({ request, limitReached }: { request: ObservationRequest; l
         <fieldset className="space-y-3">
           <legend className="text-xs text-gray-500">Proposed times, pick the one you can attend</legend>
           {upcoming.length === 0 && <p className="text-sm text-gray-700">All proposed times have passed.</p>}
-          {upcoming.map((proposed) => (
-            <label key={proposed.date} className={`flex cursor-pointer items-center gap-2.5 text-sm text-gray-900 ${date === proposed.date ? 'font-bold' : ''}`}>
-              <Radio name={`slot-${request.signupId}`} checked={date === proposed.date} disabled={busy || limitReached} onChange={() => setDate(proposed.date)} />
-              {formatSlot(proposed.date, proposed.startTime)}
-            </label>
-          ))}
+          {upcoming.map((proposed) => {
+            const clash = clashOn(proposed, request, mine);
+            return (
+              <label key={proposed.date} className={`flex items-center gap-2.5 text-sm ${clash ? 'text-gray-500' : 'cursor-pointer text-gray-900'} ${date === proposed.date ? 'font-bold' : ''}`}>
+                <Radio name={`slot-${request.signupId}`} checked={date === proposed.date} disabled={busy || limitReached || Boolean(clash)} onChange={() => setDate(proposed.date)} />
+                <span>
+                  {formatSlot(proposed.date, proposed.startTime)}
+                  {clash && <span className="block text-xs font-normal">You teach {clash.label} at this time</span>}
+                </span>
+              </label>
+            );
+          })}
+          {upcoming.length > 0 && upcoming.every((proposed) => clashOn(proposed, request, mine)) && (
+            <p className="text-sm text-gray-700">You teach at every proposed time, so you can only decline this request.</p>
+          )}
         </fieldset>
         <div className="flex flex-wrap items-center justify-between gap-4 lg:min-h-full lg:flex-col lg:items-end">
           <Tag tone="due" icon={<ClockIcon width={11} height={11} />}>
@@ -112,6 +138,9 @@ export function ObserveRequestsPage() {
   usePageTitle('Observation requests');
   const incoming = useIncomingRequests();
   const { cycle, assignments, accepted } = useThisSemester();
+  // Only used to mark proposed times that clash with the observer's own classes; without it the server still refuses them.
+  const mine = useMyCourses(cycle.data?.term.termId).data ?? [];
+  const [closed, setClosed] = useState<string[]>([]);
   const errors = [incoming.error, assignments.error, cycle.error];
   const error = errors.find(Boolean);
   const retry = () => void Promise.all([incoming.refetch(), assignments.refetch(), cycle.refetch()]);
@@ -144,7 +173,10 @@ export function ObserveRequestsPage() {
 
       <h2 className="mb-[13px] mt-6 text-base font-bold text-gray-900">New requests ({pending.length})</h2>
       <div className="flex flex-col gap-4">
-        {pending.map((request) => <RequestCard key={request.signupId} request={request} limitReached={limitReached} />)}
+        {closed.map((message) => <p key={message} role="status" className="text-sm text-gray-700">No longer open: {message}</p>)}
+        {pending.map((request) => (
+          <RequestCard key={request.signupId} request={request} limitReached={limitReached} mine={mine} onClosed={(message) => setClosed((list) => (list.includes(message) ? list : [...list, message]))} />
+        ))}
         {pending.length === 0 && <p className="text-sm text-gray-500">No new requests.</p>}
       </div>
 

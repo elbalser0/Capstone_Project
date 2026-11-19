@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../client';
+import { api, ApiError } from '../client';
 import { invalidate, withId } from './shared';
 import type {
   Candidate,
@@ -163,8 +163,14 @@ export function useConfirmRequest() {
     mutationFn: ({ signupId, observerNetId, ...input }: ConfirmRequestInput & { signupId: string; observerNetId: string }) =>
       api<ObservationRequest>(`/signups/${signupId}/requests/${observerNetId}/confirm`, { method: 'PATCH', body: input }),
     onSuccess: () => invalidate(qc, facultyKeys.incoming, facultyKeys.assignments),
+    // The request was answered elsewhere (someone accepted first, it expired) or the limit was reached: the list is out of date.
+    onError: (error) => { if (requestClosed(error)) invalidate(qc, facultyKeys.incoming, facultyKeys.assignments); },
   });
 }
+
+/** Errors that mean the request is no longer open to this observer, so the requests list needs reading again. */
+export const requestClosed = (error: unknown) =>
+  error instanceof ApiError && ['ALREADY_PAIRED', 'NOT_PENDING', 'LIMIT_REACHED'].includes(error.code);
 
 /** PATCH /api/signups/{signupId}/requests/{observerNetId}/decline */
 export function useDeclineRequest() {
@@ -173,6 +179,7 @@ export function useDeclineRequest() {
     mutationFn: ({ signupId, observerNetId }: { signupId: string; observerNetId: string }) =>
       api<ObservationRequest>(`/signups/${signupId}/requests/${observerNetId}/decline`, { method: 'PATCH' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: facultyKeys.incoming }),
+    onError: (error) => { if (requestClosed(error)) void qc.invalidateQueries({ queryKey: facultyKeys.incoming }); },
   });
 }
 

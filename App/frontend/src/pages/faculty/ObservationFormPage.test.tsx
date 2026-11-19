@@ -141,3 +141,9 @@ it('shows the save time only after a local save', async () => {
   expect(screen.getByText(/^Draft saved \d{1,2}:\d{2} [AP]M$/)).toBeVisible();
   localStorage.removeItem(key);
 });
+
+it('says the form was submitted and signed once the observer signed it, not that it is only a local draft', async () => {
+  serve(observer.netid, { ...detail, observerSignedDate: '2026-09-22' }); open();
+  expect(await screen.findByText(/You submitted and signed this form on Sep 22, 2026\./)).toBeVisible();
+  expect(screen.queryByText(/It has not been submitted or signed/)).not.toBeInTheDocument();
+});

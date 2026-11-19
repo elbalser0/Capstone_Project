@@ -10,7 +10,7 @@ import type { Cycle, ObservationRequest, ObservationSummary } from '../../api/ty
 import { AuthProvider } from '../../auth/AuthProvider';
 import { AppShell } from '../../components/AppShell';
 import { setClock } from '../../lib/clock';
-import { cycle, course, faculty, observation, observer } from '../../test/fixtures';
+import { cycle, course, faculty, observation, observer, otherCourse } from '../../test/fixtures';
 import { renderRoutes } from '../../test/render';
 import { server } from '../../test/setup';
 import { ConfirmationsPage, ObserveRequestsPage } from './ObservePage';
@@ -387,4 +387,34 @@ it('does not mention email or notifications on My confirmations', async () => {
   await within(main).findByText('No confirmations yet this semester.');
   expect(main).not.toHaveTextContent(/e-?mail/i);
   expect(main).not.toHaveTextContent(/notif/i);
+});
+
+it('marks a proposed time that clashes with one of the observer\'s own classes and does not offer it', async () => {
+  setup();
+  // The observer teaches CS 2336.001 on Mondays 8:00 to 9:15, which overlaps the observed Monday class (8:30 to 9:45).
+  server.use(http.get('/api/me/courses', () => HttpResponse.json([{ ...otherCourse, meetings: [{ dayOfWeek: 'Mon', startTime: '08:00', endTime: '09:15', room: 'ECSS 2.412' }] }])));
+  renderRoutes([{ path: '/faculty/observe', element: <ObserveRequestsPage /> }], '/faculty/observe');
+  expect(await screen.findByText('You teach CS 2336.001 at this time')).toBeVisible();
+  expect(screen.getByRole('radio', { name: /Mon Sep 21, 8:30 AM/ })).toBeDisabled();
+  expect(screen.getByRole('radio', { name: 'Wed Sep 23, 10:00 AM' })).toBeEnabled();
+  expect(screen.queryByText(/so you can only decline/)).not.toBeInTheDocument();
+});
+
+it('after "Someone else accepted first", reads the requests again and keeps the reason on the page', async () => {
+  let incoming: ObservationRequest[] = [request];
+  setup();
+  server.use(
+    http.get('/api/me/requests/incoming', () => HttpResponse.json(incoming)),
+    http.patch('/api/signups/20/requests/er123/confirm', () => {
+      incoming = [{ ...request, status: 'cancelled' }];
+      return HttpResponse.json({ error: { code: 'ALREADY_PAIRED', message: 'Someone else accepted first.' } }, { status: 409 });
+    }),
+  );
+  const user = userEvent.setup();
+  renderRoutes([{ path: '/faculty/observe', element: <ObserveRequestsPage /> }], '/faculty/observe');
+  await user.click(await screen.findByRole('radio', { name: 'Mon Sep 21, 8:30 AM' }));
+  await user.click(screen.getByRole('button', { name: 'Accept' }));
+  expect(await screen.findByText('New requests (0)')).toBeVisible();
+  expect(screen.getByRole('status')).toHaveTextContent('No longer open: Dr. Maya Lin, CS 1337.002: Someone else accepted first.');
+  expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
 });

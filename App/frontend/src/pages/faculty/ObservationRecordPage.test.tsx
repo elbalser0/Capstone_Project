@@ -311,6 +311,13 @@ it('does not offer observee signing to the observer', async () => {
   expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();
 });
 
+it('offers the observer a change to the submitted form once they signed, and a local draft before', async () => {
+  serveRecord({ ...detail, observer, observerSignedDate: '2026-09-22' }, observer.netid);
+  openRecord();
+  expect(await screen.findByRole('link', { name: /Change the submitted form/ })).toHaveAttribute('href', '/faculty/observe/30/form');
+  expect(screen.queryByRole('link', { name: /Edit local draft/ })).not.toBeInTheDocument();
+});
+
 const lockNote = /Locked until your observer submits and signs the form/;
 const reportLink = () => screen.queryByRole('button', { name: 'The observation could not be done' });
 const uploadButton = () => screen.queryByRole('button', { name: 'Upload a file about the observation' });
@@ -347,10 +354,16 @@ it('shows no problem card and no lock note on a locked record', async () => {
 });
 it('shows no lock note and no report when the observation did not happen, but still allows a file', async () => {
   serveRecord({ ...detail, status: 'not_completed', reasonNotCompleted: 'Class cancelled' }); openRecord();
-  await screen.findByText('Read only');
+  expect(await screen.findByRole('heading', { name: 'This observation did not happen' })).toBeVisible();
+  expect(screen.getByText('Reason given: Class cancelled')).toBeVisible();
   expect(screen.queryByText(lockNote)).not.toBeInTheDocument();
+  expect(screen.getByText('Reported as not done. Nobody signs this record.')).toBeVisible();
   expect(reportLink()).not.toBeInTheDocument();
   expect(uploadButton()).toBeVisible();
+  // Nothing to rate or print.
+  expect(screen.queryByRole('heading', { name: 'Ratings and comments' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Print record' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: /Edit local draft|Change the submitted form/ })).not.toBeInTheDocument();
 });
 it('shows nothing to a viewer who is neither participant', async () => {
   serveRecord(detail, 'zz999'); openRecord();

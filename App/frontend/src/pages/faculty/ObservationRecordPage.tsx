@@ -127,6 +127,8 @@ export function ObservationRecordPage() {
   if (!profile.data || !o) return <p role="status" className="pt-8">Loading observation record…</p>;
   const status = recordStatus(o, profile.data.netid);
   const hasForm = Boolean(o.templateVersion) && Array.isArray(o.answers);
+  // Reported as "could not be done": nothing to rate, print or sign.
+  const missed = o.status === 'not_completed';
   const canObserveeSign = observee && o.status === 'scheduled' && Boolean(o.observerSignedDate) && !o.observeeSignedDate && staleRefresh !== 'failed';
   // Same rule as the backend's reportMissed: observee only, while scheduled and before the observer signs.
   const canReport = observee && o.status === 'scheduled' && !o.observerSignedDate;
@@ -155,12 +157,18 @@ export function ObservationRecordPage() {
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <div className="min-w-0 max-w-full [&>span]:h-auto [&>span]:whitespace-normal [&>span]:py-1"><Tag tone={status.tone}>{status.text}</Tag></div>
-          {hasForm && <Button className="screen-only" onClick={() => window.print()}>Print record</Button>}
+          {hasForm && !missed && <Button className="screen-only" onClick={() => window.print()}>Print record</Button>}
         </div>
       </div>
       {observeeWaitsForObserver(o, profile.data.netid) && <p className="text-sm text-gray-700">{OBSERVEE_LOCK_NOTE}</p>}
       <div className="observation-record-grid grid gap-5 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
-        {!hasForm ? <p role="alert">The assigned observation form is unavailable.</p> : (
+        {missed ? (
+          <Card className="min-w-0 space-y-2 px-5 py-4 lg:row-span-2">
+            <h3 className="font-bold">This observation did not happen</h3>
+            <p className="whitespace-pre-line text-sm text-gray-700">Reason given: {o.reasonNotCompleted || 'None'}</p>
+            <p className="text-sm text-gray-500">There is no form to fill in or sign for it.</p>
+          </Card>
+        ) : !hasForm ? <p role="alert">The assigned observation form is unavailable.</p> : (
           <Card className="min-w-0 lg:row-span-2">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-5 py-4">
               <h3 className="font-bold">Ratings and comments</h3>
@@ -207,7 +215,7 @@ export function ObservationRecordPage() {
               </div>
             )}
             <ErrorNote error={sign.error instanceof ApiError && sign.error.code === 'STALE_FORM' ? null : sign.error} />
-            <LockNote>{isLocked(o) ? 'Signed and locked. Nobody can change this record.' : 'Once both of you sign, nobody can change this record.'}</LockNote>
+            <LockNote>{missed ? 'Reported as not done. Nobody signs this record.' : isLocked(o) ? 'Signed and locked. Nobody can change this record.' : 'Once both of you sign, nobody can change this record.'}</LockNote>
           </div>
         </Card>
         {o.issueFileName && <AttachedFile o={o} />}
@@ -228,8 +236,10 @@ export function ObservationRecordPage() {
         )}
       </div>
       {reporting && canReport && <ReportMissedModal o={o} onClose={closeReport} onStale={() => void record.refetch()} />}
-      {observer && hasForm && !isLocked(o) && o.status !== 'not_completed' && (
-        <Link to={`/faculty/observe/${o.observationId}/form`} className={`${linkClass} screen-only`}><PenIcon /> Edit local draft</Link>
+      {observer && hasForm && !isLocked(o) && !missed && (
+        <Link to={`/faculty/observe/${o.observationId}/form`} className={`${linkClass} screen-only`}>
+          <PenIcon /> {o.observerSignedDate ? 'Change the submitted form' : 'Edit local draft'}
+        </Link>
       )}
       {!observer && !observee && <p>Read-only record.</p>}
     </div>
