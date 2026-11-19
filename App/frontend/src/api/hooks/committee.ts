@@ -205,6 +205,6 @@ export function usePublishTemplate() {
   return useMutation({
     mutationFn: ({ versionId, changeNote }: { versionId: string; changeNote: string }) =>
       api<TemplateVersion>(`/templates/${versionId}/publish`, { method: 'PATCH', body: { changeNote } }),
-    onSuccess: () => invalidate(qc, committeeKeys.templates, sharedKeys.activeTemplate),
+    onSuccess: () => invalidate(qc, committeeKeys.templates),
   });
 }

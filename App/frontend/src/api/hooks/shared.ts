@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey, type UseQueryResult } from '@tanstack/react-query';
 import { api } from '../client';
-import type { Account, Cycle, ImportResult, Me, Notification, TemplateVersion, Term } from '../types';
+import type { Account, Cycle, ImportResult, Me, Notification, Term } from '../types';
 
 /** Query options for an endpoint that needs an id: it waits until the id is known. */
 export const withId = <T,>(id: string | undefined, key: (id: string) => QueryKey, fetch: (id: string) => Promise<T>) => ({
@@ -18,7 +18,6 @@ export const sharedKeys = {
   me: ['me'] as const,
   notifications: ['me', 'notifications'] as const,
   currentCycle: ['cycles', 'current'] as const,
-  activeTemplate: ['templates', 'active'] as const,
   terms: ['terms'] as const,
 };
 
@@ -62,11 +61,6 @@ export function useCurrentCycle() {
 /** GET /api/terms: every term, oldest first (A2 term picker). */
 export function useTerms() {
   return useQuery({ queryKey: sharedKeys.terms, queryFn: () => api<Term[]>('/terms'), staleTime: 60 * 60_000 });
-}
-
-/** GET /api/templates/active */
-export function useActiveTemplate() {
-  return useQuery({ queryKey: sharedKeys.activeTemplate, queryFn: () => api<TemplateVersion>('/templates/active') });
 }
 
 /** POST /api/admin/import: CSV files keyed by table name (professor, department, course, section, meeting_time, term, ac_member). */
