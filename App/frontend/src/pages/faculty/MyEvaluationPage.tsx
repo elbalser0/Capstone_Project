@@ -69,8 +69,8 @@ function statusTag(o: ObservationSummary) {
 function signupObservationTag(o: NonNullable<Signup['observation']>) {
   if (o.status === 'not_completed') return <Tag tone="neutral">Did not happen</Tag>;
   // The signup summary has no signature dates; only observation history can confirm a signed record.
-  if (o.status === 'completed') return <Tag tone="neutral">Completed — signature status unavailable</Tag>;
-  return <Tag tone="neutral">{o.scheduledDate ? `Scheduled ${formatDate(o.scheduledDate)}` : 'Scheduled — date unavailable'}</Tag>;
+  if (o.status === 'completed') return <Tag tone="neutral">Completed (signature status unavailable)</Tag>;
+  return <Tag tone="neutral">{o.scheduledDate ? `Scheduled ${formatDate(o.scheduledDate)}` : 'Scheduled (date unavailable)'}</Tag>;
 }
 
 const COLS = 'grid min-w-[780px] grid-cols-[160px_200px_180px_minmax(190px,1fr)_60px] items-center px-4';
