@@ -117,6 +117,39 @@ it('highlights no sidebar item for a viewer who is neither participant', async (
   sessionStorage.removeItem('assessment-helper.session');
 });
 
+function committeeShell(role: 'AC' | 'faculty') {
+  sessionStorage.setItem('assessment-helper.session', JSON.stringify({ email: 'test@example.edu', token: 'demo:test' }));
+  serveRecord(detail, 'zz999');
+  server.use(
+    http.get('*/api/me', () => HttpResponse.json({ ...faculty, netid: 'zz999', email: 'test@example.edu', role, department: { deptId: '1', deptName: 'CS' } })),
+    http.get('*/api/cycles/current', () => HttpResponse.json(cycle)),
+    http.get('*/api/me/requests/incoming', () => HttpResponse.json([])),
+  );
+  renderRoutes([{ element: <AuthProvider mode="demo"><AppShell /></AuthProvider>, children: [
+    { path: '/committee/observations', element: <p>Committee observations list</p>, handle: { title: 'Observations' } },
+    { path: '/committee/observations/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/committee/observations' } },
+    { path: '/faculty/evaluation', element: <p>Faculty evaluation page</p>, handle: { title: 'My evaluation' } },
+  ] }], '/committee/observations/30');
+}
+it('opens a record for a committee member who is neither party, read only, with a way back to Observations', async () => {
+  committeeShell('AC');
+  expect(await screen.findByText('Read-only record.')).toBeVisible();
+  expect(screen.getByText('Clear examples')).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Upload a file about the observation/ })).not.toBeInTheDocument();
+  const back = screen.getByRole('link', { name: 'Back to observations' });
+  expect(back).toHaveAttribute('href', '/committee/observations');
+  expect(screen.queryByRole('link', { name: 'Back to evaluation' })).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Observations' })).toHaveClass('font-bold');
+  sessionStorage.removeItem('assessment-helper.session');
+});
+it('sends a faculty-only account away from the committee record route', async () => {
+  committeeShell('faculty');
+  expect(await screen.findByText('Faculty evaluation page')).toBeVisible();
+  expect(screen.queryByText('Read-only record.')).not.toBeInTheDocument();
+  sessionStorage.removeItem('assessment-helper.session');
+});
+
 it('lets only the observee sign after observer submission and sends the exact saved revision', async () => {
   let current: ObservationDetail = { ...detail, observerSignedDate: '2026-09-22', observeeSignedDate: null, status: 'scheduled' };
   let signBodies: unknown[] = [];

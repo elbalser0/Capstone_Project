@@ -80,6 +80,7 @@ export const router = createBrowserRouter([
         ],
       },
       { path: '/committee/observations', element: <ObservationsPage />, handle: { title: 'Observations' } satisfies RouteHandle },
+      { path: '/committee/observations/:observationId', element: <ObservationRecordPage />, handle: { title: 'Observation record', nav: '/committee/observations' } satisfies RouteHandle },
       { path: '/faculty/survey', element: <SurveyPage />, handle: { title: 'End-of-process survey' } satisfies RouteHandle },
       { path: '/committee/survey-responses', element: <SurveyResponsesPage />, handle: { title: 'Survey responses' } satisfies RouteHandle },
       {

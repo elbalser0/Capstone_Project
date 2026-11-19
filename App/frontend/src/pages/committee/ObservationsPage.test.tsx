@@ -172,6 +172,25 @@ describe('states', () => {
   });
 });
 
+describe('view record (A6a, A6c)', () => {
+  it('links each outstanding row that has an observation to its record, and no unpaired row', async () => {
+    serve(); open();
+    await screen.findByRole('table', { name: 'Outstanding observations' });
+    expect(within(rowOf('Dr. Cy Scheduled')).getByRole('link', { name: "View Dr. Cy Scheduled's observation record" })).toHaveAttribute('href', '/committee/observations/o3');
+    expect(within(rowOf('Dr. Ed Missed')).getByRole('link', { name: "View Dr. Ed Missed's observation record" })).toHaveAttribute('href', '/committee/observations/o5');
+    expect(within(rowOf('Dr. Ana Unpaired')).queryByRole('link')).not.toBeInTheDocument();
+    expect(within(rowOf('Dr. Bo Nobody')).queryByRole('link')).not.toBeInTheDocument();
+  });
+  it('links each completed row to its record, next to Forward', async () => {
+    serve(); open();
+    await user().click(await screen.findByRole('tab', { name: 'Completed (2)' }));
+    const done = rowOf('Dr. Flo Done');
+    expect(within(done).getByRole('link', { name: "View Dr. Flo Done's observation record" })).toHaveAttribute('href', '/committee/observations/o6');
+    expect(within(done).getByRole('button', { name: "Forward Dr. Flo Done's observation" })).toBeVisible();
+    expect(within(rowOf('Dr. Hal Done')).getByRole('link', { name: "View Dr. Hal Done's observation record" })).toHaveAttribute('href', '/committee/observations/o7');
+  });
+});
+
 describe('completed tab (A6a)', () => {
   it('lists the signed and locked observations, oldest first, each with Forward', async () => {
     serve(); open();
