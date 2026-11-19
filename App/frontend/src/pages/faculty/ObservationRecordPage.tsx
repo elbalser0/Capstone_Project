@@ -6,7 +6,6 @@ import { Button, Card, Checkbox, ErrorNote, LockNote, Modal, PageError, RatingSc
 import { useActiveNav } from '../../components/AppShell';
 import { CheckIcon, ClockIcon, FlagIcon, PenIcon, UploadIcon } from '../../components/icons';
 import { formatDayYear, isLocked } from '../../lib/format';
-import { isMissingEndpoint } from '../../lib/missingEndpoint';
 import type { ObservationDetail, PersonRef } from '../../api/types';
 import { OBSERVEE_LOCK_NOTE, observeeWaitsForObserver, recordStatus, signedOn, whenLong } from './observationDisplay';
 import { useObservationRecord } from './useObservationRecord';
@@ -62,7 +61,6 @@ function UploadLink({ o }: { o: ObservationDetail }) {
   const upload = useUploadObservationFile();
   const input = useRef<HTMLInputElement>(null);
   const [tooBig, setTooBig] = useState(false);
-  const missing = isMissingEndpoint(upload.error);
   return (
     <>
       <input
@@ -85,8 +83,7 @@ function UploadLink({ o }: { o: ObservationDetail }) {
       </button>
       {o.issueFileName && <p role="status" className="mt-2 pl-[21px] text-xs text-gray-500">Uploaded: {o.issueFileName}</p>}
       {tooBig && <p role="alert" className="mt-2 pl-[21px] text-xs text-red-800">Files can be up to 10 MB.</p>}
-      {missing && <p role="status" className="mt-2 pl-[21px] text-xs text-gray-700">Uploading a file is not available yet. Nothing was uploaded.</p>}
-      {!missing && <ErrorNote error={upload.error} className="mt-2" />}
+      <ErrorNote error={upload.error} className="mt-2" />
     </>
   );
 }
