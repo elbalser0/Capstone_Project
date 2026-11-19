@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import type { AdminProfessor } from '../../api/types';
-import { Button, inputClass } from '../../components/ui';
+import { Button, Pagination, inputClass, usePages } from '../../components/ui';
 import { AddProfessorModal } from './AddProfessorModal';
 import { UpdateProfessorModal, type ProfessorAction,} from './UpdateProfessorModal';
 
@@ -11,6 +11,8 @@ const rankLabels = {
   associate: 'Associate',
   full: 'Full',
 };
+
+const PAGE_SIZE = 10;
 
 type SortField = 'firstName' | 'lastName';
 type RankFilter = 'all' | AdminProfessor['rank'];
@@ -106,6 +108,19 @@ export function ProfessorsPage() {
     );
   });
 
+  const pager = usePages(sorted, PAGE_SIZE);
+  const { setPage } = pager;
+
+  // After an add or update, the selected professor may sit on another page: show that page.
+  const selectedIndex = sorted.findIndex(
+    (professor) => professor.netid === selectedNetid,
+  );
+  const selectedPage =
+    selectedIndex < 0 ? null : Math.floor(selectedIndex / PAGE_SIZE) + 1;
+  useEffect(() => {
+    if (selectedPage !== null) setPage(selectedPage);
+  }, [selectedPage, setPage]);
+
   // Only a professor visible in the table can be managed.
   const selected = filtered.find(
     (professor) => professor.netid === selectedNetid,
@@ -123,6 +138,7 @@ export function ProfessorsPage() {
     setSortField('lastName');
     setSortDirection('asc');
     setSelectedNetid(null);
+    setPage(1);
   }
 
   if (professors.isPending) {
@@ -165,6 +181,7 @@ export function ProfessorsPage() {
           onChange={(event) => {
             setSearch(event.target.value);
             setSelectedNetid(null);
+            setPage(1);
           }}
         />
       </div>
@@ -249,6 +266,7 @@ export function ProfessorsPage() {
                 onChange={(event) => {
                   setRankFilter(event.target.value as RankFilter);
                   setSelectedNetid(null);
+                  setPage(1);
                 }}
               >
                 <option value="all">All ranks</option>
@@ -272,6 +290,7 @@ export function ProfessorsPage() {
                 onChange={(event) => {
                   setAcFilter(event.target.value as AcFilter);
                   setSelectedNetid(null);
+                  setPage(1);
                 }}
               >
                 <option value="all">All professors</option>
@@ -294,6 +313,7 @@ export function ProfessorsPage() {
                 onChange={(event) => {
                   setDepartmentFilter(event.target.value);
                   setSelectedNetid(null);
+                  setPage(1);
                 }}
               >
                 <option value="all">All departments</option>
@@ -319,9 +339,10 @@ export function ProfessorsPage() {
                 id="professor-sort"
                 className={`${inputClass} w-full`}
                 value={sortField}
-                onChange={(event) =>
-                  setSortField(event.target.value as SortField)
-                }
+                onChange={(event) => {
+                  setSortField(event.target.value as SortField);
+                  setPage(1);
+                }}
               >
                 <option value="firstName">First name</option>
                 <option value="lastName">Last name</option>
@@ -339,9 +360,10 @@ export function ProfessorsPage() {
                 id="professor-sort-direction"
                 className={`${inputClass} w-full`}
                 value={sortDirection}
-                onChange={(event) =>
-                  setSortDirection(event.target.value as 'asc' | 'desc')
-                }
+                onChange={(event) => {
+                  setSortDirection(event.target.value as 'asc' | 'desc');
+                  setPage(1);
+                }}
               >
                 <option value="asc">Ascending (A–Z)</option>
                 <option value="desc">Descending (Z–A)</option>
@@ -395,7 +417,7 @@ export function ProfessorsPage() {
           </thead>
 
           <tbody>
-            {sorted.map((professor) => {
+            {pager.rows.map((professor) => {
               const checked = selectedNetid === professor.netid;
               const blocked = Boolean(selected) && !checked;
 
@@ -452,9 +474,12 @@ export function ProfessorsPage() {
         </table>
       </div>
 
-      <p className="mt-3 text-xs text-gray-500">
-        Showing {filtered.length} of {professors.data?.length ?? 0} professors.
-      </p>
+      <div className="@container mt-3 flex flex-wrap items-center justify-between gap-3">
+        <Pagination pager={pager} label="Professor pages" />
+        <p className="text-xs text-gray-500">
+          {filtered.length} of {professors.data?.length ?? 0} professors match.
+        </p>
+      </div>
 
             {showAdd && (
         <AddProfessorModal
