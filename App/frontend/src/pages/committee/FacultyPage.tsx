@@ -13,9 +13,9 @@ import { DUE_OR_OVERDUE_TEXT } from '../../lib/statusTerms';
 import { errorText } from './DashboardSections';
 
 // A3. Every professor's status this cycle, with filters, search, CSV export and reminders to the
-// selected due or overdue professors. The full list (GET /api/cycles/{cycleId}/faculty) is not in
-// the backend yet; until it is, the page shows the due-professors list, which has no email, no due
-// semester and no NOT DUE rows.
+// selected due or overdue professors. The full list is GET /api/cycles/{cycleId}/faculty. A server
+// without that route answers 404, and then the page shows the due-professors list, which has no email,
+// no due semester and no NOT DUE rows.
 
 const PAGE_SIZE = 7;
 const ALL: DueStatus[] = ['DUE', 'OVERDUE', 'NOT_DUE'];
@@ -105,8 +105,9 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
       department: r.department.deptName, lastObserved: r.lastObservedTerm?.label ?? 'Never', dueSemester: null, status: r.dueStatus,
     }));
   const visible = shown.filter((s) => statuses.includes(s));
-  const q = query.trim().toLowerCase();
-  const rows = all.filter((r) => visible.includes(r.status) && (!q || r.name.toLowerCase().includes(q)));
+  // Every word typed must appear in the name, so "dr linda" finds "Dr. Linda Chen".
+  const words = query.toLowerCase().split(/[\s.,]+/).filter(Boolean);
+  const rows = all.filter((r) => visible.includes(r.status) && words.every((w) => r.name.toLowerCase().includes(w)));
   const pager = usePages(rows, PAGE_SIZE);
   const remindable = rows.filter((r) => r.status !== 'NOT_DUE').map((r) => r.netid);
   const picked = selected.filter((n) => remindable.includes(n));
@@ -121,11 +122,9 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
     setShown(next);
     pager.setPage(1);
   };
-  const toggleStatus = (s: DueStatus) => {
-    if (visible.length === statuses.length) return filter([s]);
-    const next = toggleIn(visible, s);
-    filter(next.length ? next : statuses);
-  };
+  // A status chip shows only that status. Pressing the chip that is already the only one pressed goes back
+  // to the opening view, due and overdue together.
+  const onlyThis = (s: DueStatus) => filter(visible.length === 1 && visible[0] === s ? DUE_ONLY : [s]);
 
   const pending = remind.isPending;
   const failed = remind.isError ? failure(remind.error) : null;
@@ -153,7 +152,7 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
         <div className="flex flex-wrap gap-2">
           <Chip selected={visible.length === statuses.length} onClick={() => filter(statuses)}>All ({all.length})</Chip>
           {statuses.map((s) => (
-            <Chip key={s} selected={visible.includes(s) && visible.length < statuses.length} onClick={() => toggleStatus(s)}>
+            <Chip key={s} selected={visible.includes(s) && visible.length < statuses.length} onClick={() => onlyThis(s)}>
               {DUE_TAG[s][1]} ({all.filter((r) => r.status === s).length})
             </Chip>
           ))}

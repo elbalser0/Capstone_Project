@@ -32,6 +32,13 @@ async function submit(email: string, password = 'secret') {
 
 afterEach(() => sessionStorage.clear());
 
+describe('Login page footer', () => {
+  it('calls the demo build a proof of concept', () => {
+    openLogin();
+    expect(screen.getByText('CS 4485 capstone, Team 06, proof of concept')).toBeVisible();
+  });
+});
+
 describe('Login email check', () => {
   it.each(['not-an-email', 'maya@', 'maya lin@demo.edu', '@demo.edu', 'maya@demo'])('stops "%s" before it reaches the server', async (typed) => {
     const seen = openLogin();

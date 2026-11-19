@@ -141,14 +141,14 @@ describe('Sign-up requests page', () => {
     expect(notifyButton()).toHaveAccessibleDescription('Available once observer selection has made lists.');
   });
 
-  it('keeps the page working when the observee emails cannot be read', async () => {
+  it('keeps the page working when the sign-ups cannot be read, and says what that hides', async () => {
     serve({ matching: [row('20', faculty, 5)] });
     server.use(http.get('*/api/cycles/1/signups', () => failure('Sign-ups could not be read.')));
     openPage();
     expect(await screen.findByText('5 of 5')).toBeVisible();
     expect(within(dataRows()[0]).getAllByRole('cell')[4]).toHaveTextContent('');
     expect(runButton()).toBeEnabled();
-    expect(screen.queryByText('Sign-ups could not be read.')).not.toBeInTheDocument();
+    expect(await screen.findByText(/Couldn't load the sign-ups, so a paired sign-up may still show its old status and the Email column is empty\. Sign-ups could not be read\./)).toBeVisible();
   });
 
   it('shows the server message when observer selection is refused', async () => {
@@ -241,6 +241,20 @@ describe('Sign-ups after pairing and hand-added observers', () => {
   const paired = (signupId: string, observee: PersonRef): Signup => ({
     ...signupOf(signupId, observee),
     observation: { observationId: `o${signupId}`, observer, status: 'scheduled', scheduledDate: '2026-09-21' },
+  });
+
+  it('hides the attention banner while the sign-ups cannot be read, and Try again brings the pairing back', async () => {
+    let fail = true;
+    serve({ matching: [row('20', faculty, 1, 'insufficient_observers')], signupList: [paired('20', faculty)] });
+    server.use(http.get('*/api/cycles/1/signups', () => (fail ? failure('Sign-ups could not be read.') : HttpResponse.json([paired('20', faculty)]))));
+    openPage();
+    expect(await screen.findByText(/Couldn't load the sign-ups/)).toBeVisible();
+    expect(screen.queryByText(/need attention/)).not.toBeInTheDocument();
+    fail = false;
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText(`Paired with ${observer.displayName}`)).toBeVisible();
+    expect(screen.queryByText(/Couldn't load the sign-ups/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/need attention/)).not.toBeInTheDocument();
   });
 
   it('ignores the alert left open on a sign-up that is already paired', async () => {

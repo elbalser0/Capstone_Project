@@ -841,6 +841,64 @@ describe('Committee dashboard recovery', () => {
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled();
   });
 
+  it('describes each KPI the way the backend counts it', async () => {
+    const all: KpiResult[] = [
+      { kpiCode: '1.1', numerator: 9, denominator: 10, kpiValue: 0.9, computedDate: '2026-10-02' },
+      { kpiCode: '1.2', numerator: 3, denominator: 15, kpiValue: 3, computedDate: '2026-10-02' },
+      { kpiCode: '2.1', numerator: 14, denominator: 15, kpiValue: 14 / 15, computedDate: '2026-10-02' },
+      { kpiCode: '2.2', numerator: 10, denominator: 14, kpiValue: 10 / 14, computedDate: '2026-10-02' },
+      { kpiCode: '3.1', numerator: 56, denominator: 14, kpiValue: 4, computedDate: '2026-10-02' },
+      { kpiCode: '4.1', numerator: 2, denominator: 10, kpiValue: 2, computedDate: '2026-10-02' },
+      { kpiCode: '4.2', numerator: 7, denominator: 14, kpiValue: 0.5, computedDate: '2026-10-02' },
+    ];
+    serve();
+    server.use(http.get('*/api/cycles/latest/kpis', () => HttpResponse.json({ cycle, computedDate: '2026-10-02', kpis: all })));
+    openPage();
+    expect(await within(kpiCard('Observer Utilization Rate')).findByText('71%')).toBeVisible();
+    expect(within(kpiCard('Observer Utilization Rate')).getByText('10 confirmed observers for 14 sign-ups.')).toBeVisible();
+    expect(within(kpiCard('Missing Observation Count')).getByText('2')).toBeVisible();
+    expect(within(kpiCard('Missing Observation Count')).getByText('Confirmed observations reported as not done, or not signed by both by the observation deadline.')).toBeVisible();
+    expect(within(kpiCard('Survey Completion Rate')).getByText('50%')).toBeVisible();
+    expect(within(kpiCard('Survey Completion Rate')).getByText("7 of the 14 sign-ups ended with a record signed by both and the observee's survey.")).toBeVisible();
+    expect(within(kpiCard('Evaluation Eligibility Accuracy')).getByText('Observers who met every matching rule (1 wrong).')).toBeVisible();
+    expect(within(kpiCard('Assessment Participation Rate')).getByText('14 of the 15 professors who were due signed up.')).toBeVisible();
+    expect(screen.queryByText(/also observed a colleague|finished the survey|did not happen/)).not.toBeInTheDocument();
+  });
+
+  it('says one observer and one sign-up in the singular', async () => {
+    serve();
+    server.use(http.get('*/api/cycles/latest/kpis', () => HttpResponse.json({
+      cycle, computedDate: '2026-10-02', kpis: [{ kpiCode: '2.2', numerator: 1, denominator: 1, kpiValue: 1, computedDate: '2026-10-02' }],
+    })));
+    openPage();
+    expect(await within(kpiCard('Observer Utilization Rate')).findByText('1 confirmed observer for 1 sign-up.')).toBeVisible();
+  });
+
+  it('says why a generated KPI has no value instead of a sentence about zero', async () => {
+    const empty: KpiResult[] = [
+      { kpiCode: '1.1', numerator: 0, denominator: 0, kpiValue: null, computedDate: '2026-10-02' },
+      { kpiCode: '1.2', numerator: 0, denominator: 0, kpiValue: 0, computedDate: '2026-10-02' },
+      { kpiCode: '2.1', numerator: 0, denominator: 0, kpiValue: null, computedDate: '2026-10-02' },
+      { kpiCode: '2.2', numerator: 0, denominator: 0, kpiValue: null, computedDate: '2026-10-02' },
+      { kpiCode: '3.1', numerator: 0, denominator: 0, kpiValue: null, computedDate: '2026-10-02' },
+      { kpiCode: '4.1', numerator: 0, denominator: 0, kpiValue: 0, computedDate: '2026-10-02' },
+      { kpiCode: '4.2', numerator: 0, denominator: 0, kpiValue: null, computedDate: '2026-10-02' },
+    ];
+    serve();
+    server.use(http.get('*/api/cycles/latest/kpis', () => HttpResponse.json({ cycle, computedDate: '2026-10-02', kpis: empty })));
+    openPage();
+    expect(await within(kpiCard('Evaluation Eligibility Accuracy')).findByText('No confirmed observations to check.')).toBeVisible();
+    expect(within(kpiCard('Evaluation Eligibility Accuracy')).getByText('N/A')).toBeVisible();
+    expect(within(kpiCard('Assessment Participation Rate')).getByText('Nobody was due this cycle.')).toBeVisible();
+    for (const name of ['Observer Utilization Rate', 'List Sufficiency Rate', 'Survey Completion Rate']) {
+      expect(within(kpiCard(name)).getByText('N/A')).toBeVisible();
+      expect(within(kpiCard(name)).getByText('No sign-ups this cycle.')).toBeVisible();
+    }
+    expect(within(kpiCard('Overdue Evaluation Count')).getByText('0')).toBeVisible();
+    expect(within(kpiCard('Missing Observation Count')).getByText('0')).toBeVisible();
+    expect(screen.getByText(/Generated Oct 2, 2026, after the feedback deadline/)).toBeVisible();
+  });
+
   it('keeps the KPIs when a refresh fails', async () => {
     serve();
     server.use(http.get('*/api/cycles/latest/kpis', () => HttpResponse.json(closedKpis)));

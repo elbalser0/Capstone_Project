@@ -81,7 +81,7 @@ export function AppShell() {
   const closeButton = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
 
-  // The phone menu closes when a link in it opens another page, and on Escape.
+  // The phone menu closes when a link in it opens another page, when a link to the page already open is tapped, and on Escape.
   useEffect(() => setMenuOpen(false), [pathname]);
   useEffect(() => {
     if (!menuOpen) return;
@@ -133,7 +133,7 @@ export function AppShell() {
   const nav = navOverride ?? handles.map((h) => h?.nav).find(Boolean);
   return (
     <div className="app-shell flex min-h-screen">
-      <Sidebar mode={mode} activeNav={nav} open={menuOpen} />
+      <Sidebar mode={mode} activeNav={nav} open={menuOpen} onLinkClick={() => setMenuOpen(false)} />
       {menuOpen && (
         <div className="fixed inset-0 z-30 bg-gray-900/40 md:hidden print:hidden" onClick={() => setMenuOpen(false)}>
           <button

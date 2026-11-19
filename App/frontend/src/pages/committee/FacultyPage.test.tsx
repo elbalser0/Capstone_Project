@@ -78,8 +78,9 @@ describe('Faculty page: full list', () => {
     expect(chip(/^NOT DUE \(1\)/)).toHaveAttribute('aria-pressed', 'false');
     const u = user();
     await u.click(chip(/^NOT DUE/));
-    expect(names()).toEqual(['Dr. Ana Test', 'Dr. Ben Test', 'Dr. Cy Test', 'Dr. Dee Test']);
+    expect(names()).toEqual(['Dr. Dee Test']);
     await u.click(chip(/^All/));
+    expect(names()).toEqual(['Dr. Ana Test', 'Dr. Ben Test', 'Dr. Cy Test', 'Dr. Dee Test']);
     await u.click(chip(/^OVERDUE/));
     expect(names()).toEqual(['Dr. Cy Test']);
     // Every column, with the due semester.
@@ -87,6 +88,46 @@ describe('Faculty page: full list', () => {
     expect(row).toHaveTextContent(/Dr\. Cy Test.*Assistant.*Computer Science.*Never.*Spring 2026.*OVERDUE/);
     expect(screen.getByRole('columnheader', { name: 'Due semester' })).toBeVisible();
     expect(log.fallbackReads).toBe(0);
+  });
+
+  it('shows only the status whose chip is pressed, from the opening view too, and goes back to it on a second press', async () => {
+    serve();
+    open();
+    await screen.findByText('Dr. Ana Test');
+    const u = user();
+    await u.click(chip(/^DUE/));
+    expect(names()).toEqual(['Dr. Ana Test', 'Dr. Ben Test']);
+    expect(chip(/^DUE/)).toHaveAttribute('aria-pressed', 'true');
+    expect(chip(/^OVERDUE/)).toHaveAttribute('aria-pressed', 'false');
+    await u.click(chip(/^OVERDUE/));
+    expect(names()).toEqual(['Dr. Cy Test']);
+    await u.click(chip(/^OVERDUE/));
+    expect(names()).toEqual(['Dr. Ana Test', 'Dr. Ben Test', 'Dr. Cy Test']);
+    expect(chip(/^DUE/)).toHaveAttribute('aria-pressed', 'true');
+    expect(chip(/^OVERDUE/)).toHaveAttribute('aria-pressed', 'true');
+    expect(chip(/^All/)).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('finds a name from any of its words, with or without the title', async () => {
+    serve();
+    open();
+    await screen.findByText('Dr. Ana Test');
+    const u = user();
+    await u.type(screen.getByLabelText('Search by name'), 'dr ana');
+    expect(names()).toEqual(['Dr. Ana Test']);
+    await u.clear(screen.getByLabelText('Search by name'));
+    await u.type(screen.getByLabelText('Search by name'), 'Test, Cy');
+    expect(names()).toEqual(['Dr. Cy Test']);
+  });
+
+  it('shows a due semester that has no term row yet', async () => {
+    serve({ list: () => HttpResponse.json([
+      facultyStatus('e1', 'Eve', 'NOT_DUE', { dueTerm: { termId: null, season: 'fall', year: 2029, label: 'Fall 2029', startDate: null, endDate: null } }),
+    ]) });
+    open();
+    await screen.findByText(/NOT DUE \(1\)/);
+    await user().click(chip(/^NOT DUE/));
+    expect(screen.getAllByRole('row')[1]).toHaveTextContent(/Dr\. Eve Test.*Fall 2029.*NOT DUE/);
   });
 
   it('searches by name and pages through long lists', async () => {
@@ -186,7 +227,7 @@ describe('Faculty page: reminders to the selected professors', () => {
     open();
     await screen.findByText('Dr. Ana Test');
     const u = user();
-    await u.click(chip(/^NOT DUE/));
+    await u.click(chip(/^All/));
     expect(screen.getByRole('checkbox', { name: 'Select Dr. Dee Test' })).toBeDisabled();
     await u.click(screen.getByRole('checkbox', { name: 'Select everyone due' }));
     expect(screen.getByRole('button', { name: 'Send reminder to selected (3)' })).toBeEnabled();
