@@ -146,12 +146,15 @@ export function person(netid: string): PersonRef {
 /** A person plus their email. */
 export const contact = (netid: string) => ({ ...person(netid), email: professor(netid).email });
 
+/** The department's name for a course's department code, like the backend's course labels. */
+export const deptNameOf = (deptId: string) => db.department.find((d) => d.dept_id === deptId)?.dept_name ?? deptId;
+
 export function section(sectionId: string): CourseSection {
   const s = db.section.find((x) => x.section_id === sectionId)!;
   const c = db.course.find((x) => x.course_id === s.course_id)!;
   return {
     sectionId: s.section_id,
-    label: `${c.dept_id} ${c.course_num}.${s.section_num}`,
+    label: `${deptNameOf(c.dept_id)} ${c.course_num}.${s.section_num}`,
     courseNum: c.course_num,
     sectionNum: s.section_num,
     title: c.title,

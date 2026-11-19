@@ -35,7 +35,6 @@ import {
   found,
   isAc,
   newId,
-  notify,
   now,
   observationDetail,
   observationSummary,
@@ -75,11 +74,11 @@ const ownSignup = (params: PathParams, me: ProfessorRow) => {
   return found(s && s.observee_netid === me.netid ? s : null, 'Sign-up not found.');
 };
 
-/** Observees reach their own records, observers only the ones they conducted; anything else is 404. */
+/** Observees reach their own records, observers the ones they conducted, committee members any record; anything else is 404. */
 const observationFor = (params: PathParams, me: ProfessorRow) => {
   const o = db.observation.find((x) => x.observation_id === params.observationId);
   const s = o && signupRow(o.signup_id);
-  if (!o || !s || (s.observee_netid !== me.netid && o.observer_netid !== me.netid)) throw fail(404, 'NOT_FOUND', 'Observation not found.');
+  if (!o || !s || (!isAc(me.netid) && s.observee_netid !== me.netid && o.observer_netid !== me.netid)) throw fail(404, 'NOT_FOUND', 'Observation not found.');
   return { o, s };
 };
 
@@ -185,7 +184,6 @@ export const facultyHandlers = [
       const existing = db.observation_request.find((r) => r.signup_id === s.signup_id && r.observer_netid === netid);
       if (existing) continue;
       db.observation_request.push({ signup_id: s.signup_id, observer_netid: netid, status: 'pending', sent_date: now(), responded_date: null });
-      notify([netid], 'observation_request', `Observation request from ${person(me.netid).displayName}`, me.netid);
     }
     return HttpResponse.json(db.observation_request.filter((r) => r.signup_id === s.signup_id).map(toRequest), { status: 201 });
   }),
@@ -210,10 +208,12 @@ export const facultyHandlers = [
   http.post('/api/observations/:observationId/sign', ({ request, params }) => {
     const me = signedIn(request);
     const { o, s } = observationFor(params, me);
-    if (isLocked(o)) return fail(409, 'LOCKED', 'This record is signed by both and locked.');
-    if (o.status !== 'completed') return fail(409, 'FORM_NOT_SUBMITTED', 'The observer has not submitted the form yet.');
-    if (s.observee_netid === me.netid) o.observee_signed_date = today();
-    else o.observer_signed_date = today();
+    if (s.observee_netid !== me.netid) return fail(403, 'FORBIDDEN', 'Only the observee signs the saved record.');
+    if (isLocked(o) || o.observee_signed_date) return fail(409, 'LOCKED', 'This record is signed by both and locked.');
+    if (o.status !== 'scheduled') return fail(409, 'NOT_SCHEDULED', 'Only a scheduled observation can be signed.');
+    if (!o.observer_signed_date) return fail(409, 'FORM_NOT_SUBMITTED', 'The observer has not submitted the form yet.');
+    // The record is completed once the observee signs, like the backend.
+    Object.assign(o, { observee_signed_date: today(), status: 'completed' });
     return HttpResponse.json(observationDetail(o));
   }),
 
@@ -252,15 +252,17 @@ export const facultyHandlers = [
     const me = signedIn(request);
     const c = cycleOr404(params.cycleId);
     if (cyclePhase(db, c, today()) !== 'feedback') return fail(409, 'SURVEY_CLOSED', `The survey is open from ${surveyOpensDate(c)} to ${c.feedback_deadline}.`);
-    if (db.survey_response.some((r) => r.cycle_id === c.cycle_id && r.respondent_id === me.netid)) return fail(409, 'ALREADY_SUBMITTED', 'You already submitted the survey.');
     const form = await request.formData();
+    const role = form.get('respondentRole') === 'observer' ? 'observer' : 'observee';
+    // One response per person per role, like the backend.
+    if (db.survey_response.some((r) => r.cycle_id === c.cycle_id && r.respondent_id === me.netid && r.respondent_role === role)) return fail(409, 'ALREADY_SUBMITTED', `You already submitted the survey as ${role}.`);
     const file = form.get('troubleFile');
     const responseId = newId('SR');
     db.survey_response.push({
       response_id: responseId,
       cycle_id: c.cycle_id,
       respondent_id: me.netid,
-      respondent_role: form.get('respondentRole') === 'observer' ? 'observer' : 'observee',
+      respondent_role: role,
       process_ok: form.get('processOk') === 'true',
       difficulties: String(form.get('difficulties') ?? ''),
       additional_feedback: String(form.get('additionalFeedback') ?? ''),
@@ -268,6 +270,18 @@ export const facultyHandlers = [
       submitted_date: today(),
     });
     return HttpResponse.json({ responseId }, { status: 201 });
+  }),
+
+  // Committee only, like the backend; 404 when the response has no file.
+  http.get('/api/cycles/:cycleId/survey-responses/:responseId/trouble-file', ({ request, params }) => {
+    if (!isAc(signedIn(request).netid)) return fail(403, 'FORBIDDEN', 'Only the Assessment Committee can open survey files.');
+    const r = db.survey_response.find((x) => x.cycle_id === params.cycleId && x.response_id === params.responseId);
+    if (!r) return fail(404, 'NOT_FOUND', 'Survey response not found.');
+    if (!r.trouble_file_key) return fail(404, 'NO_FILE', 'This response has no attached file.');
+    const name = r.trouble_file_key.split('/').pop()!;
+    return new HttpResponse(`Attachment for survey response ${r.response_id}`, {
+      headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}` },
+    });
   }),
 
   // ---------- Observer ----------
@@ -291,6 +305,7 @@ export const facultyHandlers = [
     }
     const { date } = (await request.json()) as ConfirmRequestInput;
     if (!db.proposed_date.some((p) => p.signup_id === s.signup_id && p.date === date)) return fail(400, 'INVALID_DATE', 'Pick one of the proposed dates.');
+    if (date < today()) return fail(400, 'DATE_PASSED', 'That date has already passed.');
     if (!freeDates(db, s, me.netid).includes(date)) return fail(409, 'SCHEDULE_CONFLICT', 'You have a class or observation at that time.');
     const live = db.template_version.find((v) => v.status === 'live')!;
     db.observation.push({
@@ -302,7 +317,6 @@ export const facultyHandlers = [
     // The first to accept is paired automatically; everyone else's request is cancelled.
     for (const other of db.observation_request.filter((x) => x.signup_id === s.signup_id && x !== r && x.status === 'pending')) {
       other.status = 'cancelled';
-      notify([other.observer_netid], 'request_cancelled', `${person(s.observee_netid).displayName} was paired with another colleague`, null);
     }
     if (acceptedCount(db, me.netid, s.cycle_id) >= MAX_ACCEPTED) {
       for (const other of db.observation_request.filter((x) => x.observer_netid === me.netid && x.status === 'pending')) other.status = 'cancelled';
@@ -325,15 +339,17 @@ export const facultyHandlers = [
     const me = signedIn(request);
     const o = db.observation.find((x) => x.observation_id === params.observationId);
     if (!o || o.observer_netid !== me.netid) return fail(404, 'NOT_FOUND', 'Observation not found.');
-    if (isLocked(o)) return fail(409, 'LOCKED', 'This record is signed by both and locked.');
+    if (isLocked(o) || o.observee_signed_date) return fail(409, 'LOCKED', 'This record is signed by both and locked.');
+    if (o.status !== 'scheduled') return fail(409, 'NOT_SCHEDULED', 'Only a scheduled observation can be filled in.');
+    if (o.scheduled_date > today()) return fail(409, 'NOT_YET_OBSERVED', 'The form can be filled in on or after the observation date.');
     const input = (await request.json()) as SignedFormInput;
     const questions = db.template_question.filter((q) => q.version_id === o.version_id);
     const missing = questions.filter((q) => q.is_required && !input.answers.some((a) => a.questionId === q.question_id && a.rating >= q.rating_min && a.rating <= q.rating_max));
     if (missing.length) return fail(400, 'ANSWERS_REQUIRED', `Rate every question (missing: ${missing.map((q) => q.title).join(', ')}).`);
     db.observation_answer = db.observation_answer.filter((a) => a.observation_id !== o.observation_id);
     for (const a of input.answers) db.observation_answer.push({ observation_id: o.observation_id, question_id: a.questionId, rating: a.rating, comment: a.comment });
-    // Submitting the form is the observer's signature; the observee signs next.
-    Object.assign(o, { status: 'completed', other_comments: input.otherComments, observer_signed_date: today(), last_saved_date: today() });
+    // Submitting the form is the observer's signature; the record stays scheduled until the observee signs.
+    Object.assign(o, { other_comments: input.otherComments, observer_signed_date: today(), last_saved_date: today() });
     return HttpResponse.json(observationDetail(o));
   }),
 ];
