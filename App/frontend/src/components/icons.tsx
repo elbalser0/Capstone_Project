@@ -38,12 +38,6 @@ export const EyeIcon = (p: IconProps) => (
   </svg>
 );
 
-export const ChatIcon = (p: IconProps) => (
-  <svg {...base(15, 14, p)}>
-    <path d="M0.75 0.75H13.75V9.75H6.25L3.25 12.75V9.75H0.75V0.75Z" />
-  </svg>
-);
-
 export const HelpIcon = (p: IconProps) => (
   <svg {...base(16, 16, p)}>
     <path d="M14.75 7.75C14.75 11.616 11.616 14.75 7.75 14.75C3.88401 14.75 0.75 11.616 0.75 7.75C0.75 3.88401 3.88401 0.75 7.75 0.75C11.616 0.75 14.75 3.88401 14.75 7.75Z" />

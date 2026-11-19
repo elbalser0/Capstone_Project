@@ -213,7 +213,7 @@ export function coursesTaught(db: Db, signup: SignupRow, observerNetid: string):
     .sort((a, b) => Number(courseLevel(db, b) === level) - Number(courseLevel(db, a) === level) || window.indexOf(b.term_id) - window.indexOf(a.term_id));
   const labels = sections.map((s) => {
     const course = db.course.find((c) => c.course_id === s.course_id)!;
-    return `${course.dept_id} ${course.course_num}`;
+    return `${db.department.find((d) => d.dept_id === course.dept_id)?.dept_name ?? course.dept_id} ${course.course_num}`;
   });
   return [...new Set(labels)];
 }

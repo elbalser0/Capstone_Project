@@ -193,7 +193,15 @@ export function VersionPage() {
 
   if (templates.error && !templates.data) return <LoadError error={templates.error} onRetry={() => void templates.refetch()} retrying={templates.isFetching} />;
   if (!templates.data) return <p role="status" className="pt-8 text-sm text-gray-500">Loading template…</p>;
-  if (!v) return <Navigate to="/committee/templates" replace />;
+  if (!v) {
+    return (
+      <div className="pt-8">
+        <p role="alert" className="text-sm font-bold text-gray-900">Template version not found</p>
+        <p className="mt-1 text-sm text-gray-500">There is no template version with this address.</p>
+        <Link to="/committee/templates" className={`${buttonClass('secondary')} mt-4`}>Back to templates</Link>
+      </div>
+    );
+  }
   if (v.status === 'draft') return <Navigate to="/committee/templates/draft" replace />;
   return <VersionView v={v} />;
 }

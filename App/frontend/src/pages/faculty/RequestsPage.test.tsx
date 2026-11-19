@@ -299,6 +299,37 @@ test('shows the matched observer with the other requests cancelled', async () =>
   expect(screen.getByRole('link', { name: 'View my evaluation' })).toHaveAttribute('href', '/faculty/evaluation');
 });
 
+test('counts only the latest send in the request summary, not an earlier declined request', async () => {
+  current.candidates = [candidate(observer, { status: 'pending', sentDate: '2026-09-16T15:00:00Z' }), candidate(second, { status: 'declined', sentDate: '2026-09-10T15:00:00Z' })];
+  current.outgoing = [request(observer, 'pending'), request(second, 'declined', { sentDate: '2026-09-10T15:00:00Z', respondedDate: '2026-09-10T18:00:00Z' })];
+  renderRequests();
+  expect(await screen.findByText(/Request sent .* to 1 colleague for/)).toBeVisible();
+  expect(screen.queryByText(/to 2 colleagues/)).not.toBeInTheDocument();
+});
+
+test('counts every request of one send together', async () => {
+  current.candidates = [candidate(observer, { status: 'pending', sentDate: '2026-09-16T15:00:00Z' }), candidate(second, { status: 'pending', sentDate: '2026-09-16T15:00:00Z' })];
+  current.outgoing = [request(observer, 'pending'), request(second, 'pending', { sentDate: '2026-09-16T15:00:02Z' })];
+  renderRequests();
+  expect(await screen.findByText(/Request sent .* to 2 colleagues for/)).toBeVisible();
+});
+
+test('labels availability as free at all your times', async () => {
+  current.candidates = [candidate(observer)];
+  renderRequests();
+  expect(await screen.findByText('Free at all your times')).toBeVisible();
+  expect(screen.queryByText('Free at your times')).not.toBeInTheDocument();
+});
+
+test('fills the time they picked for an accepted request and keeps pending rows as not answered', async () => {
+  current.candidates = [candidate(observer, { status: 'accepted', sentDate: '2026-09-16T15:00:00Z' }), candidate(second, { status: 'pending', sentDate: '2026-09-16T15:00:00Z' })];
+  current.outgoing = [request(observer, 'accepted', { respondedDate: '2026-09-16T20:00:00Z' }), request(second, 'pending')];
+  renderRequests();
+  const table = within(await screen.findByRole('table', { name: 'My requests' }));
+  expect(await table.findByText('Mon Sep 21, 8:30 AM')).toBeVisible();
+  expect(table.getByText('Not answered yet')).toBeVisible();
+});
+
 test('does not say cancelled colleagues are told while requests are pending', async () => {
   current.candidates = [candidate(observer, { status: 'pending', sentDate: '2026-09-16T15:00:00Z' })];
   current.outgoing = [request(observer, 'pending')];

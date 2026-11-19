@@ -44,15 +44,18 @@ function SurveyForm({ cycleId }: { cycleId: string }) {
   const [file, setFile] = useState<File | undefined>();
   const [fileError, setFileError] = useState('');
   const [successRole, setSuccessRole] = useState<SurveyInput['respondentRole'] | null>(null);
+  const [alreadyRole, setAlreadyRole] = useState<SurveyInput['respondentRole'] | null>(null);
   const [submittedRoles, setSubmittedRoles] = useState<SurveyInput['respondentRole'][]>([]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (busy.current || submit.isPending || !role || processOk === null || fileError || submittedRoles.includes(role)) return;
     busy.current = true;
+    setAlreadyRole(null);
     try {
       await submit.mutateAsync({ respondentRole: role, processOk, difficulties, additionalFeedback, troubleFile: file });
       setSubmittedRoles((roles) => [...roles, role]);
+      setAlreadyRole(null);
       setSuccessRole(role);
       setRole('');
       setProcessOk(null);
@@ -60,7 +63,17 @@ function SurveyForm({ cycleId }: { cycleId: string }) {
       setAdditionalFeedback('');
       setFile(undefined);
       if (fileInput.current) fileInput.current.value = '';
-    } catch { /* Mutation error is shown below; keep the draft intact. */ }
+    } catch (error) {
+      // The backend allows one response per person per role, so a duplicate means this role is already done.
+      if (error instanceof ApiError && error.code === 'ALREADY_SUBMITTED') {
+        setSubmittedRoles((roles) => (roles.includes(role) ? roles : [...roles, role]));
+        setSuccessRole(null);
+        setAlreadyRole(role);
+        setRole('');
+        submit.reset();
+      }
+      /* Any other error is shown below; keep the draft intact. */
+    }
     finally { busy.current = false; }
   };
 
@@ -80,6 +93,7 @@ function SurveyForm({ cycleId }: { cycleId: string }) {
       <h2 className="text-lg font-bold">End-of-process survey</h2>
       <p className="mt-2 text-sm text-gray-600">One response per role. If you participated in both roles, submit each separately.</p>
       {successRole && <p role="status" className="mt-4 rounded-md bg-green-100 px-4 py-3 text-sm text-green-900">Your {successRole} response was submitted.</p>}
+      {alreadyRole && <p role="status" className="mt-4 rounded-md bg-green-100 px-4 py-3 text-sm text-green-900">You already submitted the survey as {alreadyRole}.</p>}
       {message && <ErrorNote error={new Error(message)} className="mt-4" />}
       <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-5">
         <fieldset disabled={submit.isPending} className="contents">

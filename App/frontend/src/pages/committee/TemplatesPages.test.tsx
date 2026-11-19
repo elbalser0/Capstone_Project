@@ -122,13 +122,17 @@ describe('version view (A5a)', () => {
     expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to templates' })).toHaveAttribute('href', '/committee/templates');
   });
-  it('sends the draft to the editor and an unknown version to the list', async () => {
+  it('sends the draft to the editor', async () => {
     serve([draft, live]);
-    const first = open('/committee/templates/11');
+    open('/committee/templates/11');
     expect(await screen.findByRole('button', { name: 'Preview' })).toBeVisible();
-    first.unmount();
+  });
+  it('says an unknown version was not found, with a way back to Templates', async () => {
+    serve([draft, live]);
     open('/committee/templates/999');
-    expect(await screen.findByRole('table', { name: 'Versions' })).toBeVisible();
+    expect(await screen.findByText('Template version not found')).toBeVisible();
+    expect(screen.queryByRole('table', { name: 'Versions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to templates' })).toHaveAttribute('href', '/committee/templates');
   });
 });
 
