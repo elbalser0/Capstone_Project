@@ -6,7 +6,7 @@ import type { ObservationRequest, ObservationSummary } from '../../api/types';
 import { usePageTitle } from '../../components/AppShell';
 import { ClockIcon } from '../../components/icons';
 import { Button, Card, Cell, EmptyRow, ErrorNote, InfoLine, Note, Radio, Row, StatCard, Table, Tag, buttonClass, linkClass } from '../../components/ui';
-import { hoursUntil, todayIso } from '../../lib/dates';
+import { campusTodayIso, hoursUntil } from '../../lib/dates';
 import { classStart, formatShort, formatSlot, isLocked, RANK_LABEL } from '../../lib/format';
 import { recordStatus } from './observationDisplay';
 
@@ -31,7 +31,7 @@ function confirmationStatus(assignment: ObservationSummary) {
 function FormAction({ assignment }: { assignment: ObservationSummary }) {
   const view = isLocked(assignment) || assignment.status === 'not_completed' || Boolean(assignment.observerSignedDate);
   if (view) return <Link to={`/faculty/observe/${assignment.observationId}`} className={buttonClass('secondary', 'w-28', 'sm')}>View</Link>;
-  if (assignment.scheduledDate > todayIso()) return <span className="text-xs text-gray-500">Form opens {formatShort(assignment.scheduledDate)}</span>;
+  if (assignment.scheduledDate > campusTodayIso()) return <span className="text-xs text-gray-500">Form opens {formatShort(assignment.scheduledDate)}</span>;
   return <Link to={`/faculty/observe/${assignment.observationId}/form`} className={buttonClass('secondary', 'w-28', 'sm')}>Open form</Link>;
 }
 
@@ -67,6 +67,9 @@ function RequestCard({ request, limitReached }: { request: ObservationRequest; l
     decline.mutate(requestTarget, { onError: () => { submitting.current = false; } });
   };
   const hours = hoursUntil(request.expiresAt);
+  // The backend refuses a date that has passed (DATE_PASSED), so only offer today and later.
+  const today = campusTodayIso();
+  const upcoming = request.proposedDates.filter((proposed) => proposed.date >= today);
 
   return (
     <Card className="space-y-4 p-5 sm:px-6">
@@ -78,7 +81,8 @@ function RequestCard({ request, limitReached }: { request: ObservationRequest; l
         </div>
         <fieldset className="space-y-3">
           <legend className="text-xs text-gray-500">Proposed times, pick the one you can attend</legend>
-          {request.proposedDates.map((proposed) => (
+          {upcoming.length === 0 && <p className="text-sm text-gray-700">All proposed times have passed.</p>}
+          {upcoming.map((proposed) => (
             <label key={proposed.date} className={`flex cursor-pointer items-center gap-2.5 text-sm text-gray-900 ${date === proposed.date ? 'font-bold' : ''}`}>
               <Radio name={`slot-${request.signupId}`} checked={date === proposed.date} disabled={busy || limitReached} onChange={() => setDate(proposed.date)} />
               {formatSlot(proposed.date, proposed.startTime)}
@@ -90,7 +94,7 @@ function RequestCard({ request, limitReached }: { request: ObservationRequest; l
             {hours > 0 ? `Expires in ${hours} ${hours === 1 ? 'hour' : 'hours'}` : 'Expiring now'}
           </Tag>
           <div className="flex gap-3">
-            <Button className="w-[88px]" disabled={!date || busy || limitReached} aria-busy={confirm.isPending} onClick={accept}>
+            <Button className="w-[88px]" disabled={!date || busy || limitReached || upcoming.length === 0} aria-busy={confirm.isPending} onClick={accept}>
               {confirm.isPending ? 'Accepting…' : confirm.isSuccess ? 'Accepted' : 'Accept'}
             </Button>
             <Button className="w-[88px]" variant="secondary" disabled={busy} aria-busy={decline.isPending} onClick={declineRequest}>
@@ -192,7 +196,7 @@ export function ConfirmationsPage() {
                 <Cell />
               </Row>
             ))}
-            {!assignments.isPending && allAssignments.length + cancelled.length === 0 && <EmptyRow>No confirmations yet this semester.</EmptyRow>}
+            {!assignments.isPending && cycle.data && accepted.length + cancelled.length === 0 && <EmptyRow>No confirmations yet this semester.</EmptyRow>}
           </Table>
         </div>
       </div>

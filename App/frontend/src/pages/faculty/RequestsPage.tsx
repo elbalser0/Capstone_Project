@@ -129,7 +129,7 @@ function ChooseObservers({ signup, candidates, signupDeadline }: { signup: Signu
               />,
               'Name',
               'Teaches',
-              'Free at your times',
+              'Free at all your times',
             ]}
           >
             {open.map((c) => (
@@ -218,15 +218,25 @@ function RequestTable({ requests, columns, min, head, children }: { requests: Ob
   );
 }
 
-function RequestsSent({ signup, requests }: { signup: Signup; requests: ObservationRequest[] }) {
+/** Requests written together share one send time; allow a minute of slack for the rows of one send. */
+const SAME_SEND_MS = 60_000;
+
+function RequestsSent({ signup, requests, observations }: { signup: Signup; requests: ObservationRequest[]; observations: ObservationSummary[] | undefined }) {
   const sent = requests.reduce((latest, r) => (r.sentDate > latest ? r.sentDate : latest), requests[0].sentDate);
+  const latestSend = requests.filter((r) => Date.parse(sent) - Date.parse(r.sentDate) < SAME_SEND_MS);
+  /** The accepted observer's observation can be known before the sign-up shows it; the time is its date plus the class start. */
+  const pickedTime = (r: ObservationRequest) => {
+    if (r.status !== 'accepted') return '';
+    const o = observations?.find((x) => x.observer.netid === r.observer.netid && x.section.sectionId === signup.section.sectionId);
+    return o ? formatSlot(o.scheduledDate, classStart(signup.section, o.scheduledDate)) : '';
+  };
   return (
     <div className="flex flex-col pt-8">
       <div className="flex gap-[13px] rounded-lg border border-gray-200 bg-gray-50 px-[22px] pt-[19px] pb-[18px]">
         <SendIcon width={13} height={13} className="mt-0.5 shrink-0 text-gray-700" />
         <div>
           <p className="text-sm font-bold text-gray-900">
-            Request sent {formatDateTime(sent)} to {requests.length} {requests.length === 1 ? 'colleague' : 'colleagues'} for {signup.section.label}
+            Request sent {formatDateTime(sent)} to {latestSend.length} {latestSend.length === 1 ? 'colleague' : 'colleagues'} for {signup.section.label}
           </p>
           <p className="mt-[5px] text-sm text-gray-500">Proposed times: {listSlots(signup.proposedDates)}</p>
         </div>
@@ -234,7 +244,7 @@ function RequestsSent({ signup, requests }: { signup: Signup; requests: Observat
       <RequestTable requests={requests} columns="280px 280px 220px 1fr" min="min-w-[900px]" head={['Time they picked', 'Status', 'Answered']}>
         {(r) => (
           <>
-            <Cell className="text-gray-500">{r.status === 'pending' ? 'Not answered yet' : ''}</Cell>
+            <Cell className="text-gray-500">{r.status === 'pending' ? 'Not answered yet' : pickedTime(r)}</Cell>
             <Cell>{statusTag(r)}</Cell>
             <Cell className="text-gray-500">
               {r.status === 'pending' ? expiresIn(r) : r.respondedDate ? formatDateTime(r.respondedDate) : formatDateTime(r.expiresAt)}
@@ -288,7 +298,7 @@ function Matched({ signup, requests, observation }: { signup: Signup; requests: 
         {signup.section.label} {signup.section.title}
         {room ? `, ${room}.` : '.'}
       </Callout>
-      <RequestTable requests={requests} columns="280px 240px 260px 1fr" min="min-w-[900px]" head={['Time', 'Status', 'When']}>
+      <RequestTable requests={requests} columns="280px 240px 260px 1fr" min="min-w-[900px]" head={['Time they picked', 'Status', 'When']}>
         {(r) => (
           <>
             <Cell className="text-gray-700">{r.status === 'accepted' && date ? formatSlot(date, time) : ''}</Cell>
@@ -404,7 +414,7 @@ function renderView(
     );
   }
   if (view === 'choose') return <ChooseObservers signup={s} candidates={candidates!} signupDeadline={status.cycle?.signupDeadline ?? ''} />;
-  if (view === 'sent') return <RequestsSent signup={s} requests={requests} />;
+  if (view === 'sent') return <RequestsSent signup={s} requests={requests} observations={observations} />;
   if (view === 'nobody') return <NobodyAccepted signup={s} requests={requests} />;
   return <Matched signup={s} requests={requests} observation={observations?.find((o) => o.observationId === s.observation!.observationId)} />;
 }
