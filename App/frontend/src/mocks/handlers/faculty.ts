@@ -349,7 +349,8 @@ export const facultyHandlers = [
     db.observation_answer = db.observation_answer.filter((a) => a.observation_id !== o.observation_id);
     for (const a of input.answers) db.observation_answer.push({ observation_id: o.observation_id, question_id: a.questionId, rating: a.rating, comment: a.comment });
     // Submitting the form is the observer's signature; the record stays scheduled until the observee signs.
-    Object.assign(o, { other_comments: input.otherComments, observer_signed_date: today(), last_saved_date: today() });
+    // A new save time on every submit, like the backend's now(), so a draft of an earlier submit reads as out of date.
+    Object.assign(o, { other_comments: input.otherComments, observer_signed_date: today(), last_saved_date: new Date().toISOString() });
     return HttpResponse.json(observationDetail(o));
   }),
 ];

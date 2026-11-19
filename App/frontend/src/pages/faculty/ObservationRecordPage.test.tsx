@@ -380,14 +380,18 @@ it('uploads a file as multipart field "file" and shows its name from the returne
     bodies.push(await request.text());
     return HttpResponse.json({ ...detail, issueFileName: 'notes.txt' });
   }));
+  // Node 24's fetch drops the contents of a jsdom File when it encodes the body, so the file itself is checked where the app adds it.
+  const append = vi.spyOn(FormData.prototype, 'append');
   const user = userEvent.setup();
   openRecord();
   await screen.findByText(lockNote);
-  await user.upload(fileInput(), new File(['what happened'], 'notes.txt', { type: 'text/plain' }));
+  const file = new File(['what happened'], 'notes.txt', { type: 'text/plain' });
+  await user.upload(fileInput(), file);
   expect(await screen.findByText('notes.txt')).toBeVisible();
   expect(bodies).toHaveLength(1);
   expect(bodies[0]).toContain('name="file"');
-  expect(bodies[0]).toContain('what happened');
+  expect(append.mock.calls.filter(([name]) => name === 'file').map(([, value]) => value)).toEqual([file]);
+  append.mockRestore();
 });
 it('sends nothing for a file over 10 MB and says so', async () => {
   const upload = vi.fn();

@@ -15,7 +15,7 @@ import type {
   UnmatchedFaculty,
   UpdateCycleInput,
 } from '../../api/types';
-import { alertFor, checkEligibility, dueStatus, dueTermId, eligibleObservers, isEligible, isLocked, isSignedOff, lastCompletedTermId, termOrder } from '../rules';
+import { alertFor, dueStatus, dueTermId, eligibleObservers, isLocked, isSignedOff, lastCompletedTermId, requestExpiresAt, termOrder } from '../rules';
 import type { EvalCycleRow, SignupRow } from '../schema';
 import {
   byRank,
@@ -40,6 +40,7 @@ import {
   templateVersion,
   term,
   today,
+  ADMIN_DEMO_EMAIL,
 } from '../store';
 
 const RANK_ORDER = { assistant: 0, associate: 1, full: 2 };
@@ -53,7 +54,8 @@ function facultyRows(termId: string, c: EvalCycleRow | undefined): FacultyStatus
   const order = termOrder(db);
   const before = order[order.indexOf(termId) - 1];
   return db.professor
-    .filter((p) => p.is_active)
+    // The demo admin account is a copy of a professor for the admin pages' mock sign-in, not a faculty member.
+    .filter((p) => p.is_active && p.email !== ADMIN_DEMO_EMAIL)
     .map((p): FacultyStatus => {
       const due = c && db.eval_due.find((d) => d.cycle_id === c.cycle_id && d.netid === p.netid);
       const status = c ? (due ? (due.due_status === 'overdue' ? 'OVERDUE' : 'DUE') : 'NOT_DUE') : dueStatus(db, p, termId);
@@ -155,6 +157,8 @@ export const committeeHandlers = [
     const due = db.eval_due
       .filter((d) => d.cycle_id === c.cycle_id && (!netids?.length || netids.includes(d.netid)))
       .filter((d) => professor(d.netid).is_active)
+      // Like the backend: a professor who already signed up this cycle gets no reminder.
+      .filter((d) => !db.sign_up.some((s) => s.cycle_id === c.cycle_id && s.observee_netid === d.netid))
       .map((d) => d.netid);
     return HttpResponse.json({ sent: notify(due, 'reminder', `Reminder: sign up to be observed by ${c.signup_deadline}`, me.netid, c.cycle_id) });
   }),
@@ -215,11 +219,14 @@ export const committeeHandlers = [
     committeeMember(request);
     const s = found(signupRow(String(params.signupId)), 'Sign-up not found.');
     const { observerNetid } = (await request.json()) as { observerNetid: string };
-    if (!db.professor.some((p) => p.netid === observerNetid)) return fail(400, 'UNKNOWN_PROFESSOR', 'No professor with that NetID.');
-    if (!isEligible(checkEligibility(db, s, observerNetid))) return fail(409, 'NOT_ELIGIBLE', 'That professor does not meet the matching rules for this sign-up.');
-    if (!db.observer_match.some((m) => m.signup_id === s.signup_id && m.observer_netid === observerNetid)) {
-      db.observer_match.push({ signup_id: s.signup_id, observer_netid: observerNetid, generated_date: now(), round_no: 2 });
+    // The backend's checks for a hand-added observer: it skips the matching rules on purpose.
+    if (observerNetid === s.observee_netid) return fail(400, 'INVALID_CANDIDATE', 'A faculty member cannot observe their own sign-up.');
+    if (observationOfSignup(s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'This sign-up already has an assigned observer.');
+    if (db.observer_match.some((m) => m.signup_id === s.signup_id && m.observer_netid === observerNetid)) {
+      return fail(409, 'ALREADY_MATCHED', 'This professor is already on the sign-up’s candidate history.');
     }
+    if (!db.professor.some((p) => p.netid === observerNetid && p.is_active)) return fail(404, 'CANDIDATE_NOT_FOUND', 'Active professor not found.');
+    db.observer_match.push({ signup_id: s.signup_id, observer_netid: observerNetid, generated_date: now(), round_no: 2 });
     return HttpResponse.json(matchingRow(s), { status: 201 });
   }),
 
@@ -294,8 +301,14 @@ export const committeeHandlers = [
     const items = signupsOf(c)
       .filter((s) => !observationOfSignup(s.signup_id))
       .flatMap((s) => {
-        const a = db.alert.find((x) => x.signup_id === s.signup_id && (x.alert_type === 'no_observer' || x.alert_type === 'no_acceptance'));
-        return a ? [{ signupId: s.signup_id, observee: person(s.observee_netid), section: section(s.section_id), alertType: a.alert_type }] : [];
+        // Like the backend: requests were sent and none is open or accepted, with nobody left to ask, reads as
+        // "no one accepted" (expired requests included); otherwise the open no_observer or insufficient_observers alert.
+        const requests = db.observation_request.filter((r) => r.signup_id === s.signup_id);
+        const open = requests.some((r) => r.status === 'accepted' || (r.status === 'pending' && requestExpiresAt(r.sent_date) > now()));
+        const unasked = db.observer_match.some((m) => m.signup_id === s.signup_id && !requests.some((r) => r.observer_netid === m.observer_netid));
+        const a = db.alert.find((x) => x.signup_id === s.signup_id && !x.resolved_date && (x.alert_type === 'no_observer' || x.alert_type === 'insufficient_observers'));
+        const alertType = requests.length && !open && !unasked ? 'no_acceptance' as const : a?.alert_type;
+        return alertType ? [{ signupId: s.signup_id, observee: person(s.observee_netid), section: section(s.section_id), alertType }] : [];
       });
     return HttpResponse.json({ cycleId: c.cycle_id, total: items.length, items } satisfies UnmatchedFaculty);
   }),

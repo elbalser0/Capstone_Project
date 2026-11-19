@@ -21,7 +21,7 @@ const call = (email: string, path: string, init: { method?: string; body?: unkno
     body: init.form ?? (init.body ? JSON.stringify(init.body) : undefined),
   });
 
-const snapshot = () => structuredClone({ meta: db.meta, observation: db.observation, observation_request: db.observation_request, proposed_date: db.proposed_date, survey_response: db.survey_response, notification: db.notification, observation_answer: db.observation_answer });
+const snapshot = () => structuredClone({ meta: db.meta, observation: db.observation, observation_request: db.observation_request, proposed_date: db.proposed_date, survey_response: db.survey_response, notification: db.notification, observation_answer: db.observation_answer, observer_match: db.observer_match, alert: db.alert });
 let saved: ReturnType<typeof snapshot>;
 beforeEach(() => {
   saved = snapshot();
@@ -145,5 +145,50 @@ describe('course labels', () => {
   it('use the department name, like the backend', () => {
     const label = section(db.section[0].section_id).label;
     expect(label).toMatch(/^Computer Science \d{4}\.\d{3}$/);
+  });
+});
+
+describe('click-test mock fixes', () => {
+  it('gives a never-saved record the same save time on every read, so a local draft stays usable', async () => {
+    const o = schedule(db.meta.today);
+    const read = async () => ((await (await call(OBSERVER_EMAIL, `/api/observations/${o.observation_id}`)).json()) as { lastSavedDate: string }).lastSavedDate;
+    const first = await read();
+    expect(await read()).toBe(first);
+    await submitForm(o);
+    expect(await read()).not.toBe(first);
+  });
+
+  it('adds an observer by hand without the matching rules, refusing only what the backend refuses', async () => {
+    const s = db.sign_up.find((x) => x.cycle_id === 'C-FA26' && !db.observation.some((ob) => ob.signup_id === x.signup_id))!;
+    const someone = db.professor.find((p) => p.is_active && p.netid !== s.observee_netid && !db.observer_match.some((m) => m.signup_id === s.signup_id && m.observer_netid === p.netid))!;
+    const add = (netid: string) => call(AC, `/api/signups/${s.signup_id}/candidates`, { method: 'POST', body: { observerNetid: netid } });
+    expect((await add(someone.netid)).status).toBe(201);
+    expect(await error(await add(someone.netid))).toBe('ALREADY_MATCHED');
+    expect(await error(await add(s.observee_netid))).toBe('INVALID_CANDIDATE');
+    expect(await error(await add('nobody1'))).toBe('CANDIDATE_NOT_FOUND');
+  });
+
+  it('sends no due reminder to a professor who already signed up', async () => {
+    const signedUp = db.sign_up.filter((x) => x.cycle_id === 'C-FA26').map((x) => x.observee_netid);
+    expect(db.eval_due.some((d) => d.cycle_id === 'C-FA26' && signedUp.includes(d.netid))).toBe(true);
+    const before = db.notification.length;
+    const res = await call(AC, '/api/cycles/C-FA26/notifications/due-reminders', { method: 'POST', body: {} });
+    expect(res.status).toBe(200);
+    const sentTo = db.notification.slice(before).map((n) => n.recipient_netid);
+    expect(sentTo.filter((netid) => signedUp.includes(netid))).toEqual([]);
+  });
+
+  it('lists a sign-up with too few observers on Unmatched, as the backend does', async () => {
+    const s = db.sign_up.find((x) => x.cycle_id === 'C-FA26' && !db.observation.some((ob) => ob.signup_id === x.signup_id))!;
+    db.observation_request = db.observation_request.filter((r) => r.signup_id !== s.signup_id);
+    db.alert = [...db.alert.filter((a) => a.signup_id !== s.signup_id), { alert_id: 'AL-TEST', signup_id: s.signup_id, alert_type: 'insufficient_observers', created_date: '2026-09-16T12:00:00Z', resolved_by: null, resolved_date: null, resolution_note: null }];
+    const body = (await (await call(AC, '/api/dashboard/unmatched')).json()) as { items: { signupId: string; alertType: string }[] };
+    expect(body.items.find((i) => i.signupId === s.signup_id)?.alertType).toBe('insufficient_observers');
+  });
+
+  it('leaves the demo admin account off the Faculty list', async () => {
+    const rows = (await (await call(AC, '/api/cycles/C-FA26/faculty')).json()) as { professor: { email: string } }[];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((r) => r.professor.email === 'admin@demo.edu')).toBe(false);
   });
 });
