@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router';
-import { ApiError } from '../../api/client';
+import { ApiError, downloadObservationIssueFile } from '../../api/client';
 import { useReportMissed, useSignObservation, useUploadObservationFile } from '../../api/hooks/faculty';
 import { Button, Card, Checkbox, ErrorNote, LockNote, Modal, PageError, RatingScale, Tag, TextArea, labelClass, linkClass } from '../../components/ui';
 import { useActiveNav } from '../../components/AppShell';
@@ -81,10 +81,29 @@ function UploadLink({ o }: { o: ObservationDetail }) {
       <button type="button" className={`${linkClass} disabled:text-gray-400 disabled:no-underline`} disabled={upload.isPending} onClick={() => input.current?.click()}>
         <UploadIcon className="text-gray-600" /> Upload a file about the observation
       </button>
-      {o.issueFileName && <p role="status" className="mt-2 pl-[21px] text-xs text-gray-500">Uploaded: {o.issueFileName}</p>}
       {tooBig && <p role="alert" className="mt-2 pl-[21px] text-xs text-red-800">Files can be up to 10 MB.</p>}
       <ErrorNote error={upload.error} className="mt-2" />
     </>
+  );
+}
+
+function AttachedFile({ o }: { o: ObservationDetail }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const download = async () => {
+    setBusy(true);
+    setError(null);
+    try { await downloadObservationIssueFile(o.observationId); } catch (e) { setError(e); } finally { setBusy(false); }
+  };
+  return (
+    <Card className="screen-only min-w-0 px-5 py-4">
+      <h3 className="text-sm font-bold">Attached file</h3>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <p role="status" className="min-w-0 text-sm text-gray-700">{o.issueFileName}</p>
+        <Button variant="secondary" size="sm" disabled={busy} onClick={() => void download()}>{busy ? 'Downloading…' : 'Download'}</Button>
+      </div>
+      <ErrorNote error={error} className="mt-2" />
+    </Card>
   );
 }
 
@@ -191,6 +210,7 @@ export function ObservationRecordPage() {
             <LockNote>{isLocked(o) ? 'Signed and locked. Nobody can change this record.' : 'Once both of you sign, nobody can change this record.'}</LockNote>
           </div>
         </Card>
+        {o.issueFileName && <AttachedFile o={o} />}
         {(observer || observee) && !isLocked(o) && (
           <Card className="screen-only min-w-0 px-5 py-4">
             <h3 className="text-sm font-bold">Something went wrong?</h3>
