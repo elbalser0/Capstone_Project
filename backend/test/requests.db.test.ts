@@ -71,6 +71,45 @@ describe('confirm and decline against the database', { skip }, () => {
     assert.deepEqual(rows, [{ observer_netid: 'obsA', scheduled_date: date, status: 'scheduled' }]);
   });
 
+  test('a missed observation can be paired again with another matched observer', async () => {
+    await addAccepted(1, 'obsA');
+    await sql(`UPDATE observation SET status = 'not_completed', reason_not_completed = 'Class was cancelled'
+               WHERE signup_id = 1`);
+    await sql("INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsB')");
+
+    const requests = await sendRequests(1, 'ee1');
+    assert.equal(requests.find((request) => request.observer.netid === 'obsB')?.status, 'pending');
+    assert.equal((await confirmRequest(1, 'obsB', await futureDate(9))).status, 'accepted');
+    const { rows } = await sql('SELECT observer_netid, status FROM observation WHERE signup_id = 1 ORDER BY observation_id');
+    assert.deepEqual(rows, [
+      { observer_netid: 'obsA', status: 'not_completed' },
+      { observer_netid: 'obsB', status: 'scheduled' },
+    ]);
+  });
+
+  test('a missed observation does not count toward the observer limit', async () => {
+    await addAccepted(1, 'obsA');
+    await addAccepted(2, 'obsA');
+    await addAccepted(3, 'obsA');
+    await sql(`UPDATE observation SET status = 'not_completed', reason_not_completed = 'Class was cancelled'
+               WHERE signup_id = 1`);
+    await addRequest(4, 'obsA');
+    // This test isolates the observation-capacity rule from calendar conflicts.
+    await sql('DELETE FROM meeting_time WHERE section_id = 4');
+
+    assert.equal((await confirmRequest(4, 'obsA', await futureDate(7))).status, 'accepted');
+    assert.equal((await sql(`SELECT count(*)::int AS n FROM observation
+                             WHERE observer_netid = 'obsA' AND status <> 'not_completed'`)).rows[0].n, 3);
+  });
+
+  test('the database refuses a second active observation for the same signup', async () => {
+    await addAccepted(1, 'obsA');
+    await addRequest(1, 'obsB');
+    await assert.rejects(sql(`INSERT INTO observation (signup_id, observer_netid, version_id, scheduled_date)
+                              VALUES (1, 'obsB', 1, ${dayOffset(9)})`), { code: '23505' });
+    assert.equal((await sql("SELECT count(*)::int AS n FROM observation WHERE signup_id = 1 AND status <> 'not_completed'")).rows[0].n, 1);
+  });
+
   test('confirming resolves an open no_acceptance alert', async () => {
     await addRequest(1, 'obsA');
     await sql(`INSERT INTO alert (signup_id, alert_type) VALUES (1, 'no_acceptance')`);
