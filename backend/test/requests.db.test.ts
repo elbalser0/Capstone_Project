@@ -28,6 +28,14 @@ async function addAccepted(signupId: number, observer: string) {
              VALUES ($1, $2, 1, ${dayOffset(7)})`, [signupId, observer]);
 }
 
+async function teachEveryDay(observer: string) {
+  const { rows: [section] } = await sql(`INSERT INTO section (course_id, term_id, section_num, instructor_id, class_mode)
+                                         VALUES (1, 1, '900', $1, 'in-person') RETURNING section_id`, [observer]);
+  await sql(`INSERT INTO meeting_time (section_id, day_of_week, start_time, end_time)
+             SELECT $1, day, '10:00', '10:50'
+             FROM unnest(ARRAY['monday','tuesday','wednesday','thursday','friday','saturday','sunday']) AS weekdays(day)`, [section.section_id]);
+}
+
 const futureDate = async (days: number) => (await sql(`SELECT ${dayOffset(days)}::text AS d`)).rows[0].d as string;
 
 describe('confirm and decline against the database', { skip }, () => {
@@ -97,6 +105,44 @@ describe('confirm and decline against the database', { skip }, () => {
     assert.equal(sent.length, 2);
     assert.equal(sent.find((r) => r.observer.netid === 'obsA')?.status, 'expired');
     assert.equal(sent.find((r) => r.observer.netid === 'obsB')?.status, 'pending');
+  });
+
+  test('sending to all candidates is refused when the only observer teaches at every proposed time', async () => {
+    await teachEveryDay('obsA');
+    await sql("INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA')");
+
+    await assert.rejects(sendRequests(1, 'ee1'), { status: 409, code: 'NO_AVAILABLE_DATES' });
+    assert.equal((await sql('SELECT count(*)::int AS n FROM observation_request WHERE signup_id = 1')).rows[0].n, 0);
+  });
+
+  test('an explicitly selected observer with no free date is refused even when another candidate is free', async () => {
+    await teachEveryDay('obsA');
+    await sql("INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA'), (1, 'obsB')");
+
+    await assert.rejects(sendRequests(1, 'ee1', ['obsA']), { status: 409, code: 'NO_AVAILABLE_DATES' });
+    assert.equal((await sql('SELECT count(*)::int AS n FROM observation_request WHERE signup_id = 1')).rows[0].n, 0);
+  });
+
+  test('a selected observer with one free proposed date still receives the request', async () => {
+    const { rows: [section] } = await sql(`INSERT INTO section (course_id, term_id, section_num, instructor_id, class_mode)
+                                           VALUES (1, 1, '900', 'obsA', 'in-person') RETURNING section_id`);
+    const { rows: [date] } = await sql(`SELECT lower(trim(to_char(${dayOffset(7)}, 'FMDay'))) AS day`);
+    await sql(`INSERT INTO meeting_time (section_id, day_of_week, start_time, end_time)
+               VALUES ($1, $2, '10:00', '10:50')`, [section.section_id, date.day]);
+    await sql("INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA')");
+
+    const requests = await sendRequests(1, 'ee1', ['obsA']);
+    assert.equal(requests.find((request) => request.observer.netid === 'obsA')?.status, 'pending');
+  });
+
+  test('sending to all candidates skips the ones with no free proposed dates', async () => {
+    await teachEveryDay('obsA');
+    await sql("INSERT INTO observer_match (signup_id, observer_netid) VALUES (1, 'obsA'), (1, 'obsB')");
+
+    const requests = await sendRequests(1, 'ee1');
+    assert.deepEqual(requests.filter((request) => request.status === 'pending').map((request) => request.observer.netid), ['obsB']);
+    assert.equal(await status(1, 'obsA'), undefined);
+    assert.equal(await status(1, 'obsB'), 'pending');
   });
 
   test('a decline does not alert while an unrequested matched observer remains', async () => {

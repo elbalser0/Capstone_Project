@@ -226,7 +226,8 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
       noCandidates = true;
       return;
     }
-    const targets = observerNetids?.length ? observerNetids : [...candidates];
+    const explicitlySelected = Boolean(observerNetids?.length);
+    const targets = explicitlySelected ? observerNetids! : [...candidates];
     if (targets.some((id) => !candidates.has(id))) {
       throw new ApiError(400, 'NOT_A_CANDIDATE', 'Requests can only go to observers on your list.');
     }
@@ -268,12 +269,14 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
           )
       )
     `, [signupId, targets]);
-    if (conflicts.rowCount) {
-      const ids = conflicts.rows.map((row) => row.observer_netid).join(', ');
+    const conflicting = new Set(conflicts.rows.map((row) => row.observer_netid));
+    const requestTargets = targets.filter((id) => !conflicting.has(id));
+    if (conflicting.size && (explicitlySelected || requestTargets.length === 0)) {
+      const ids = [...conflicting].join(', ');
       throw new ApiError(409, 'NO_AVAILABLE_DATES', `No proposed date is available for observer(s): ${ids}. Remove them or add another candidate.`);
     }
 
-    for (const observerNetid of targets) {
+    for (const observerNetid of requestTargets) {
       const inserted = await client.query(`
         INSERT INTO observation_request (signup_id, observer_netid, status, sent_date)
         VALUES ($1, $2, 'pending', now())
