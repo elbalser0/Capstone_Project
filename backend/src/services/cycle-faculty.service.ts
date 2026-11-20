@@ -14,6 +14,8 @@ interface FacultyRow extends ProfessorInput {
   email: string;
   dept_id: number;
   dept_name: string;
+  due_status: 'due' | 'overdue' | null;
+  observed_this_cycle: boolean;
 }
 
 const STATUS_ORDER = { OVERDUE: 0, DUE: 1, NOT_DUE: 2 } as const;
@@ -29,13 +31,13 @@ function term(row: TermRow) {
   };
 }
 
-// GET /api/cycles/{cycleId}/faculty: every active professor, using the same current status and
-// observation history as /api/me/evaluation-status.
+// GET /api/cycles/{cycleId}/faculty: every active professor, with due status frozen at cycle
+// kickoff and a separate flag for observations completed during this cycle.
 export async function listCycleFaculty(cycleId: number) {
   const db = getPool();
-  const cycleResult = await db.query<CycleInput & { term_start: string }>(`
+  const cycleResult = await db.query<CycleInput>(`
     SELECT c.cycle_id, c.term_id, c.started_by, c.start_date::text, c.signup_deadline::text,
-           c.observation_deadline::text, c.feedback_deadline::text, t.start_date::text AS term_start
+           c.observation_deadline::text, c.feedback_deadline::text
     FROM eval_cycle AS c JOIN term AS t ON t.term_id = c.term_id
     WHERE c.cycle_id = $1`, [cycleId]);
   const cycle = cycleResult.rows[0];
@@ -45,9 +47,20 @@ export async function listCycleFaculty(cycleId: number) {
     db.query<FacultyRow>(`
       SELECT p.netid, p.first_name, p.last_name, p.email, p.rank, p.eval_interval_years,
              p.baseline_last_eval_term, p.start_term, CURRENT_DATE::text AS today,
-             d.dept_id, d.dept_name, completed.term_id AS last_completed_term_id
+             d.dept_id, d.dept_name, completed.term_id AS last_completed_term_id,
+             ed.due_status,
+             EXISTS (
+               SELECT 1
+               FROM sign_up AS cycle_signup
+               JOIN observation AS cycle_observation ON cycle_observation.signup_id = cycle_signup.signup_id
+               WHERE cycle_signup.cycle_id = $1 AND cycle_signup.observee_netid = p.netid
+                 AND cycle_observation.status = 'completed'
+                 AND cycle_observation.observee_signed_date IS NOT NULL
+                 AND cycle_observation.observer_signed_date IS NOT NULL
+             ) AS observed_this_cycle
       FROM professor AS p
       JOIN department AS d ON d.dept_id = p.dept_id
+      LEFT JOIN eval_due AS ed ON ed.cycle_id = $1 AND ed.netid = p.netid
       -- Latest signed observation of any term: the base for the due semester.
       LEFT JOIN LATERAL (
         SELECT t.term_id
@@ -60,7 +73,7 @@ export async function listCycleFaculty(cycleId: number) {
         ORDER BY t.start_date DESC, t.term_id DESC LIMIT 1
       ) AS completed ON true
       WHERE p.is_active
-    `, [cycleId, cycle.term_start]),
+    `, [cycleId]),
     db.query<TermRow>('SELECT term_id, season, year, start_date::text, end_date::text FROM term ORDER BY start_date, term_id'),
   ]);
 
@@ -70,6 +83,7 @@ export async function listCycleFaculty(cycleId: number) {
   return faculty.rows
     .map((row) => {
       const status = mapEvaluationStatus(row, terms.rows, statusCycle);
+      const dueStatus: keyof typeof STATUS_ORDER = row.due_status === 'overdue' ? 'OVERDUE' : row.due_status === 'due' ? 'DUE' : 'NOT_DUE';
       const due = status.dueTerm;
       const dueRow = terms.rows.find((t) => t.season === due.season && t.year === due.year);
       return {
@@ -82,7 +96,8 @@ export async function listCycleFaculty(cycleId: number) {
           email: row.email,
         },
         department: { deptId: String(row.dept_id), deptName: row.dept_name },
-        dueStatus: status.status,
+        dueStatus,
+        observedThisCycle: row.observed_this_cycle,
         lastObservedTerm: status.lastObservedTerm,
         dueTerm: dueRow ? term(dueRow) : { termId: null, season: due.season, year: due.year, label: due.label, startDate: null, endDate: null },
       };

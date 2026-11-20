@@ -148,7 +148,9 @@ export interface FacultyStatus {
   professor: PersonRef & { email: string };
   department: Department;
   dueStatus: DueStatus;
-  /** Last signed observation before this term. */
+  /** Whether this professor has a fully signed, completed observation in this cycle. */
+  observedThisCycle: boolean;
+  /** Most recent fully signed observation, including one completed this cycle. */
   lastObservedTerm: Term | null;
   /** A due semester with no term row yet has no termId and no calendar dates. */
   dueTerm: Omit<Term, 'termId' | 'startDate' | 'endDate'> & { termId: string | null; startDate: IsoDate | null; endDate: IsoDate | null };

@@ -42,6 +42,7 @@ export const facultyStatus = (netid: string, name: string, dueStatus: FacultySta
   professor: { netid, firstName: name, lastName: 'Test', displayName: `Dr. ${name} Test`, rank: 'assistant', email: `${netid}@demo.edu` },
   department: { deptId: '1', deptName: 'Computer Science' },
   dueStatus,
+  observedThisCycle: false,
   lastObservedTerm: null,
   dueTerm: term,
   ...extra,
