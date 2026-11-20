@@ -2,10 +2,12 @@ import { Router, type Request } from 'express';
 import { requireAC } from '../middleware/auth.middleware.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { readMultipart } from './multipart.js';
-import { getTroubleFile, listSurveyResponses, submitSurvey, type SurveyInput, type TroubleFile } from '../services/survey.service.js';
+import { getMySurveyStatus, getTroubleFile, listSurveyResponses, submitSurvey, type SurveyInput, type TroubleFile } from '../services/survey.service.js';
 
 // Mounted at /api/cycles/:cycleId/survey-responses (after requireLogin)
 export const surveyRouter = Router({ mergeParams: true });
+// Mounted at /api/me/survey (after requireLogin)
+export const mySurveyRouter = Router();
 
 const TEXT_LIMIT = 5000;
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -13,11 +15,19 @@ export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 export const MAX_FORM_BYTES = MAX_FILE_BYTES + 64 * 1024;
 const FILE_NAME_LIMIT = 255;
 
-function cycleId(req: Request) {
-  const id = String(req.params.cycleId);
-  if (!/^[1-9]\d{0,8}$/.test(id)) throw new ApiError(400, 'INVALID_CYCLE_ID', 'cycleId must be a positive integer.');
-  return Number(id);
+function parseCycleId(value: unknown) {
+  if (typeof value !== 'string' || !/^[1-9]\d{0,8}$/.test(value)) {
+    throw new ApiError(400, 'INVALID_CYCLE_ID', 'cycleId must be a positive integer.');
+  }
+  return Number(value);
 }
+
+const cycleId = (req: Request) => parseCycleId(req.params.cycleId);
+
+// GET /api/me/survey?cycleId=…: which survey roles the signed-in professor can submit and has submitted.
+mySurveyRouter.get('/', async (req, res) => {
+  res.status(200).json(await getMySurveyStatus(parseCycleId(req.query.cycleId), req.user!.netid));
+});
 
 const invalid = (message: string) => new ApiError(400, 'INVALID_SURVEY', message);
 

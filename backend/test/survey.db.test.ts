@@ -5,8 +5,8 @@ import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { skip, sql, useTestDatabase } from './db-test-helper.js';
 
-const { listSurveyResponses, submitSurvey } = await import('../src/services/survey.service.js');
-const { MAX_FILE_BYTES, MAX_FORM_BYTES, surveyRouter } = await import('../src/routes/survey.routes.js');
+const { getMySurveyStatus, listSurveyResponses, submitSurvey } = await import('../src/services/survey.service.js');
+const { MAX_FILE_BYTES, MAX_FORM_BYTES, mySurveyRouter, surveyRouter } = await import('../src/routes/survey.routes.js');
 const { errorHandler } = await import('../src/middleware/error.middleware.js');
 
 const answers = { processOk: true, difficulties: null, additionalFeedback: null };
@@ -43,6 +43,22 @@ async function download(netid: string, responseId: string) {
   try {
     const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/cycles/1/survey-responses/${responseId}/trouble-file`);
     return { status: response.status, headers: response.headers, body: Buffer.from(await response.arrayBuffer()) };
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+// GET /api/me/survey as the given professor.
+async function myStatus(netid: string, query: string) {
+  const app = express();
+  app.use((req, _res, next) => { req.user = { netid, role: 'faculty' } as typeof req.user; next(); });
+  app.use('/api/me/survey', mySurveyRouter);
+  app.use(errorHandler);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/me/survey${query}`);
+    return { status: response.status, body: await response.json() };
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -93,6 +109,42 @@ describe('survey against the database', { skip }, () => {
     assert.equal(list[0].respondent.displayName, 'Dr. obs Test');
     assert.equal(list[0].troubleFileKey, null);
     assert.match(list[0].submittedDate, /^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test('GET /api/me/survey lists the roles a professor can submit and has submitted, so a reload keeps them', async () => {
+    const before = await myStatus('ee', '?cycleId=1');
+    assert.equal(before.status, 200);
+    assert.deepEqual(before.body, {
+      cycleId: '1', open: true,
+      opensDate: (await sql(`SELECT CURRENT_DATE::text AS d`)).rows[0].d,
+      closesDate: (await sql(`SELECT (CURRENT_DATE + 10)::text AS d`)).rows[0].d,
+      eligibleRoles: ['observee'], submittedRoles: [],
+    });
+    await post('ee', form({ respondentRole: 'observee', processOk: 'true' }));
+    assert.deepEqual((await myStatus('ee', '?cycleId=1')).body.submittedRoles, ['observee']);
+
+    // Someone who was both an observee and an observer can submit both, one at a time.
+    await sql(`INSERT INTO section (course_id, term_id, section_num, instructor_id, class_mode) VALUES (1, 1, '002', 'obs', 'in-person')`);
+    await sql(`INSERT INTO sign_up (cycle_id, observee_netid, section_id) VALUES (1, 'obs', 2)`);
+    assert.deepEqual((await myStatus('obs', '?cycleId=1')).body.eligibleRoles, ['observee', 'observer']);
+    await submitSurvey(1, 'obs', { respondentRole: 'observer', ...answers });
+    assert.deepEqual((await myStatus('obs', '?cycleId=1')).body.submittedRoles, ['observer']);
+
+    // Someone who took no part sees no roles, and only their own responses ever count.
+    assert.deepEqual((await myStatus('other', '?cycleId=1')).body,
+      { ...before.body, eligibleRoles: [], submittedRoles: [] });
+  });
+
+  test('GET /api/me/survey says when the survey is closed, and checks cycleId', async () => {
+    await sql(`UPDATE eval_cycle SET observation_deadline = CURRENT_DATE, feedback_deadline = CURRENT_DATE + 10`);
+    assert.equal((await getMySurveyStatus(1, 'ee')).open, false);
+    for (const query of ['', '?cycleId=abc', '?cycleId=0']) {
+      const bad = await myStatus('ee', query);
+      assert.equal(bad.status, 400);
+      assert.equal(bad.body.error.code, 'INVALID_CYCLE_ID');
+    }
+    const missing = await myStatus('ee', '?cycleId=99');
+    assert.equal(missing.status, 404);
   });
 
   test('one response per role', async () => {

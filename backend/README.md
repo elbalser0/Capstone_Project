@@ -85,6 +85,15 @@ populate `eval_due` before this write endpoint can accept sign-ups.
 For an active cycle, `GET /api/me/evaluation-status` uses that saved roster for
 `canSignUp`; its `status` and `dueTerm` still reflect current professor records.
 
+`GET /api/me/survey?cycleId=...` returns the signed-in professor's end-of-process
+survey status for a cycle, for example `{"cycleId":"1","open":true,
+"opensDate":"2026-11-19","closesDate":"2026-12-10","eligibleRoles":["observee"],
+"submittedRoles":["observee"]}`. `eligibleRoles` are the roles the survey accepts
+from them (observee if they signed up in the cycle, observer if they have an
+observation in it) and `submittedRoles` the roles already answered. `open` is true
+from `opensDate` through `closesDate`. A missing or invalid `cycleId` returns 400
+`INVALID_CYCLE_ID` and an unknown cycle 404.
+
 Technical debt: add a department short code and section enrollment if the UI
 needs them. Expand the frontend meeting-day type if weekend sections are used.
 Future term rows are still needed before scheduling evaluation cycles in those

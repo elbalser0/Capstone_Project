@@ -19,14 +19,15 @@ export interface TroubleFile {
   data: Buffer;
 }
 
-// POST /api/cycles/{cycleId}/survey-responses: the end-of-process survey. Open the day after
-// the observation deadline through the feedback deadline. Observees must have signed up in
-// the cycle and observers must have an observation in it. One response per role.
-export async function submitSurvey(cycleId: number, netid: string, input: SurveyInput, file?: TroubleFile) {
-  const db = getPool();
-  const { rows: [cycle] } = await db.query<{
-    open: boolean; opens: string; closes: string; observee: boolean; observer: boolean;
-  }>(`
+interface CycleSurveyRow {
+  open: boolean; opens: string; closes: string; observee: boolean; observer: boolean;
+}
+
+// The survey window and this professor's roles in the cycle: observee if they signed up in it,
+// observer if they have an observation in it. Used by submitting and by GET /api/me/survey,
+// so the page offers exactly the roles the server accepts.
+async function cycleSurvey(cycleId: number, netid: string) {
+  const { rows: [cycle] } = await getPool().query<CycleSurveyRow>(`
     SELECT CURRENT_DATE > c.observation_deadline AND CURRENT_DATE <= c.feedback_deadline AS open,
            (c.observation_deadline + 1)::text AS opens, c.feedback_deadline::text AS closes,
            EXISTS (SELECT 1 FROM sign_up AS s WHERE s.cycle_id = c.cycle_id AND s.observee_netid = $2) AS observee,
@@ -35,6 +36,34 @@ export async function submitSurvey(cycleId: number, netid: string, input: Survey
     FROM eval_cycle AS c WHERE c.cycle_id = $1
   `, [cycleId, netid]);
   if (!cycle) throw new ApiError(404, 'NOT_FOUND', 'Cycle not found.');
+  return cycle;
+}
+
+const ROLES: RespondentRole[] = ['observee', 'observer'];
+
+// GET /api/me/survey?cycleId=…: the signed-in professor's survey status for a cycle, so the
+// survey page can show which roles are already submitted after a reload or on another device.
+export async function getMySurveyStatus(cycleId: number, netid: string) {
+  const cycle = await cycleSurvey(cycleId, netid);
+  const { rows } = await getPool().query<{ respondent_role: RespondentRole }>(
+    'SELECT respondent_role FROM survey_response WHERE cycle_id = $1 AND respondent_id = $2',
+    [cycleId, netid]);
+  const submitted = new Set(rows.map((row) => row.respondent_role));
+  return {
+    cycleId: String(cycleId),
+    open: cycle.open,
+    opensDate: cycle.opens,
+    closesDate: cycle.closes,
+    eligibleRoles: ROLES.filter((role) => cycle[role]),
+    submittedRoles: ROLES.filter((role) => submitted.has(role)),
+  };
+}
+
+// POST /api/cycles/{cycleId}/survey-responses: the end-of-process survey. Open the day after
+// the observation deadline through the feedback deadline. Observees must have signed up in
+// the cycle and observers must have an observation in it. One response per role.
+export async function submitSurvey(cycleId: number, netid: string, input: SurveyInput, file?: TroubleFile) {
+  const cycle = await cycleSurvey(cycleId, netid);
   if (!cycle.open) {
     throw new ApiError(409, 'SURVEY_CLOSED', `The survey is open from ${cycle.opens} to ${cycle.closes}.`);
   }
