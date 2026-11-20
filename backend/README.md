@@ -85,6 +85,17 @@ populate `eval_due` before this write endpoint can accept sign-ups.
 For an active cycle, `GET /api/me/evaluation-status` uses that saved roster for
 `canSignUp`; its `status` and `dueTerm` still reflect current professor records.
 
+Cycle deadline rules (`POST /api/cycles` and `PATCH /api/cycles/{cycleId}`): the
+deadlines go start <= sign-up <= observation < feedback. The survey opens the day
+after the observation deadline, so the feedback deadline must be at least one day
+later (400 `INVALID_DEADLINES`); a cycle that already has equal dates must move the
+feedback deadline in the same PATCH. Once observer selection has run (any sign-up in
+the cycle has a match or a matching alert), the sign-up deadline cannot move to today
+or later, which would reopen sign-up (409 `SELECTION_DONE`). Before that, extending
+sign-up is allowed. `POST /api/cycles/{cycleId}/notifications/survey` only sends
+while the survey is open, from the day after the observation deadline through the
+feedback deadline (409 `SURVEY_CLOSED` otherwise), and skips anyone already told in
+that cycle, so sending again only reaches new participants.
 `GET /api/me/survey?cycleId=...` returns the signed-in professor's end-of-process
 survey status for a cycle, for example `{"cycleId":"1","open":true,
 "opensDate":"2026-11-19","closesDate":"2026-12-10","eligibleRoles":["observee"],
