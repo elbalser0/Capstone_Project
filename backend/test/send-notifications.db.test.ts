@@ -119,10 +119,15 @@ describe('sending notifications against the database', { skip }, () => {
     assert.equal((await sent('reminder')).length, 1);
   });
 
+  // The survey (and its notification) opens the day after the observation deadline.
+  const openSurvey = () => sql(`UPDATE eval_cycle SET signup_deadline = CURRENT_DATE - 20,
+                                  observation_deadline = CURRENT_DATE - 1 WHERE cycle_id = 1`);
+
   test('only due reminders send email', async () => {
     const mailer = fakeMailer();
     setMailTransportForTests(mailer.transport);
     await sendListsReady(1, 'ac1');
+    await openSurvey();
     await sendSurveyOpen(1, 'ac1');
     await waitForEmails();
     assert.equal(mailer.sent.length, 0);
@@ -134,10 +139,35 @@ describe('sending notifications against the database', { skip }, () => {
   });
 
   test('the survey goes to every observee and observer once', async () => {
+    await openSurvey();
     assert.deepEqual(await sendSurveyOpen(1, 'ac1'), { sent: 3 });
     assert.deepEqual((await sent('survey_open')).map((r) => r.recipient_netid), ['due1', 'ee3', 'obs']);
     const { rows: [d] } = await sql(`SELECT (CURRENT_DATE + 45)::text AS f`);
     assert.equal((await sent('survey_open'))[0].subject, `The end-of-process survey is open until ${d.f}.`);
+  });
+
+  test('sending the survey notice again only reaches participants who were not told yet', async () => {
+    await openSurvey();
+    await sendSurveyOpen(1, 'ac1');
+    assert.deepEqual(await sendSurveyOpen(1, 'ac1'), { sent: 0 });
+    await sql(`INSERT INTO professor (netid, first_name, last_name, email, rank, dept_id, eval_interval_years, start_term)
+               VALUES ('late', 'late', 'Test', 'late@example.edu', 'full', 1, 2, 1)`);
+    await sql(`INSERT INTO section (course_id, term_id, section_num, instructor_id, class_mode) VALUES (1, 1, '003', 'late', 'in-person')`);
+    await sql(`INSERT INTO sign_up (cycle_id, observee_netid, section_id) VALUES (1, 'late', 3)`);
+    assert.deepEqual(await sendSurveyOpen(1, 'ac1'), { sent: 1 });
+    assert.deepEqual((await sent('survey_open')).map((r) => r.recipient_netid), ['due1', 'ee3', 'late', 'obs']);
+  });
+
+  test('the survey notice is refused before the survey opens and after it closes, and sends nothing', async () => {
+    const closed = { status: 409, code: 'SURVEY_CLOSED' };
+    await assert.rejects(sendSurveyOpen(1, 'ac1'), closed);   // observation phase
+    await sql(`UPDATE eval_cycle SET signup_deadline = CURRENT_DATE - 20, observation_deadline = CURRENT_DATE,
+               feedback_deadline = CURRENT_DATE + 10 WHERE cycle_id = 1`);
+    await assert.rejects(sendSurveyOpen(1, 'ac1'), closed);   // last day of observations
+    await assert.rejects(sendSurveyOpen(2, 'ac1'), closed);   // cycle 2 is over
+    assert.equal((await sql('SELECT count(*)::int AS n FROM notification')).rows[0].n, 0);
+    await sql(`UPDATE eval_cycle SET observation_deadline = CURRENT_DATE - 10, feedback_deadline = CURRENT_DATE WHERE cycle_id = 1`);
+    assert.deepEqual(await sendSurveyOpen(1, 'ac1'), { sent: 3 });   // the feedback deadline day still counts
   });
 
   test('an unknown cycle returns NOT_FOUND and sends nothing', async () => {
@@ -148,6 +178,7 @@ describe('sending notifications against the database', { skip }, () => {
   });
 
   test('sent notifications show up in the recipient inbox, and a notification with no sender has sentBy null', async () => {
+    await openSurvey();
     await sendSurveyOpen(1, 'ac1');
     const [fromAc] = await listMyNotifications('obs');
     assert.equal(fromAc.notifType, 'survey_open');

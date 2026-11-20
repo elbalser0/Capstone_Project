@@ -38,6 +38,10 @@ test('deadlines must be in order', () => {
   assert.throws(() => checkDeadlineOrder('2026-11-02', ok), { code: 'INVALID_DEADLINES' });
   assert.throws(() => checkDeadlineOrder('2026-10-23', { ...ok, observationDeadline: '2026-10-30' }), { code: 'INVALID_DEADLINES' });
   assert.throws(() => checkDeadlineOrder('2026-10-23', { ...ok, feedbackDeadline: '2026-11-19' }), { code: 'INVALID_DEADLINES' });
+  // The survey opens the day after the observation deadline, so feedback must be at least one day later.
+  assert.throws(() => checkDeadlineOrder('2026-10-23', { ...ok, feedbackDeadline: '2026-11-20' }),
+    { code: 'INVALID_DEADLINES', message: /at least one day after the observation deadline/ });
+  assert.doesNotThrow(() => checkDeadlineOrder('2026-10-23', { ...ok, feedbackDeadline: '2026-11-21' }));
 });
 
 test('cycle phase follows today and the deadlines', () => {

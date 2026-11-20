@@ -113,8 +113,20 @@ export async function sendListsReady(cycleId: number, sentBy: string) {
 }
 
 // POST /api/cycles/{cycleId}/notifications/survey: every observee and observer in the cycle,
-// once each.
+// once each. Only while the survey is open (the day after the observation deadline through the
+// feedback deadline). Anyone already told in this cycle is skipped, so sending again only
+// reaches participants who were not told yet.
 export async function sendSurveyOpen(cycleId: number, sentBy: string) {
+  const { rows: [cycle] } = await getPool().query<{ open: boolean; opens: string; closes: string }>(`
+    SELECT CURRENT_DATE > observation_deadline AND CURRENT_DATE <= feedback_deadline AS open,
+           (observation_deadline + 1)::text AS opens, feedback_deadline::text AS closes
+    FROM eval_cycle WHERE cycle_id = $1
+  `, [cycleId]);
+  if (!cycle) throw new ApiError(404, 'NOT_FOUND', 'Cycle not found.');
+  if (!cycle.open) {
+    throw new ApiError(409, 'SURVEY_CLOSED',
+      `The survey notification can only be sent while the survey is open, from ${cycle.opens} to ${cycle.closes}.`);
+  }
   return { sent: (await sendToCycle(cycleId, sentBy, 'survey_open', `
     SELECT netid, 'The end-of-process survey is open until ' || deadlines.feedback || '.' AS subject FROM (
       SELECT s.observee_netid AS netid FROM sign_up AS s WHERE s.cycle_id = $1
@@ -122,5 +134,7 @@ export async function sendSurveyOpen(cycleId: number, sentBy: string) {
       SELECT o.observer_netid FROM observation AS o
       JOIN sign_up AS s ON s.signup_id = o.signup_id WHERE s.cycle_id = $1
     ) AS participants CROSS JOIN deadlines
+    WHERE NOT EXISTS (SELECT 1 FROM notification AS n
+                      WHERE n.cycle_id = $1 AND n.notif_type = 'survey_open' AND n.recipient_netid = participants.netid)
   `)).length };
 }

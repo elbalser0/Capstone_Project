@@ -43,13 +43,19 @@ function nextDay(date: string): string {
   return next.toISOString().slice(0, 10);
 }
 
-// The deadlines must be in order: start <= signup <= observation <= feedback (same rule as the database).
+// The deadlines must be in order: start <= signup <= observation < feedback. The survey opens the
+// day after the observation deadline and closes on the feedback deadline, so the feedback
+// deadline must be at least one day later or the survey could never be submitted.
 export function checkDeadlineOrder(startDate: string, d: Deadlines) {
   if (!(startDate <= d.signupDeadline)) {
     throw new ApiError(400, 'INVALID_DEADLINES', 'The signup deadline cannot be before the cycle start date.');
   }
   if (!(d.signupDeadline <= d.observationDeadline && d.observationDeadline <= d.feedbackDeadline)) {
     throw new ApiError(400, 'INVALID_DEADLINES', 'Deadlines must be in order: signup, then observation, then feedback.');
+  }
+  if (d.observationDeadline === d.feedbackDeadline) {
+    throw new ApiError(400, 'INVALID_DEADLINES',
+      'The feedback deadline must be at least one day after the observation deadline, so the survey can open.');
   }
 }
 
@@ -165,6 +171,23 @@ export async function updateCycle(cycleId: number, changes: Partial<Deadlines>) 
   };
   checkDeadlineOrder(current.startDate, deadlines);
   await inTransaction(async (client) => {
+    // Observer selection has run once any sign-up in the cycle has a match or a matching alert
+    // (a run that finds nobody still raises a no_observer alert). After that, the sign-up
+    // deadline cannot move to today or later, which would reopen sign-up. Locking the cycle row
+    // first means observer selection (which locks it too) cannot start in between.
+    const { rows: [state] } = await client.query<{ today: string; selection_ran: boolean }>(`
+      SELECT CURRENT_DATE::text AS today,
+             EXISTS (SELECT 1 FROM sign_up AS s
+                     WHERE s.cycle_id = c.cycle_id
+                       AND (EXISTS (SELECT 1 FROM observer_match AS m WHERE m.signup_id = s.signup_id)
+                            OR EXISTS (SELECT 1 FROM alert AS a WHERE a.signup_id = s.signup_id))) AS selection_ran
+      FROM eval_cycle AS c WHERE c.cycle_id = $1 FOR UPDATE
+    `, [cycleId]);
+    if (state.selection_ran && deadlines.signupDeadline !== current.signupDeadline
+        && deadlines.signupDeadline >= state.today) {
+      throw new ApiError(409, 'SELECTION_DONE',
+        'Observer selection has already run, so the sign-up deadline cannot move to today or later.');
+    }
     await client.query(`
       UPDATE eval_cycle
       SET signup_deadline = $2::date, observation_deadline = $3::date, feedback_deadline = $4::date
