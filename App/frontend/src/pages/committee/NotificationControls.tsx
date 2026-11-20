@@ -24,6 +24,8 @@ interface ActionCopy {
   confirmButton: string;
   /** The result line once the backend answers with { sent }. */
   sent: (n: number) => string;
+  /** What sending again does, shown in the dialog after a send. Defaults to the duplicate warning. */
+  again?: string;
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -67,13 +69,14 @@ const ACTIONS: Record<ActionId, ActionCopy> = {
     confirm: (
       <>
         <p>This tells <strong>every</strong> observee and observer in this cycle, once each, that the end-of-process survey is open until the feedback deadline.</p>
-        <p className="mt-3">In-app notification only, no email. Sending again notifies the same people again.</p>
+        <p className="mt-3">In-app notification only, no email. Anyone already told in this cycle is skipped, so sending again only reaches people who were not told yet.</p>
       </>
     ),
     confirmButton: 'Send survey notification',
     sent: (n) => (n === 0
-      ? 'No notifications sent: this cycle has no observees or observers yet.'
+      ? 'No notifications sent: everyone in this cycle was already told, or it has no observees or observers yet.'
       : `Sent ${plural(n, 'in-app notification', 'in-app notifications')}.`),
+    again: 'Sending again only reaches people who were not told yet.',
   },
 };
 
@@ -162,7 +165,7 @@ function SendAction({ id, cycleId, disabled, offNote }: { id: ActionId; cycleId:
             {copy.confirm}
             {(mutation.isSuccess || (failed && !failed.known)) && (
               <p className="mt-3 font-bold text-gray-900">
-                {mutation.isSuccess ? 'Sent' : 'Possibly sent'} from this page at {formatClock(mutation.submittedAt)}. Sending again creates duplicate notifications.
+                {mutation.isSuccess ? 'Sent' : 'Possibly sent'} from this page at {formatClock(mutation.submittedAt)}. {copy.again ?? 'Sending again creates duplicate notifications.'}
               </p>
             )}
           </div>

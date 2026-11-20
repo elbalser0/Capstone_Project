@@ -105,7 +105,7 @@ describe('Committee notification sends', () => {
     await confirmSend(/Observer lists ready/, /Notify lists ready/, /Notify observees/);
     expect(await within(group(/Observer lists ready/)).findByText(/No notifications sent: no sign-up in this cycle has an observer list yet\./)).toBeVisible();
     await confirmSend(/End-of-process survey/, /Send survey notification/, /Send survey notification/);
-    expect(await within(group(/End-of-process survey/)).findByText(/No notifications sent: this cycle has no observees or observers yet\./)).toBeVisible();
+    expect(await within(group(/End-of-process survey/)).findByText(/No notifications sent: everyone in this cycle was already told, or it has no observees or observers yet\./)).toBeVisible();
   });
 
   it('sends once while a send is pending, however often the button is clicked', async () => {

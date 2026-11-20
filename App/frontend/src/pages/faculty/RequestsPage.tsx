@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useCandidates, useEvaluationStatus, useMyObservations, useMySignup, useOutgoingRequests, useSendRequests } from '../../api/hooks/faculty';
+import { ApiError } from '../../api/client';
 import { useNotifications } from '../../api/hooks/shared';
 import type { Candidate, EvaluationStatus, ObservationRequest, ObservationSummary, RequestStatus, Signup } from '../../api/types';
 import { usePageTitle } from '../../components/AppShell';
@@ -93,6 +94,18 @@ function endedText(requests: ObservationRequest[]) {
   ].filter(Boolean).join(' ');
 }
 
+/**
+ * The server refuses the whole send with NO_AVAILABLE_DATES when a selected observer teaches or has another
+ * observation at every proposed time, and names them by NetID. Here they are named as on the list, with what to do.
+ */
+function sendError(error: Error | null, candidates: Candidate[]): Error | null {
+  if (!(error instanceof ApiError) || error.code !== 'NO_AVAILABLE_DATES') return error;
+  const ids = /observer\(s\): ([^.]+)\./.exec(error.message)?.[1].split(',').map((id) => id.trim()).filter(Boolean) ?? [];
+  const names = ids.map((id) => candidates.find((c) => c.observer.netid === id)?.observer.displayName ?? id);
+  if (!names.length) return error;
+  return new Error(`Nothing was sent. ${joinAnd(names)} ${names.length === 1 ? 'teaches or observes' : 'teach or observe'} at every one of your proposed times. Unselect ${names.length === 1 ? 'them' : 'those observers'} and send again.`);
+}
+
 function ChooseObservers({ signup, candidates, signupDeadline, ended }: { signup: Signup; candidates: Candidate[]; signupDeadline: string; ended: ObservationRequest[] }) {
   const navigate = useNavigate();
   const notifications = useNotifications();
@@ -179,7 +192,7 @@ function ChooseObservers({ signup, candidates, signupDeadline, ended }: { signup
       </div>
       <p className="mt-3 text-xs text-gray-500">Set when you signed up. Observers choose one of these dates when confirming a request.</p>
 
-      <ErrorNote error={send.error} className="mt-4" />
+      <ErrorNote error={sendError(send.error, candidates)} className="mt-4" />
       <div className="mt-[21px] flex flex-wrap items-center gap-3">
         <Button disabled={!chosen.length || locked} aria-busy={send.isPending} onClick={submit}>
           <SendIcon width={13} height={13} />{' '}

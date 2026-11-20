@@ -197,6 +197,17 @@ test('a fast double-click sends one request', async () => {
   expect(posts).toBe(1);
 });
 
+test('names the observers with no free proposed time when the server refuses the send', async () => {
+  current.candidates = [candidate(observer), candidate(second)];
+  server.use(http.post('*/api/signups/:signupId/requests', () => HttpResponse.json({
+    error: { code: 'NO_AVAILABLE_DATES', message: `No proposed date is available for observer(s): ${second.netid}. Remove them or add another candidate.` },
+  }, { status: 409 })));
+  renderRequests();
+  await screen.findByText('2 of 2 selected');
+  await userEvent.setup().click(sendButton());
+  expect(await screen.findByRole('alert')).toHaveTextContent('Nothing was sent. Dr. Jon Kim teaches or observes at every one of your proposed times. Unselect them and send again.');
+});
+
 test('keeps the selection after a failed send and lets the professor retry', async () => {
   current.candidates = [candidate(observer), candidate(second)];
   let attempts = 0;

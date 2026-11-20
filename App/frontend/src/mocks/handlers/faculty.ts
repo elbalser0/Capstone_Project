@@ -187,7 +187,14 @@ export const facultyHandlers = [
       .map((m) => m.observer_netid);
     const targets = input.observerNetids?.length ? input.observerNetids : candidates;
     if (targets.some((n) => !candidates.includes(n))) return fail(400, 'NOT_A_CANDIDATE', 'Requests can only go to observers on your list.');
-    for (const netid of targets) {
+    // Like the backend (#250): an observer with no free proposed date is refused when picked by hand, or when
+    // nobody else is left; otherwise they are skipped.
+    const conflicting = targets.filter((n) => freeDates(db, s, n).length === 0);
+    const sendTo = targets.filter((n) => !conflicting.includes(n));
+    if (conflicting.length && (input.observerNetids?.length || sendTo.length === 0)) {
+      return fail(409, 'NO_AVAILABLE_DATES', `No proposed date is available for observer(s): ${conflicting.join(', ')}. Remove them or add another candidate.`);
+    }
+    for (const netid of sendTo) {
       const existing = db.observation_request.find((r) => r.signup_id === s.signup_id && r.observer_netid === netid);
       if (existing) continue;
       db.observation_request.push({ signup_id: s.signup_id, observer_netid: netid, status: 'pending', sent_date: now(), responded_date: null });

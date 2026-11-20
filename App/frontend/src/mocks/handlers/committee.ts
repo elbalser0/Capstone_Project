@@ -15,7 +15,7 @@ import type {
   UnmatchedFaculty,
   UpdateCycleInput,
 } from '../../api/types';
-import { alertFor, dueStatus, dueTermId, eligibleObservers, isLocked, isSignedOff, lastCompletedTermId, requestExpiresAt, termOrder } from '../rules';
+import { alertFor, cyclePhase, dueStatus, dueTermId, eligibleObservers, isLocked, isSignedOff, lastCompletedTermId, requestExpiresAt, surveyOpensDate, termOrder } from '../rules';
 import type { EvalCycleRow, SignupRow } from '../schema';
 import {
   byRank,
@@ -241,12 +241,17 @@ export const committeeHandlers = [
   http.post('/api/cycles/:cycleId/notifications/survey', ({ request, params }) => {
     const me = committeeMember(request);
     const c = cycleOr404(params.cycleId);
+    // Like the backend: only while the survey is open, and anyone already told in this cycle is skipped.
+    if (cyclePhase(db, c, today()) !== 'feedback') {
+      return fail(409, 'SURVEY_CLOSED', `The survey notification can only be sent while the survey is open, from ${surveyOpensDate(c)} to ${c.feedback_deadline}.`);
+    }
     const participants = new Set(signupsOf(c).map((s) => s.observee_netid));
     for (const s of signupsOf(c)) {
-      const o = observationOfSignup(s.signup_id);
-      if (o) participants.add(o.observer_netid);
+      for (const o of db.observation.filter((x) => x.signup_id === s.signup_id)) participants.add(o.observer_netid);
     }
-    return HttpResponse.json({ sent: notify([...participants], 'survey_open', 'The end-of-process survey is open', me.netid, c.cycle_id) });
+    const told = new Set(db.notification.filter((n) => n.cycle_id === c.cycle_id && n.notif_type === 'survey_open').map((n) => n.recipient_netid));
+    const fresh = [...participants].filter((n) => !told.has(n));
+    return HttpResponse.json({ sent: notify(fresh, 'survey_open', 'The end-of-process survey is open', me.netid, c.cycle_id) });
   }),
 
   http.get('/api/cycles/:cycleId/survey-responses', ({ request, params }) => {
