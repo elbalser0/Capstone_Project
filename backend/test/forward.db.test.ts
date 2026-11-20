@@ -114,6 +114,12 @@ describe('forwarding an observation against the database', { skip }, () => {
       'Organization: 4 of 5', '  Clear structure', 'Engagement: 5 of 5', 'Other comments: Nice class', 'Signed by the observee on']) {
       assert.ok(sent[0].text.includes(part), part);
     }
+    // Dates read like 'Tue, Nov 17, 2026', not 2026-11-17.
+    const { rows: [today] } = await sql(`SELECT to_char(CURRENT_DATE, 'Dy, Mon FMDD, YYYY') AS d`);
+    for (const part of [`Observation date: ${today.d}`, `Signed by the observer on ${today.d}`, `Signed by the observee on ${today.d}`]) {
+      assert.ok(sent[0].text.includes(part), part);
+    }
+    assert.doesNotMatch(sent[0].text, /\d{4}-\d{2}-\d{2}/);
   });
 
   test('each forward gets its own row and token', async () => {
@@ -135,7 +141,10 @@ describe('forwarding an observation against the database', { skip }, () => {
 
   test('a bad email gets 400, faculty 403, a bad id 400 and an unknown observation 404', async () => {
     await lock();
-    for (const body of [{ email: 'not-an-email' }, { email: '' }, {}, { email: 5 }]) {
+    // RFC 5321 limits: at most 64 characters before the @ and 254 in total.
+    const tooLongLocal = `${'a'.repeat(65)}@example.edu`;
+    const tooLong = `a@${'b'.repeat(250)}.edu`;
+    for (const body of [{ email: 'not-an-email' }, { email: '' }, {}, { email: 5 }, { email: tooLongLocal }, { email: tooLong }]) {
       const bad = await forward(body);
       assert.equal(bad.status, 400);
       assert.equal(bad.body.error.code, 'INVALID_EMAIL');
@@ -146,5 +155,7 @@ describe('forwarding an observation against the database', { skip }, () => {
     assert.equal((await sql('SELECT count(*)::int AS n FROM forwarded_observation')).rows[0].n, 0);
     await waitForEmails();
     assert.equal(sent.length, 0);
+    // Exactly 64 characters before the @ is still allowed.
+    assert.equal((await forward({ email: `${'a'.repeat(64)}@example.edu` })).status, 201);
   });
 });
