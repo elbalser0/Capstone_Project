@@ -100,7 +100,7 @@ describe('outstanding observations dashboard against the database', { skip }, ()
   test('a completed replacement observation clears an older missed observation from the outstanding count', async () => {
     await sql(`INSERT INTO observation (signup_id, observer_netid, version_id, scheduled_date, status,
                                        observer_signed_date, observee_signed_date)
-               VALUES (2, 'observer', 1, CURRENT_DATE + 2, 'completed', now(), now())`);
+               VALUES (2, 'observer', 1, CURRENT_DATE + 1, 'completed', now(), now())`);
     await withDashboardServer(async (base) => {
       const response = await fetch(`${base}/api/dashboard/outstanding-observations`, {
         headers: { authorization: 'Bearer ac' },
