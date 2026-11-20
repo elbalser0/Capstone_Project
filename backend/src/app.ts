@@ -11,7 +11,7 @@ import { adminRouter } from './routes/admin.routes.js';
 import { myAssignmentsRouter, myObservationsRouter, observationsRouter } from './routes/observations.routes.js';
 import { meRouter } from './routes/me.routes.js';
 import { myRequestsRouter, signupRequestsRouter } from './routes/requests.routes.js';
-import { surveyRouter } from './routes/survey.routes.js';
+import { mySurveyRouter, surveyRouter } from './routes/survey.routes.js';
 import { importRouter } from './routes/import.routes.js';
 import { termsRouter } from './routes/terms.routes.js';
 
@@ -26,6 +26,7 @@ app.use('/api/me/requests', requireLogin, myRequestsRouter);
 app.use('/api/me/notifications', requireLogin, myNotificationsRouter);
 app.use('/api/me/assignments', requireLogin, myAssignmentsRouter);
 app.use('/api/me/observations', requireLogin, myObservationsRouter);
+app.use('/api/me/survey', requireLogin, mySurveyRouter);
 app.use('/api/signups/:signupId/requests', requireLogin, signupRequestsRouter);
 // GET /api/me also works for admins who are not professors; the rest of /api/me needs a professor.
 app.use('/api/me', authenticate, meRouter, requireProfessor, facultyMeRouter);
