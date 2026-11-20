@@ -62,7 +62,10 @@ describe('sending notifications against the database', { skip }, () => {
 
   test('due reminders go to due professors in this cycle who have not signed up, with status and deadlines', async () => {
     assert.deepEqual(await sendDueReminders(1, 'ac1'), { sent: 1 });
-    const { rows: [d] } = await sql(`SELECT (CURRENT_DATE + 5)::text AS s, (CURRENT_DATE + 30)::text AS o, (CURRENT_DATE + 45)::text AS f`);
+    // Deadlines read like 'Wed, Nov 25, 2026'.
+    const { rows: [d] } = await sql(`SELECT to_char(CURRENT_DATE + 5, 'Dy, Mon FMDD, YYYY') AS s,
+                                            to_char(CURRENT_DATE + 30, 'Dy, Mon FMDD, YYYY') AS o,
+                                            to_char(CURRENT_DATE + 45, 'Dy, Mon FMDD, YYYY') AS f`);
     assert.deepEqual(await sent('reminder'), [{
       recipient_netid: 'due2', sent_by: 'ac1', cycle_id: 1,
       subject: `Reminder: you are overdue for a classroom observation. Sign up by ${d.s}. Observations are due by ${d.o} and feedback by ${d.f}.`,
@@ -136,7 +139,7 @@ describe('sending notifications against the database', { skip }, () => {
   test('the survey goes to every observee and observer once', async () => {
     assert.deepEqual(await sendSurveyOpen(1, 'ac1'), { sent: 3 });
     assert.deepEqual((await sent('survey_open')).map((r) => r.recipient_netid), ['due1', 'ee3', 'obs']);
-    const { rows: [d] } = await sql(`SELECT (CURRENT_DATE + 45)::text AS f`);
+    const { rows: [d] } = await sql(`SELECT to_char(CURRENT_DATE + 45, 'Dy, Mon FMDD, YYYY') AS f`);
     assert.equal((await sent('survey_open'))[0].subject, `The end-of-process survey is open until ${d.f}.`);
   });
 
