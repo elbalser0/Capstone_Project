@@ -291,6 +291,26 @@ describe('Sign-ups after pairing and hand-added observers', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('2 sign-ups need attention: 2 where nobody accepted.');
   });
 
+  it('treats an observation reported as not done as unpaired, so Add observer comes back', async () => {
+    const missed: Signup = { ...paired('20', faculty), observation: { ...paired('20', faculty).observation!, status: 'not_completed' } };
+    serve({ matching: [row('20', faculty, 5), row('21', sarah, 5)], signupList: [missed, paired('21', sarah)] });
+    openPage();
+    expect(await screen.findByText('Observation did not happen')).toBeVisible();
+    const [gone, done] = dataRows();
+    expect(within(gone).queryByText(/Paired with/)).not.toBeInTheDocument();
+    expect(within(gone).getByRole('button', { name: `Add an observer for ${faculty.displayName}` })).toBeVisible();
+    expect(within(done).getByText(`Paired with ${observer.displayName}`)).toBeVisible();
+    expect(within(done).queryByRole('button', { name: /Add an observer/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('1 sign-up needs attention: 1 where the observation did not happen.');
+  });
+
+  it('pairs a missed sign-up again once a new observer accepts', async () => {
+    serve({ matching: [row('20', faculty, 5)], signupList: [paired('20', faculty)] });
+    openPage();
+    expect(await screen.findByText(`Paired with ${observer.displayName}`)).toBeVisible();
+    expect(screen.queryByText('Observation did not happen')).not.toBeInTheDocument();
+  });
+
   it('holds the attention banner until the sign-ups have loaded', async () => {
     serve({ matching: [row('20', faculty, 1, 'insufficient_observers')] });
     server.use(http.get('*/api/cycles/1/signups', never));

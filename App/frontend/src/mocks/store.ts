@@ -190,7 +190,11 @@ export function cycle(c: EvalCycleRow): Cycle {
   };
 }
 
-export const observationOfSignup = (signupId: string) => db.observation.find((o) => o.signup_id === signupId) ?? null;
+/** The newest observation of a sign-up, like the backend's lists: after a missed one is paired again, the new one. */
+export const observationOfSignup = (signupId: string) => db.observation.filter((o) => o.signup_id === signupId).pop() ?? null;
+/** The observation that pairs a sign-up. One reported as not done no longer does, so the sign-up can be paired again. */
+export const activeObservationOfSignup = (signupId: string) =>
+  db.observation.find((o) => o.signup_id === signupId && o.status !== 'not_completed') ?? null;
 
 export function signup(s: SignupRow): Signup {
   const o = observationOfSignup(s.signup_id);

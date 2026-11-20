@@ -311,14 +311,17 @@ function Matched({ signup, requests, observation }: { signup: Signup; requests: 
   const date = observation?.scheduledDate;
   const time = date ? classStart(signup.section, date) : '';
   const room = signup.section.meetings[0]?.room;
-  const accepted = requests.find((r) => r.status === 'accepted');
-  // The record was reported as "could not be done": there is no form to sign, and this cycle has no second pairing.
+  // After a missed observation and a second pairing, the first observer's request is still "accepted";
+  // only the current observer's one is the pairing, and the earlier one reads as did not happen.
+  const accepted = requests.find((r) => r.status === 'accepted' && r.observer.netid === observer.netid);
+  const earlier = (r: ObservationRequest) => r.status === 'accepted' && r.observer.netid !== observer.netid;
+  // The record was reported as "could not be done": there is no form to sign, and the sign-up can be paired again.
   const missed = signup.observation!.status === 'not_completed' || observation?.status === 'not_completed';
   return (
     <div className="flex flex-col pt-8">
       {missed ? (
         <Callout tone="warning" title={`The observation with ${observer.displayName} did not happen.`}>
-          It was reported as not done{date ? ` (planned for ${formatDayYear(date)})` : ''}. There is no form to sign, and this sign-up cannot get another observer in the app this semester. The Assessment Committee can tell you what happens next.
+          It was reported as not done{date ? ` (planned for ${formatDayYear(date)})` : ''}. There is no form to sign. Your sign-up has no observer now, so it can be paired again: when the Assessment Committee adds an observer to your list, you can send a new request from this page.
         </Callout>
       ) : (
         <Callout tone="success" title={`${observer.displayName} accepted first and is your observer.`}>
@@ -330,8 +333,8 @@ function Matched({ signup, requests, observation }: { signup: Signup; requests: 
       <RequestTable requests={requests} columns="280px 240px 260px 1fr" min="min-w-[900px]" head={['Time they picked', 'Status', 'When']}>
         {(r) => (
           <>
-            <Cell className="text-gray-700">{r.status === 'accepted' && date ? formatSlot(date, time) : ''}</Cell>
-            <Cell>{statusTag(r)}</Cell>
+            <Cell className="text-gray-700">{r === accepted && date ? formatSlot(date, time) : ''}</Cell>
+            <Cell>{earlier(r) ? <Tag tone="neutral">Did not happen</Tag> : statusTag(r)}</Cell>
             <Cell className="text-gray-700">
               {r.respondedDate
                 ? formatDateTime(r.respondedDate)
@@ -364,10 +367,10 @@ function Matched({ signup, requests, observation }: { signup: Signup; requests: 
 
 // ---------- Page ----------
 
-type View = 'none' | 'waiting' | 'choose' | 'sent' | 'nobody' | 'matched';
+type View = 'none' | 'waiting' | 'choose' | 'sent' | 'nobody' | 'matched' | 'missed';
 
 /** States whose data can change from elsewhere (an answer, an expiry, a new list); the others stay put until the professor acts. */
-const POLLED: View[] = ['waiting', 'sent', 'nobody'];
+const POLLED: View[] = ['waiting', 'sent', 'nobody', 'missed'];
 
 export function RequestsPage() {
   const [live, setLive] = useState(false);
@@ -380,10 +383,19 @@ export function RequestsPage() {
 
   const s = signup.data;
   const requests = s ? (outgoing.data ?? []).filter((r) => r.signupId === s.signupId) : [];
+  // After an observation is reported as not done the sign-up is unpaired again (the backend lets it be paired
+  // a second time), so the missed observer's accepted request no longer counts as an answer.
+  const missed = s?.observation?.status === 'not_completed';
+  const missedAccept = missed ? requests.find((r) => r.status === 'accepted' && r.observer.netid === s!.observation!.observer.netid) : undefined;
+  const current = missed ? requests.filter((r) => r !== missedAccept) : requests;
+  // Requests sent after the missed observer had accepted: a second round, which can end with nobody accepting.
+  const secondRound = missed ? current.filter((r) => !missedAccept?.respondedDate || r.sentDate > missedAccept.respondedDate) : current;
   const fresh = (candidates.data ?? []).some((c) => !c.request);
   // An accepted request counts as "sent" until the sign-up shows its observation, so the page never flashes "nobody accepted".
-  const answered = requests.some((r) => r.status === 'pending' || r.status === 'accepted');
-  const view: View = !s ? 'none' : s.observation ? 'matched' : answered ? 'sent' : fresh ? 'choose' : requests.length ? 'nobody' : 'waiting';
+  const answered = current.some((r) => r.status === 'pending' || r.status === 'accepted');
+  const view: View = !s ? 'none'
+    : s.observation && !missed ? 'matched'
+      : answered ? 'sent' : fresh ? 'choose' : secondRound.length ? 'nobody' : missed ? 'missed' : 'waiting';
   const poll = POLLED.includes(view);
   useEffect(() => setLive(poll), [poll]);
   usePageTitle(view === 'choose' ? 'Choose your observers' : view === 'matched' ? 'Your observer' : null);
@@ -412,7 +424,7 @@ export function RequestsPage() {
           </Banner>
         </div>
       )}
-      {renderView(view, s, status.data, candidates.data, requests, observations.data)}
+      {renderView(view, s, status.data, candidates.data, view === 'missed' ? requests : view === 'nobody' ? secondRound : current, observations.data)}
     </>
   );
 }

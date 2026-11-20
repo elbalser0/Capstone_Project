@@ -26,6 +26,7 @@ import {
 } from '../rules';
 import type { EvalCycleRow, ObservationRequestRow, ProfessorRow } from '../schema';
 import {
+  activeObservationOfSignup,
   currentCycleRow,
   currentTerm,
   cycle,
@@ -50,6 +51,12 @@ import {
 
 /** A pending request past its 48 hours reads as expired. */
 const requestStatus = (r: ObservationRequestRow) => (r.status === 'pending' && requestExpiresAt(r.sent_date) <= now() ? 'expired' : r.status);
+/**
+ * A request that no longer counts: declined, cancelled, expired, or accepted by an observer whose observation
+ * was then reported as not done (backend #249), so the observee can ask the others again.
+ */
+const requestEnded = (r: ObservationRequestRow) => ['declined', 'cancelled', 'expired'].includes(requestStatus(r))
+  || (r.status === 'accepted' && db.observation.some((o) => o.signup_id === r.signup_id && o.observer_netid === r.observer_netid && o.status === 'not_completed'));
 
 const toRequest = (r: ObservationRequestRow): ObservationRequest => {
   const s = signupRow(r.signup_id)!;
@@ -151,7 +158,7 @@ export const facultyHandlers = [
       .filter((m) => m.signup_id === s.signup_id)
       .filter((m) => {
         const r = db.observation_request.find((x) => x.signup_id === s.signup_id && x.observer_netid === m.observer_netid);
-        return !r || !['declined', 'cancelled', 'expired'].includes(requestStatus(r));
+        return !r || !requestEnded(r);
       })
       .map((m) => {
         const r = db.observation_request.find((x) => x.signup_id === s.signup_id && x.observer_netid === m.observer_netid);
@@ -169,13 +176,13 @@ export const facultyHandlers = [
   http.post('/api/signups/:signupId/requests', async ({ request, params }) => {
     const me = signedIn(request);
     const s = ownSignup(params, me);
-    if (db.observation.some((o) => o.signup_id === s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'You are already paired with an observer.');
+    if (activeObservationOfSignup(s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'You are already paired with an observer.');
     const input = ((await request.json().catch(() => ({}))) ?? {}) as SendRequestsInput;
     const candidates = db.observer_match
       .filter((m) => m.signup_id === s.signup_id)
       .filter((m) => {
         const r = db.observation_request.find((x) => x.signup_id === s.signup_id && x.observer_netid === m.observer_netid);
-        return !r || !['declined', 'cancelled', 'expired'].includes(requestStatus(r));
+        return !r || !requestEnded(r);
       })
       .map((m) => m.observer_netid);
     const targets = input.observerNetids?.length ? input.observerNetids : candidates;
@@ -322,7 +329,7 @@ export const facultyHandlers = [
     const me = signedIn(request);
     const r = pendingRequestTo(params, me);
     const s = signupRow(r.signup_id)!;
-    if (db.observation.some((o) => o.signup_id === s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'Someone else accepted first.');
+    if (activeObservationOfSignup(s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'Someone else accepted first.');
     if (!isEligible(checkEligibility(db, s, me.netid))) {
       return acceptedCount(db, me.netid, s.cycle_id) >= MAX_ACCEPTED
         ? fail(409, 'LIMIT_REACHED', `You have already accepted ${MAX_ACCEPTED} observations this semester.`)

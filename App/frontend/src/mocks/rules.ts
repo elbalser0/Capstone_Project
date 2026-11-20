@@ -142,7 +142,9 @@ function levelsTaught(db: Db, netid: string, termId: string): Set<number> {
 /** Accepted (confirmed) observations an observer has in a cycle. */
 export function acceptedCount(db: Db, observerNetid: string, cycleId: string) {
   return db.observation.filter(
-    (o) => o.observer_netid === observerNetid && db.sign_up.find((s) => s.signup_id === o.signup_id)?.cycle_id === cycleId,
+    // An observation reported as not done does not count toward the limit (backend #249).
+    (o) => o.observer_netid === observerNetid && o.status !== 'not_completed'
+      && db.sign_up.find((s) => s.signup_id === o.signup_id)?.cycle_id === cycleId,
   ).length;
 }
 

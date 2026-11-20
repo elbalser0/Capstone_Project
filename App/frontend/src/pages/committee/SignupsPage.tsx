@@ -28,7 +28,11 @@ const ALERT_TAG: Record<AlertType, [TagTone, string]> = {
 
 const observers = (n: number) => `${n} observer${n === 1 ? '' : 's'}`;
 
-function attentionText(rows: MatchingRow[]) {
+/** A sign-up whose observation was reported as not done has no observer now and can be paired again (backend #249). */
+const MISSED_TAG = 'Observation did not happen';
+
+function attentionText(rows: MatchingRow[], missed: Set<string>) {
+  const gone = rows.filter((r) => !r.alert && missed.has(r.signupId)).length;
   const none = rows.filter((r) => r.alert?.alertType === 'no_observer').length;
   const few = rows.filter((r) => r.alert?.alertType === 'insufficient_observers');
   const nobody = rows.filter((r) => r.alert?.alertType === 'no_acceptance').length;
@@ -36,12 +40,13 @@ function attentionText(rows: MatchingRow[]) {
     [none, 'with no observer'],
     [few.length, few.length === 1 ? `with only ${observers(few[0].candidates.length)}` : `with fewer than ${ENOUGH} observers`],
     [nobody, 'where nobody accepted'],
+    [gone, 'where the observation did not happen'],
   ]);
   const n = rows.length;
   return `${n} sign-up${n === 1 ? ' needs' : 's need'} attention: ${parts}.`;
 }
 
-function ObserversFound({ row, ran, pairedWith }: { row: MatchingRow; ran: boolean; pairedWith?: string }) {
+function ObserversFound({ row, ran, pairedWith, missed }: { row: MatchingRow; ran: boolean; pairedWith?: string; missed: boolean }) {
   const n = row.candidates.length;
   const type = row.alert?.alertType;
   return (
@@ -49,8 +54,10 @@ function ObserversFound({ row, ran, pairedWith }: { row: MatchingRow; ran: boole
       {ran ? <span className="font-bold">{n === 0 ? '0' : `${n} of ${LIST_SIZE}`}</span> : <span className="text-gray-500">Not run yet</span>}
       {pairedWith ? (
         <Tag wrap tone="signed" icon={<CheckIcon width={10} height={8} />}>Paired with {pairedWith}</Tag>
+      ) : type ? (
+        <Tag wrap tone={ALERT_TAG[type][0]} icon={<AlertIcon width={10.5} height={9.5} />}>{ALERT_TAG[type][1]}</Tag>
       ) : (
-        type && <Tag wrap tone={ALERT_TAG[type][0]} icon={<AlertIcon width={10.5} height={9.5} />}>{ALERT_TAG[type][1]}</Tag>
+        missed && <Tag wrap tone="overdue" icon={<AlertIcon width={10.5} height={9.5} />}>{MISSED_TAG}</Tag>
       )}
     </span>
   );
@@ -253,12 +260,14 @@ export function SignupsPage() {
 
   // A sign-up that already has its observation is paired. The backend leaves the alert it raised before
   // the pairing open, so it is ignored here, the same way Dashboard > Unmatched leaves paired sign-ups out.
-  const pairedWith = new Map(signups.data?.flatMap((s) => (s.observation ? [[s.signupId, s.observation.observer.displayName] as const] : [])));
+  // An observation reported as not done does not count: the sign-up is unpaired again and can get a new observer.
+  const pairedWith = new Map(signups.data?.flatMap((s) => (s.observation && s.observation.status !== 'not_completed' ? [[s.signupId, s.observation.observer.displayName] as const] : [])));
+  const missed = new Set(signups.data?.flatMap((s) => (s.observation?.status === 'not_completed' ? [s.signupId] : [])));
   // Until the sign-ups have loaded, paired sign-ups can't be told apart, so the banner waits instead of flashing a stale
   // count. If they fail to load, the banner stays away and a note says why.
   const signupsSettled = Boolean(signups.data);
   const all = withUnmatchedReason(matching.data ?? [], unmatched.data).map((r) => (pairedWith.has(r.signupId) && r.alert ? { ...r, alert: null } : r));
-  const attention = all.filter((r) => r.alert);
+  const attention = all.filter((r) => r.alert || missed.has(r.signupId));
   // Once nothing needs attention any more (for example after an observer is added), the full list is shown.
   const filtered = onlyAttention && attention.length > 0;
   const rows = filtered ? attention : all;
@@ -321,7 +330,7 @@ export function SignupsPage() {
               </button>
             }
           >
-            {attentionText(attention)}
+            {attentionText(attention, missed)}
           </Banner>
           <p className="mt-2 text-[13px] text-gray-500">{UNMATCHED_TEXT}</p>
         </div>
@@ -368,8 +377,8 @@ export function SignupsPage() {
                 <Cell className="truncate text-gray-500">{email.get(r.signupId)}</Cell>
                 <Cell>
                   <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <ObserversFound row={r} ran={ran} pairedWith={pairedWith.get(r.signupId)} />
-                    {r.alert && (
+                    <ObserversFound row={r} ran={ran} pairedWith={pairedWith.get(r.signupId)} missed={missed.has(r.signupId)} />
+                    {(r.alert || missed.has(r.signupId)) && (
                       <button type="button" className={`${linkClass} text-[13px]`} aria-label={`Add an observer for ${r.observee.displayName}`} onClick={() => setAdding(r)}>
                         <PlusIcon width={10} height={10} /> Add observer
                       </button>

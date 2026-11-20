@@ -179,6 +179,21 @@ describe('click-test mock fixes', () => {
     expect(await error(await add('nobody1'))).toBe('CANDIDATE_NOT_FOUND');
   });
 
+  it('pairs a sign-up again after its observation is reported as not done', async () => {
+    const o = schedule(db.meta.today, { status: 'not_completed', reason_not_completed: 'Class was cancelled' });
+    db.observation_request.push({ signup_id: o.signup_id, observer_netid: OBSERVER, status: 'accepted', sent_date: '2026-09-15T12:00:00.000Z', responded_date: '2026-09-15T13:00:00.000Z' });
+    db.observer_match.push({ signup_id: o.signup_id, observer_netid: OBSERVER, round_no: 1 } as (typeof db.observer_match)[number]);
+    const someone = db.professor.find((p) => p.is_active && p.netid !== OBSERVEE && p.netid !== OBSERVER && !db.observer_match.some((m) => m.signup_id === o.signup_id && m.observer_netid === p.netid))!;
+    expect((await call(AC, `/api/signups/${o.signup_id}/candidates`, { method: 'POST', body: { observerNetid: someone.netid } })).status).toBe(201);
+
+    const mine = (await (await call(OBSERVEE_EMAIL(), '/api/me/signup')).json()) as { observation: { status: string } | null };
+    expect(mine.observation?.status).toBe('not_completed');
+    const list = (await (await call(OBSERVEE_EMAIL(), `/api/signups/${o.signup_id}/candidates`)).json()) as { observer: { netid: string } }[];
+    expect(list.map((c) => c.observer.netid)).toContain(someone.netid);
+    expect(list.map((c) => c.observer.netid)).not.toContain(OBSERVER);
+    expect((await call(OBSERVEE_EMAIL(), `/api/signups/${o.signup_id}/requests`, { method: 'POST', body: { observerNetids: [someone.netid] } })).status).toBe(201);
+  });
+
   it('sends no due reminder to a professor who already signed up', async () => {
     const signedUp = db.sign_up.filter((x) => x.cycle_id === 'C-FA26').map((x) => x.observee_netid);
     expect(db.eval_due.some((d) => d.cycle_id === 'C-FA26' && signedUp.includes(d.netid))).toBe(true);
