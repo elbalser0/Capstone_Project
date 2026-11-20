@@ -23,7 +23,7 @@ const never = () => new Promise<never>(() => {});
 
 const roster: FacultyStatus[] = [
   facultyStatus('a1', 'Ana', 'DUE', { lastObservedTerm: { ...term, termId: '0', label: 'Fall 2025', year: 2025 } }),
-  facultyStatus('b1', 'Ben', 'DUE'),
+  facultyStatus('b1', 'Ben', 'DUE', { observedThisCycle: true }),
   facultyStatus('c1', 'Cy', 'OVERDUE', { dueTerm: { ...nextTerm, label: 'Spring 2026' } }),
   facultyStatus('d1', 'Dee', 'NOT_DUE', { dueTerm: nextTerm }),
 ];
@@ -167,16 +167,26 @@ describe('Faculty page: full list', () => {
     expect(screen.getByText('Nobody matches.')).toBeVisible();
   });
 
+  it('marks a professor observed this cycle next to the status from kickoff', async () => {
+    serve();
+    open();
+    const ben = (await screen.findByText('Dr. Ben Test')).closest('[role="row"]') as HTMLElement;
+    expect(within(ben).getByText('DUE')).toBeVisible();
+    expect(within(ben).getByText('Observed this cycle')).toBeVisible();
+    const ana = screen.getByText('Dr. Ana Test').closest('[role="row"]') as HTMLElement;
+    expect(within(ana).queryByText('Observed this cycle')).not.toBeInTheDocument();
+  });
+
   it('exports the shown rows with email and due semester', async () => {
     serve();
     open();
     await screen.findByText('Dr. Ana Test');
     await user().click(screen.getByRole('button', { name: /Export/ }));
     expect(downloadCsv).toHaveBeenCalledWith('faculty', 'Fall 2026', [
-      ['name', 'email', 'rank', 'department', 'last_observed', 'due_semester', 'status'],
-      ['Dr. Ana Test', 'a1@demo.edu', 'Assistant', 'Computer Science', 'Fall 2025', 'Fall 2026', 'DUE'],
-      ['Dr. Ben Test', 'b1@demo.edu', 'Assistant', 'Computer Science', 'Not observed yet', 'Fall 2026', 'DUE'],
-      ['Dr. Cy Test', 'c1@demo.edu', 'Assistant', 'Computer Science', 'Not observed yet', 'Spring 2026', 'OVERDUE'],
+      ['name', 'email', 'rank', 'department', 'last_observed', 'due_semester', 'status', 'observed_this_cycle'],
+      ['Dr. Ana Test', 'a1@demo.edu', 'Assistant', 'Computer Science', 'Fall 2025', 'Fall 2026', 'DUE', 'no'],
+      ['Dr. Ben Test', 'b1@demo.edu', 'Assistant', 'Computer Science', 'Not observed yet', 'Fall 2026', 'DUE', 'yes'],
+      ['Dr. Cy Test', 'c1@demo.edu', 'Assistant', 'Computer Science', 'Not observed yet', 'Spring 2026', 'OVERDUE', 'no'],
     ]);
   });
 
