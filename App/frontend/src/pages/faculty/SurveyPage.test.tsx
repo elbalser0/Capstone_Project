@@ -9,7 +9,10 @@ import { SurveyPage } from './SurveyPage';
 
 const cycle = { cycleId: '4', term: { label: 'Fall 2026' }, phase: 'feedback', surveyOpensDate: '2026-10-01', feedbackDeadline: '2026-11-10' };
 const route = () => renderRoutes([{ path: '/faculty/survey', element: <SurveyPage /> }], '/faculty/survey');
-function current(value: typeof cycle | null = cycle) { server.use(http.get('*/api/cycles/current', () => HttpResponse.json(value))); }
+const both = { cycleId: '4', open: true, opensDate: '2026-10-01', closesDate: '2026-11-10', eligibleRoles: ['observee', 'observer'], submittedRoles: [] as string[] };
+function mySurvey(value: Partial<typeof both> = {}) { server.use(http.get('*/api/me/survey', () => HttpResponse.json({ ...both, ...value }))); }
+/** The current cycle, and by default a professor who took part in both roles and has submitted nothing yet. */
+function current(value: typeof cycle | null = cycle) { server.use(http.get('*/api/cycles/current', () => HttpResponse.json(value))); mySurvey(); }
 async function fillSurvey() {
   const user = userEvent.setup();
   await user.click(await screen.findByRole('radio', { name: 'observer' }));
@@ -60,7 +63,7 @@ it('recovers from a cycle-load error without calling it an empty result', async 
   server.use(http.get('*/api/cycles/current', () => ++attempts === 1
     ? HttpResponse.json({ error: { code: 'UNAVAILABLE', message: 'Cycle unavailable' } }, { status: 503 })
     : HttpResponse.json(cycle)));
-  route();
+  mySurvey(); route();
   expect(await screen.findByRole('alert')).toHaveTextContent('Cycle unavailable');
   expect(screen.queryByText('No current cycle is available.')).not.toBeInTheDocument();
   await userEvent.setup().click(screen.getByRole('button', { name: 'Try again' }));
@@ -120,6 +123,42 @@ it('rejects oversized files before sending and permits retry with a valid attach
   expect(received.mock.calls[0][0]).toContain('name="troubleFile"');
 });
 
+it('asks the server which roles were already submitted, so a reload keeps them marked', async () => {
+  current(); const asked = vi.fn();
+  server.use(http.get('*/api/me/survey', ({ request }) => { asked(new URL(request.url).searchParams.get('cycleId')); return HttpResponse.json({ ...both, submittedRoles: ['observer'] }); }));
+  route();
+  expect(await screen.findByRole('radio', { name: 'observer (submitted)' })).toBeDisabled();
+  expect(asked).toHaveBeenCalledWith('4');
+  // Only observee is left, so it is picked already.
+  expect(screen.getByRole('radio', { name: 'observee' })).toBeChecked();
+});
+it('offers only the roles the server accepts', async () => {
+  current(); mySurvey({ eligibleRoles: ['observee'] });
+  route();
+  expect(await screen.findByRole('radio', { name: 'observee' })).toBeChecked();
+  expect(screen.queryByRole('radio', { name: /observer/ })).not.toBeInTheDocument();
+  expect(screen.getByText('One response as observee.')).toBeVisible();
+});
+it('says thank you instead of showing the form once every role is in', async () => {
+  current(); mySurvey({ submittedRoles: ['observee', 'observer'] });
+  route();
+  expect(await screen.findByText('You have submitted the survey for both of your roles. Thank you.')).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Submit survey' })).not.toBeInTheDocument();
+});
+it('says there is no survey for someone who took part in neither role', async () => {
+  current(); mySurvey({ eligibleRoles: [] });
+  route();
+  expect(await screen.findByText(/You were not an observee or an observer in this cycle/)).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Submit survey' })).not.toBeInTheDocument();
+});
+it('falls back to both roles with a note when the status read fails', async () => {
+  current(); server.use(http.get('*/api/me/survey', () => HttpResponse.json({ error: { code: 'UNAVAILABLE', message: 'Status down' } }, { status: 503 })));
+  route();
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't check which roles you already submitted");
+  expect(screen.getByRole('radio', { name: 'observer' })).toBeEnabled();
+  expect(screen.getByRole('radio', { name: 'observee' })).toBeEnabled();
+});
+
 const timing = 'The survey opens after the observation deadline. It does not wait for signatures.';
 it('shows the intro, numbered questions, the closing date and the timing note while the survey is open', async () => {
   current({ ...cycle, term: { label: 'Fall 2026', termId: '1' } } as typeof cycle); route();
@@ -127,7 +166,7 @@ it('shows the intro, numbered questions, the closing date and the timing note wh
   expect(screen.getByText(timing)).toBeVisible();
   expect(screen.getByText('Survey closes')).toBeVisible();
   expect(screen.getByText('Nov 10, 2026', { selector: 'p' })).toBeVisible();
-  expect(screen.getByText(/^1\. /)).toBeVisible();
+  expect(await screen.findByText(/^1\. /)).toBeVisible();
   expect(screen.getByText(/^2\. Difficulties/)).toBeVisible();
   expect(screen.getByText(/^3\. Additional feedback/)).toBeVisible();
 });

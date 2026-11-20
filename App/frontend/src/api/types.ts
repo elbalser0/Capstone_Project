@@ -288,6 +288,17 @@ export interface SurveyInput {
   troubleFile?: File;
 }
 
+/** GET /api/me/survey?cycleId=: which survey roles the signed-in professor can submit, and which are already in. */
+export interface MySurveyStatus {
+  cycleId: string;
+  open: boolean;
+  opensDate: IsoDate;
+  closesDate: IsoDate;
+  /** Observee if they signed up in the cycle, observer if they have an observation in it. */
+  eligibleRoles: SurveyInput['respondentRole'][];
+  submittedRoles: SurveyInput['respondentRole'][];
+}
+
 // ---------- Faculty: observer ----------
 
 /** PATCH /api/signups/{signupId}/requests/{observerNetId}/confirm */

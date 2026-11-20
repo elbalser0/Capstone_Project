@@ -130,6 +130,17 @@ describe('survey', () => {
     expect((await survey('observer')).status).toBe(201);
   });
 
+  it('reports the roles the survey accepts and the ones already in, like GET /api/me/survey', async () => {
+    db.meta.today = '2026-11-10';
+    const status = async () => (await (await call(OBSERVEE_EMAIL(), '/api/me/survey?cycleId=C-FA26')).json()) as { open: boolean; eligibleRoles: string[]; submittedRoles: string[] };
+    const before = await status();
+    expect(before.open).toBe(true);
+    expect(before.eligibleRoles).toContain('observee');
+    expect(before.submittedRoles).toEqual([]);
+    expect((await survey('observee')).status).toBe(201);
+    expect((await status()).submittedRoles).toEqual(['observee']);
+  });
+
   it('lets only the committee download a response file, and answers 404 when there is none', async () => {
     const withFile: SurveyResponseRow = { response_id: 'SR-T1', cycle_id: 'C-FA26', respondent_id: OBSERVEE, respondent_role: 'observee', process_ok: false, difficulties: '', additional_feedback: '', trouble_file_key: 'uploads/SR-T1/notes.txt', submitted_date: db.meta.today };
     db.survey_response.push(withFile, { ...withFile, response_id: 'SR-T2', trouble_file_key: null });

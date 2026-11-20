@@ -248,6 +248,31 @@ export const facultyHandlers = [
     return HttpResponse.json(observationDetail(o));
   }),
 
+  // GET /api/me/survey?cycleId=: same roles as the backend: observee if signed up in the cycle,
+  // observer if they have an observation in it (any status).
+  http.get('/api/me/survey', ({ request }) => {
+    const me = signedIn(request);
+    const id = new URL(request.url).searchParams.get('cycleId') ?? '';
+    // Demo cycle ids are not numbers (C-FA26), so only a missing one is refused here.
+    if (!id) return fail(400, 'INVALID_CYCLE_ID', 'cycleId is required.');
+    const c = cycleOr404(id);
+    const signups = db.sign_up.filter((s) => s.cycle_id === c.cycle_id);
+    const roles = {
+      observee: signups.some((s) => s.observee_netid === me.netid),
+      observer: db.observation.some((o) => o.observer_netid === me.netid && signups.some((s) => s.signup_id === o.signup_id)),
+    };
+    const submitted = new Set(db.survey_response.filter((r) => r.cycle_id === c.cycle_id && r.respondent_id === me.netid).map((r) => r.respondent_role));
+    const order = ['observee', 'observer'] as const;
+    return HttpResponse.json({
+      cycleId: c.cycle_id,
+      open: cyclePhase(db, c, today()) === 'feedback',
+      opensDate: surveyOpensDate(c),
+      closesDate: c.feedback_deadline,
+      eligibleRoles: order.filter((r) => roles[r]),
+      submittedRoles: order.filter((r) => submitted.has(r)),
+    });
+  }),
+
   http.post('/api/cycles/:cycleId/survey-responses', async ({ request, params }) => {
     const me = signedIn(request);
     const c = cycleOr404(params.cycleId);

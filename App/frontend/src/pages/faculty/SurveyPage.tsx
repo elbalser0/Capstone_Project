@@ -1,6 +1,6 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../../api/client';
-import { useMyObservations, useSubmitSurvey } from '../../api/hooks/faculty';
+import { useMyObservations, useMySurveyStatus, useSubmitSurvey } from '../../api/hooks/faculty';
 import { useCurrentCycle } from '../../api/hooks/shared';
 import type { Cycle, SurveyInput } from '../../api/types';
 import { Button, Card, ErrorNote, LockedTag, Tag } from '../../components/ui';
@@ -33,11 +33,47 @@ function SurveySummary({ cycle }: { cycle: Cycle }) {
   );
 }
 
+type Role = SurveyInput['respondentRole'];
+const ROLES: Role[] = ['observer', 'observee'];
+
+/**
+ * Reads GET /api/me/survey first, so roles already submitted stay marked after a reload or on another
+ * device, and only the roles the server accepts are offered. If that read fails, both roles are offered
+ * and the server still refuses a duplicate or a role the professor did not have.
+ */
 function SurveyForm({ cycleId }: { cycleId: string }) {
+  const status = useMySurveyStatus(cycleId);
+  if (status.isPending) return <Card className="min-w-0 px-6 py-6"><p role="status" className="text-sm text-gray-500">Loading your survey status…</p></Card>;
+  const eligible = status.data ? ROLES.filter((r) => status.data.eligibleRoles.includes(r)) : ROLES;
+  if (status.data && eligible.length === 0) {
+    return (
+      <Card className="min-w-0 px-6 py-6">
+        <h2 className="text-lg font-bold">End-of-process survey</h2>
+        <p className="mt-2 text-sm text-gray-600">You were not an observee or an observer in this cycle, so there is no survey for you to fill in.</p>
+      </Card>
+    );
+  }
+  return (
+    <SurveyFormBody
+      cycleId={cycleId}
+      eligible={eligible}
+      serverSubmitted={status.data?.submittedRoles ?? []}
+      // A failed refresh keeps the last answer on screen, so the note is only for a read that never loaded.
+      statusNote={status.error && !status.data ? (
+        <div className="mt-4 flex flex-col items-start gap-2">
+          <ErrorNote error={new Error(`Couldn't check which roles you already submitted, so both roles are shown. ${status.error.message}`.trim())} className="self-stretch" />
+          <Button type="button" variant="secondary" size="sm" onClick={() => void status.refetch()}>Try again</Button>
+        </div>
+      ) : null}
+    />
+  );
+}
+
+function SurveyFormBody({ cycleId, eligible, serverSubmitted, statusNote }: { cycleId: string; eligible: Role[]; serverSubmitted: Role[]; statusNote: ReactNode }) {
   const submit = useSubmitSurvey(cycleId);
   const busy = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [role, setRole] = useState<SurveyInput['respondentRole'] | ''>('');
+  const [picked, setRole] = useState<Role | ''>('');
   const [processOk, setProcessOk] = useState<boolean | null>(null);
   const [difficulties, setDifficulties] = useState('');
   const [additionalFeedback, setAdditionalFeedback] = useState('');
@@ -45,7 +81,12 @@ function SurveyForm({ cycleId }: { cycleId: string }) {
   const [fileError, setFileError] = useState('');
   const [successRole, setSuccessRole] = useState<SurveyInput['respondentRole'] | null>(null);
   const [alreadyRole, setAlreadyRole] = useState<SurveyInput['respondentRole'] | null>(null);
-  const [submittedRoles, setSubmittedRoles] = useState<SurveyInput['respondentRole'][]>([]);
+  const [localSubmitted, setSubmittedRoles] = useState<Role[]>([]);
+  // The server's list after a reload, plus anything submitted on this page before the status read refreshes.
+  const submittedRoles = [...new Set([...serverSubmitted, ...localSubmitted])];
+  const remaining = eligible.filter((r) => !submittedRoles.includes(r));
+  // With one role left there is nothing to choose, so it is picked already.
+  const role: Role | '' = picked && remaining.includes(picked) ? picked : remaining.length === 1 ? remaining[0] : '';
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -91,15 +132,19 @@ function SurveyForm({ cycleId }: { cycleId: string }) {
   return (
     <Card className="min-w-0 px-6 py-6">
       <h2 className="text-lg font-bold">End-of-process survey</h2>
-      <p className="mt-2 text-sm text-gray-600">One response per role. If you participated in both roles, submit each separately.</p>
+      <p className="mt-2 text-sm text-gray-600">{eligible.length > 1 ? 'One response per role. You took part in both roles, so submit each separately.' : `One response as ${eligible[0]}.`}</p>
+      {statusNote}
       {successRole && <p role="status" className="mt-4 rounded-md bg-green-100 px-4 py-3 text-sm text-green-900">Your {successRole} response was submitted.</p>}
       {alreadyRole && <p role="status" className="mt-4 rounded-md bg-green-100 px-4 py-3 text-sm text-green-900">You already submitted the survey as {alreadyRole}.</p>}
       {message && <ErrorNote error={new Error(message)} className="mt-4" />}
+      {remaining.length === 0 ? (
+        <p role="status" className="mt-4 text-sm text-gray-900">You have submitted the survey for {eligible.length > 1 ? 'both of your roles' : `your role as ${eligible[0]}`}. Thank you.</p>
+      ) : (
       <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-5">
         <fieldset disabled={submit.isPending} className="contents">
         <fieldset>
           <legend className="text-sm font-bold">Your role in this cycle *</legend>
-          {(['observer', 'observee'] as const).map((value) => (
+          {eligible.map((value) => (
             <label key={value} className="mt-2 mr-5 inline-flex items-center gap-2 text-sm capitalize">
               <input type="radio" name="respondentRole" value={value} required checked={role === value} disabled={submittedRoles.includes(value)} onChange={() => { setRole(value); submit.reset(); }} />{value}{submittedRoles.includes(value) ? ' (submitted)' : ''}
             </label>
@@ -132,6 +177,7 @@ function SurveyForm({ cycleId }: { cycleId: string }) {
           {submit.isPending ? 'Submitting…' : 'Submit survey'}
         </Button>
       </form>
+      )}
     </Card>
   );
 }
