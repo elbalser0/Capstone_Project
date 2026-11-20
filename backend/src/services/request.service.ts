@@ -226,12 +226,57 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
       noCandidates = true;
       return;
     }
-    const targets = observerNetids?.length ? observerNetids : [...candidates];
+    const explicitlySelected = Boolean(observerNetids?.length);
+    const targets = explicitlySelected ? observerNetids! : [...candidates];
     if (targets.some((id) => !candidates.has(id))) {
       throw new ApiError(400, 'NOT_A_CANDIDATE', 'Requests can only go to observers on your list.');
     }
 
-    for (const observerNetid of targets) {
+    const conflicts = await client.query<{ observer_netid: string }>(`
+      SELECT target.observer_netid
+      FROM unnest($2::text[]) AS target(observer_netid)
+      WHERE NOT EXISTS (
+        SELECT 1 FROM proposed_date AS proposed
+        WHERE proposed.signup_id = $1
+          AND NOT EXISTS (
+            SELECT 1
+            FROM sign_up AS target_signup
+            JOIN section AS observee_section ON observee_section.section_id = target_signup.section_id
+            JOIN meeting_time AS observee_meeting ON observee_meeting.section_id = observee_section.section_id
+              AND observee_meeting.day_of_week = lower(trim(to_char(proposed.date, 'FMDay')))
+            JOIN section AS observer_section ON observer_section.instructor_id = target.observer_netid
+              AND observer_section.term_id = observee_section.term_id
+            JOIN meeting_time AS observer_meeting ON observer_meeting.section_id = observer_section.section_id
+              AND observer_meeting.day_of_week = observee_meeting.day_of_week
+              AND observer_meeting.start_time < observee_meeting.end_time
+              AND observee_meeting.start_time < observer_meeting.end_time
+            WHERE target_signup.signup_id = $1
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM sign_up AS target_signup
+            JOIN meeting_time AS target_meeting ON target_meeting.section_id = target_signup.section_id
+              AND target_meeting.day_of_week = lower(trim(to_char(proposed.date, 'FMDay')))
+            JOIN observation AS booked ON booked.observer_netid = target.observer_netid
+              AND booked.signup_id <> target_signup.signup_id AND booked.scheduled_date = proposed.date
+              AND booked.status <> 'not_completed'
+            JOIN sign_up AS booked_signup ON booked_signup.signup_id = booked.signup_id
+            JOIN meeting_time AS booked_meeting ON booked_meeting.section_id = booked_signup.section_id
+              AND booked_meeting.day_of_week = target_meeting.day_of_week
+              AND booked_meeting.start_time < target_meeting.end_time
+              AND target_meeting.start_time < booked_meeting.end_time
+            WHERE target_signup.signup_id = $1
+          )
+      )
+    `, [signupId, targets]);
+    const conflicting = new Set(conflicts.rows.map((row) => row.observer_netid));
+    const requestTargets = targets.filter((id) => !conflicting.has(id));
+    if (conflicting.size && (explicitlySelected || requestTargets.length === 0)) {
+      const ids = [...conflicting].join(', ');
+      throw new ApiError(409, 'NO_AVAILABLE_DATES', `No proposed date is available for observer(s): ${ids}. Remove them or add another candidate.`);
+    }
+
+    for (const observerNetid of requestTargets) {
       const inserted = await client.query(`
         INSERT INTO observation_request (signup_id, observer_netid, status, sent_date)
         VALUES ($1, $2, 'pending', now())
