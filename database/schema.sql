@@ -322,7 +322,7 @@ CREATE TABLE public.template_question (
 CREATE TABLE public.observation (
     observation_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
-    signup_id INTEGER NOT NULL UNIQUE
+    signup_id INTEGER NOT NULL
         REFERENCES public.sign_up(signup_id),
 
     observer_netid TEXT NOT NULL
@@ -372,6 +372,10 @@ CREATE TABLE public.observation (
         OR NULLIF(BTRIM(reason_not_completed), '') IS NOT NULL
     )
 );
+
+CREATE UNIQUE INDEX observation_one_active_per_signup
+ON public.observation (signup_id)
+WHERE status <> 'not_completed';
 
 CREATE TABLE public.observation_answer (
     observation_id INTEGER NOT NULL

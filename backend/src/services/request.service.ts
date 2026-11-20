@@ -94,7 +94,11 @@ export function noUsableCandidatesSql(signupIdSql: string) {
         SELECT 1 FROM observation_request AS r
         WHERE r.signup_id = m.signup_id AND r.observer_netid = m.observer_netid
           AND (r.status IN ('declined', 'cancelled', 'expired')
-               OR (r.status = 'pending' AND r.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS})))
+               OR (r.status = 'pending' AND r.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS}))
+               OR (r.status = 'accepted' AND EXISTS (
+                 SELECT 1 FROM observation AS missed
+                 WHERE missed.signup_id = r.signup_id AND missed.observer_netid = r.observer_netid
+                   AND missed.status = 'not_completed')))
       )
   )`;
 }
@@ -111,7 +115,7 @@ export async function raiseNoAcceptanceAlert(client: PoolClient, signupId: numbe
   const result = await client.query(`
     SELECT 1
     WHERE EXISTS (SELECT 1 FROM observation_request WHERE signup_id = $1)
-      AND NOT EXISTS (SELECT 1 FROM observation WHERE signup_id = $1)
+      AND NOT EXISTS (SELECT 1 FROM observation WHERE signup_id = $1 AND status <> 'not_completed')
       AND ${noUsableCandidatesSql('$1')}
       AND NOT EXISTS (
         SELECT 1 FROM alert AS dismissed
@@ -207,7 +211,7 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
       throw new ApiError(409, 'OBSERVATION_CLOSED', 'The observation deadline has passed.');
     }
 
-    const paired = await client.query('SELECT 1 FROM observation WHERE signup_id = $1', [signupId]);
+    const paired = await client.query("SELECT 1 FROM observation WHERE signup_id = $1 AND status <> 'not_completed'", [signupId]);
     if (paired.rowCount) throw new ApiError(409, 'ALREADY_PAIRED', 'You are already paired with an observer.');
 
     const { rows } = await client.query<{ observer_netid: string }>(
@@ -218,7 +222,11 @@ export async function sendRequests(signupId: number, observeeNetid: string, obse
            WHERE ended.signup_id = m.signup_id AND ended.observer_netid = m.observer_netid
              AND (ended.status IN ('declined', 'cancelled', 'expired')
                   OR (ended.status = 'pending'
-                      AND ended.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS})))
+                      AND ended.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS}))
+                  OR (ended.status = 'accepted' AND EXISTS (
+                    SELECT 1 FROM observation AS missed
+                    WHERE missed.signup_id = ended.signup_id AND missed.observer_netid = ended.observer_netid
+                      AND missed.status = 'not_completed')))
          )`, [signupId]);
     const candidates = new Set(rows.map((row) => row.observer_netid));
     if (!candidates.size) {
@@ -268,7 +276,7 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
     // The pairing and the limit are checked before the request status: both cancel other
     // requests, so the observer would otherwise only ever see "This request is cancelled."
     const paired = await client.query<{ observer_netid: string }>(
-      'SELECT observer_netid FROM observation WHERE signup_id = $1', [signupId]);
+      "SELECT observer_netid FROM observation WHERE signup_id = $1 AND status <> 'not_completed'", [signupId]);
     const pairedWithMe = paired.rows[0]?.observer_netid === observerNetid;
     if (paired.rows[0] && !pairedWithMe) {
       throw new ApiError(409, 'ALREADY_PAIRED', 'Someone else accepted first.');
@@ -277,7 +285,7 @@ export async function confirmRequest(signupId: number, observerNetid: string, da
     const accepted = await client.query<{ count: number }>(`
       SELECT count(*)::int AS count FROM observation AS o
       JOIN sign_up AS s ON s.signup_id = o.signup_id
-      WHERE o.observer_netid = $1 AND s.cycle_id = $2
+      WHERE o.observer_netid = $1 AND s.cycle_id = $2 AND o.status <> 'not_completed'
     `, [observerNetid, cycleId]);
     const acceptedCount = accepted.rows[0].count;
     if (!pairedWithMe && acceptedCount >= MAX_ACCEPTED) {

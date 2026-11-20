@@ -79,7 +79,11 @@ export async function listSignupCandidates(signupId: number, netid: string) {
         WHERE ended.signup_id = m.signup_id AND ended.observer_netid = m.observer_netid
           AND (ended.status IN ('declined', 'cancelled', 'expired')
                OR (ended.status = 'pending'
-                   AND ended.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS})))
+                   AND ended.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS}))
+               OR (ended.status = 'accepted' AND EXISTS (
+                 SELECT 1 FROM observation AS missed
+                 WHERE missed.signup_id = ended.signup_id AND missed.observer_netid = ended.observer_netid
+                   AND missed.status = 'not_completed')))
       )
     LEFT JOIN professor AS p ON p.netid = m.observer_netid
     LEFT JOIN observation_request AS r ON r.signup_id = m.signup_id AND r.observer_netid = m.observer_netid

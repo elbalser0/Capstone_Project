@@ -95,7 +95,10 @@ export async function listCycleSignups(cycleId: number) {
     JOIN department AS dept ON dept.dept_id = course.dept_id
     JOIN term ON term.term_id = sec.term_id
     LEFT JOIN meeting_time AS meeting ON meeting.section_id = sec.section_id
-    LEFT JOIN observation AS o ON o.signup_id = s.signup_id
+    LEFT JOIN LATERAL (
+      SELECT * FROM observation WHERE signup_id = s.signup_id
+      ORDER BY observation_id DESC LIMIT 1
+    ) AS o ON true
     LEFT JOIN professor AS observer ON observer.netid = o.observer_netid
     WHERE s.cycle_id = $1
     ORDER BY s.signup_id, meeting.day_of_week, meeting.start_time
