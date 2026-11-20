@@ -175,7 +175,7 @@ export function useUnmatchedFaculty() {
   return useQuery({ queryKey: committeeKeys.unmatched, queryFn: () => api<UnmatchedFaculty>('/dashboard/unmatched') });
 }
 
-/** POST /api/observations/{observationId}/forward: email a read-only link to a signed record. */
+/** POST /api/observations/{observationId}/forward: email a signed record as text. */
 export function useForwardObservation() {
   return useMutation({
     mutationFn: ({ observationId, ...input }: ForwardInput & { observationId: string }) =>
