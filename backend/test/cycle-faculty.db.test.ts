@@ -89,7 +89,7 @@ describe('cycle faculty list against the database', { skip }, () => {
   async function getFaculty(role: Role, cycleId = '1') {
     return fetch(`${base}/api/cycles/${cycleId}/faculty`, { headers: { 'x-test-role': role } });
   }
-  type Row = { professor: { netid: string; email: string }; dueStatus: string; lastObservedTerm: { label: string } | null;
+  type Row = { professor: { netid: string; email: string }; dueStatus: string; observedThisCycle: boolean; lastObservedTerm: { label: string } | null;
     dueTerm: { termId: string | null; label: string; startDate: string | null } };
   const find = (rows: Row[], netid: string) => rows.find((row) => row.professor.netid === netid)!;
 
@@ -113,6 +113,10 @@ describe('cycle faculty list against the database', { skip }, () => {
       ['n-new', 'NOT_DUE'], ['ac', 'NOT_DUE'],
     ]);
     assert.equal(find(rows, 'a-amy').professor.email, 'a-amy@example.edu');
+    // The cycle roster is a kickoff snapshot; completion is reported independently.
+    assert.equal(find(rows, 'a-current').dueStatus, 'OVERDUE');
+    assert.equal(find(rows, 'a-current').observedThisCycle, true);
+    assert.equal(find(rows, 'b-prior').observedThisCycle, false);
   });
 
   test('last observed comes from before the cycle term; the due semester follows the evaluation rules', async () => {
@@ -122,8 +126,8 @@ describe('cycle faculty list against the database', { skip }, () => {
     assert.deepEqual(find(rows, 'b-prior').dueTerm, {
       termId: '4', season: 'spring', year: 2026, label: 'Spring 2026', startDate: '2026-01-15', endDate: '2026-05-15',
     });
-    // The Fall 2026 observation is this cycle's own, so last observed stays the Fall 2022 baseline.
-    assert.equal(find(rows, 'a-current').lastObservedTerm!.label, 'Fall 2022');
+    // The most recent completed observation includes this cycle's own observation.
+    assert.equal(find(rows, 'a-current').lastObservedTerm!.label, 'Fall 2026');
     // Assistants are observed every year, so the Fall 2026 observation makes them due Fall 2027.
     assert.equal(find(rows, 'a-current').dueTerm.label, 'Fall 2027');
     // A due semester without a term row yet has a label but no id or dates.

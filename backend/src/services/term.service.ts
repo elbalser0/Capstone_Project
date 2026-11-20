@@ -50,6 +50,7 @@ interface PreviewProfessorRow {
   start_term: number | null;
   last_completed_term_id: number | null;
   existing_cycle_id: number | null;
+  observed_this_cycle: boolean;
   dept_id: number;
   dept_name: string;
   saved_due_status: 'due' | 'overdue' | null;
@@ -84,6 +85,7 @@ function mapDuePreviewRow(row: PreviewProfessorRow, terms: EvaluationTerm[], cyc
     dueStatus: row.existing_cycle_id !== null
       ? (row.saved_due_status === 'overdue' ? 'OVERDUE' : row.saved_due_status === 'due' ? 'DUE' : 'NOT_DUE')
       : evaluation.status,
+    observedThisCycle: row.observed_this_cycle,
     lastObservedTerm: evaluation.lastObservedTerm,
     dueTerm,
   };
@@ -122,7 +124,17 @@ export async function previewDueProfessors(termId: number, db: Pick<PoolClient, 
            p.eval_interval_years, baseline_term.term_id AS baseline_last_eval_term, p.start_term,
            p.dept_id, d.dept_name, CURRENT_DATE::text AS today,
            completed.term_id AS last_completed_term_id,
-           ed.due_status AS saved_due_status, cycle.cycle_id AS existing_cycle_id
+           ed.due_status AS saved_due_status, cycle.cycle_id AS existing_cycle_id,
+           EXISTS (
+             SELECT 1
+             FROM sign_up AS cycle_signup
+             JOIN observation AS cycle_observation ON cycle_observation.signup_id = cycle_signup.signup_id
+             WHERE cycle_signup.cycle_id = cycle.cycle_id
+               AND cycle_signup.observee_netid = p.netid
+               AND cycle_observation.status = 'completed'
+               AND cycle_observation.observee_signed_date IS NOT NULL
+               AND cycle_observation.observer_signed_date IS NOT NULL
+           ) AS observed_this_cycle
     FROM professor AS p
     JOIN department AS d ON d.dept_id = p.dept_id
     LEFT JOIN eval_cycle AS cycle ON cycle.term_id = $1

@@ -59,11 +59,16 @@ function facultyRows(termId: string, c: EvalCycleRow | undefined): FacultyStatus
     .map((p): FacultyStatus => {
       const due = c && db.eval_due.find((d) => d.cycle_id === c.cycle_id && d.netid === p.netid);
       const status = c ? (due ? (due.due_status === 'overdue' ? 'OVERDUE' : 'DUE') : 'NOT_DUE') : dueStatus(db, p, termId);
-      const last = before ? lastCompletedTermId(db, p.netid, before) : null;
+      const last = c ? lastCompletedTermId(db, p.netid) : before ? lastCompletedTermId(db, p.netid, before) : null;
+      const observedThisCycle = Boolean(c && db.sign_up
+        .filter((s) => s.cycle_id === c.cycle_id && s.observee_netid === p.netid)
+        .some((s) => db.observation.some((o) => o.signup_id === s.signup_id && o.status === 'completed'
+          && o.observee_signed_date && o.observer_signed_date)));
       return {
         professor: contact(p.netid),
         department: department(p.dept_id),
         dueStatus: status,
+        observedThisCycle,
         lastObservedTerm: last ? term(last) : null,
         dueTerm: term(dueTermId(db, p, termId, last)),
       };
