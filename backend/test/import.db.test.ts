@@ -261,6 +261,7 @@ describe('admin import against the database', { skip }, () => {
       [prof('ab1234567,A,B,a@example.edu,50,full,2,,,true\n'),
         'professor.csv line 2: netid must be three letters followed by six digits, like abc123456.'],
       [prof('abc123456,A,B,not-an-email,50,full,2,,,true\n'), 'professor.csv line 2: email must be a valid email address.'],
+      [prof(`abc123456,A,B,${'a'.repeat(65)}@example.edu,50,full,2,,,true\n`), 'professor.csv line 2: email must be a valid email address.'],
       [prof('abc123456,A,B,a@example.edu,50,lecturer,2,,,true\n'), 'professor.csv line 2: rank must be assistant, associate or full.'],
       [prof('abc123456,A,B,a@example.edu,50,full,2,,,yes\n'), 'professor.csv line 2: is_active must be true or false.'],
       [prof('abc123456,A,B,a@example.edu,99,full,2,,,true\n'), 'professor.csv line 2: dept_id 99 is not in department.csv or the database.'],

@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
-import { EMAIL } from './forward.service.js';
+import { isValidEmail } from './forward.service.js';
 
 // POST /api/admin/import loads data from the same CSV layout as Scripts/seed_data. The tables are
 // listed in the order they are imported, so a row can point to a row from an earlier file.
@@ -333,7 +333,7 @@ async function importProfessors(
     const firstName = required('professor', row, 'first_name');
     const lastName = required('professor', row, 'last_name');
     const email = required('professor', row, 'email');
-    if (!EMAIL.test(email)) throw badRow('professor', row, 'email must be a valid email address.');
+    if (!isValidEmail(email)) throw badRow('professor', row, 'email must be a valid email address.');
     const rank = row.values.rank.toLowerCase();
     if (!RANKS.includes(rank)) throw badRow('professor', row, 'rank must be assistant, associate or full.');
     const deptFileId = positiveInt('professor', row, 'dept_id');

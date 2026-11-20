@@ -59,8 +59,11 @@ type NotifType = 'reminder' | 'matches_ready' | 'survey_open';
 // row) and returns each recipient's email and subject. Extra parameters start at $7.
 async function sendToCycle(cycleId: number, sentBy: string, type: NotifType, recipientsSql: string, extra: unknown[] = []) {
   const db = getPool();
+  // Deadlines read as text like 'Wed, Nov 25, 2026', the same format as the forward email.
   const { rows: [cycle] } = await db.query<{ signup: string; observation: string; feedback: string }>(`
-    SELECT signup_deadline::text AS signup, observation_deadline::text AS observation, feedback_deadline::text AS feedback
+    SELECT to_char(signup_deadline, 'Dy, Mon FMDD, YYYY') AS signup,
+           to_char(observation_deadline, 'Dy, Mon FMDD, YYYY') AS observation,
+           to_char(feedback_deadline, 'Dy, Mon FMDD, YYYY') AS feedback
     FROM eval_cycle WHERE cycle_id = $1
   `, [cycleId]);
   if (!cycle) throw new ApiError(404, 'NOT_FOUND', 'Cycle not found.');
