@@ -23,7 +23,10 @@ export async function listOutstandingObservations() {
     SELECT p.rank, count(DISTINCT s.signup_id)::int AS count
     FROM sign_up AS s
     JOIN professor AS p ON p.netid = s.observee_netid
-    LEFT JOIN observation AS o ON o.signup_id = s.signup_id
+    LEFT JOIN LATERAL (
+      SELECT observation_id, status FROM observation WHERE signup_id = s.signup_id
+      ORDER BY observation_id DESC LIMIT 1
+    ) AS o ON true
     WHERE s.cycle_id = $1 AND (o.observation_id IS NULL OR o.status <> 'completed')
     GROUP BY p.rank
   `, [cycle.cycleId]);

@@ -32,7 +32,11 @@ const endedRequest = (alias: string) => `EXISTS (
   SELECT 1 FROM observation_request AS r
   WHERE r.signup_id = ${alias}.signup_id AND r.observer_netid = ${alias}.observer_netid
     AND (r.status IN ('declined', 'cancelled', 'expired')
-         OR (r.status = 'pending' AND r.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS}))))`;
+         OR (r.status = 'pending' AND r.sent_date <= now() - make_interval(hours => ${REQUEST_HOURS}))
+         OR (r.status = 'accepted' AND EXISTS (
+           SELECT 1 FROM observation AS missed
+           WHERE missed.signup_id = r.signup_id AND missed.observer_netid = r.observer_netid
+             AND missed.status = 'not_completed'))))`;
 
 // Matches that still count toward the candidate limit and the alerts.
 const USABLE_COUNT = `SELECT count(*)::int FROM observer_match AS um WHERE um.signup_id = $1 AND NOT ${endedRequest('um')}`;
@@ -72,7 +76,7 @@ async function addCandidates(client: PoolClient, signupId: number, cycleId: numb
         WHERE taught.instructor_id = p.netid AND tc.course_level = target.course_level
           AND taught.term_id IN (SELECT term_id FROM recent_terms))
       AND (SELECT count(*) FROM observation AS o JOIN sign_up AS os ON os.signup_id = o.signup_id
-           WHERE o.observer_netid = p.netid AND os.cycle_id = $2) < $3
+           WHERE o.observer_netid = p.netid AND os.cycle_id = $2 AND o.status <> 'not_completed') < $3
     ORDER BY (SELECT count(*) FROM observer_match AS m JOIN sign_up AS ms ON ms.signup_id = m.signup_id
               WHERE m.observer_netid = p.netid AND ms.cycle_id = $2), p.netid
     LIMIT GREATEST(0, $4 - (${USABLE_COUNT}))
@@ -97,7 +101,8 @@ export async function runMatching(cycleId: number) {
     // Locks the sign-ups, like sending and confirming requests do, so they can't change mid-run.
     const { rows: signups } = await client.query<{ signup_id: number }>(`
       SELECT s.signup_id FROM sign_up AS s
-      WHERE s.cycle_id = $1 AND NOT EXISTS (SELECT 1 FROM observation AS o WHERE o.signup_id = s.signup_id)
+      WHERE s.cycle_id = $1 AND NOT EXISTS (
+        SELECT 1 FROM observation AS o WHERE o.signup_id = s.signup_id AND o.status <> 'not_completed')
       ORDER BY s.signup_id FOR UPDATE OF s
     `, [cycleId]);
     for (const { signup_id: signupId } of signups) {
@@ -169,7 +174,7 @@ export async function addManualCandidate(signupId: number, observerNetid: string
       throw new ApiError(400, 'INVALID_CANDIDATE', 'A faculty member cannot observe their own sign-up.');
     }
 
-    const paired = await client.query('SELECT 1 FROM observation WHERE signup_id = $1', [signupId]);
+    const paired = await client.query("SELECT 1 FROM observation WHERE signup_id = $1 AND status <> 'not_completed'", [signupId]);
     if (paired.rowCount) {
       throw new ApiError(409, 'ALREADY_PAIRED', 'This sign-up already has an assigned observer.');
     }
@@ -203,7 +208,7 @@ export async function addManualCandidate(signupId: number, observerNetid: string
       SELECT count(*)::int AS n
       FROM observation AS o
       JOIN sign_up AS s ON s.signup_id = o.signup_id
-      WHERE o.observer_netid = $1 AND s.cycle_id = $2
+      WHERE o.observer_netid = $1 AND s.cycle_id = $2 AND o.status <> 'not_completed'
     `, [observerNetid, signup.cycle_id]);
     if (accepted.rows[0].n >= MAX_ACCEPTED) {
       throw new ApiError(409, 'LIMIT_REACHED', 'This professor has reached the observation limit for this cycle.');

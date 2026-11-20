@@ -80,7 +80,7 @@ export async function listUnmatchedFaculty() {
         OR (NOT (${hasRequests} AND ${noUsableCandidates})
             AND a.alert_type IN ('no_observer', 'insufficient_observers'))
       )
-      AND NOT EXISTS (SELECT 1 FROM observation AS o WHERE o.signup_id = s.signup_id)
+      AND NOT EXISTS (SELECT 1 FROM observation AS o WHERE o.signup_id = s.signup_id AND o.status <> 'not_completed')
     ORDER BY s.signup_id, meeting.day_of_week, meeting.start_time
   `, [cycle.cycleId]);
   const items = mapUnmatchedRows(rows);

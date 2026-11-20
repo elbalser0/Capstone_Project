@@ -73,7 +73,10 @@ export async function getMySignup(user: AuthUser) {
            observer.last_name AS observer_last_name, observer.rank AS observer_rank
     FROM sign_up AS s
     JOIN eval_cycle AS c ON c.cycle_id = s.cycle_id
-    LEFT JOIN observation AS o ON o.signup_id = s.signup_id
+    LEFT JOIN LATERAL (
+      SELECT * FROM observation WHERE signup_id = s.signup_id
+      ORDER BY observation_id DESC LIMIT 1
+    ) AS o ON true
     LEFT JOIN professor AS observer ON observer.netid = o.observer_netid
     WHERE s.observee_netid = $1
       AND s.cycle_id = (
