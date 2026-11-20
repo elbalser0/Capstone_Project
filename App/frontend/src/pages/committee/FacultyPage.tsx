@@ -4,8 +4,8 @@ import { ApiError } from '../../api/client';
 import { useCycleFaculty, useDueProfessors, useSendDueReminders } from '../../api/hooks/committee';
 import { sharedKeys, useCurrentCycle } from '../../api/hooks/shared';
 import type { DueStatus, Rank } from '../../api/types';
-import { DownloadIcon, MailIcon, SearchIcon } from '../../components/icons';
-import { Banner, Button, Cell, Checkbox, Chip, DUE_TAG, DueTag, EmptyRow, ErrorNote, Modal, Pagination, Row, Table, inputClass, usePages } from '../../components/ui';
+import { CheckIcon, DownloadIcon, MailIcon, SearchIcon } from '../../components/icons';
+import { Banner, Button, Cell, Checkbox, Chip, DUE_TAG, DueTag, EmptyRow, ErrorNote, Modal, Pagination, Row, Table, Tag, inputClass, usePages } from '../../components/ui';
 import { downloadCsv } from '../../lib/csv';
 import { RANK_SHORT, formatClock, toggleIn } from '../../lib/format';
 import { isMissingEndpoint } from '../../lib/missingEndpoint';
@@ -22,6 +22,8 @@ const PAGE_SIZE = 7;
 const NOT_OBSERVED = 'Not observed yet';
 const ALL: DueStatus[] = ['DUE', 'OVERDUE', 'NOT_DUE'];
 const DUE_ONLY: DueStatus[] = ['DUE', 'OVERDUE'];
+/** Shown next to the status: DUE or OVERDUE stays as it was at kickoff, so this says the observation is done. */
+const OBSERVED_THIS_CYCLE = 'Observed this cycle';
 const FALLBACK_BANNER = 'The full faculty list is not available yet, so only due and overdue professors are shown.';
 
 /** One table row from either list. email and dueSemester are null in the due-professors fallback. */
@@ -34,16 +36,18 @@ interface FacultyRow {
   lastObserved: string;
   dueSemester: string | null;
   status: DueStatus;
+  /** A fully signed, completed observation in this cycle. Unknown (null) in the due-professors fallback. */
+  observedThisCycle: boolean | null;
 }
 
 function exportCsv(rows: FacultyRow[], full: boolean, termLabel: string) {
   const lines = [full
-    ? ['name', 'email', 'rank', 'department', 'last_observed', 'due_semester', 'status']
+    ? ['name', 'email', 'rank', 'department', 'last_observed', 'due_semester', 'status', 'observed_this_cycle']
     : ['name', 'rank', 'department', 'last_observed', 'status']];
   for (const r of rows) {
     const status = DUE_TAG[r.status][1];
     lines.push(full
-      ? [r.name, r.email ?? '', RANK_SHORT[r.rank], r.department, r.lastObserved, r.dueSemester ?? '', status]
+      ? [r.name, r.email ?? '', RANK_SHORT[r.rank], r.department, r.lastObserved, r.dueSemester ?? '', status, r.observedThisCycle ? 'yes' : 'no']
       : [r.name, RANK_SHORT[r.rank], r.department, r.lastObserved, status]);
   }
   downloadCsv('faculty', termLabel, lines);
@@ -101,10 +105,12 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
     ? faculty.data.map((r) => ({
       netid: r.professor.netid, name: r.professor.displayName, email: r.professor.email, rank: r.professor.rank,
       department: r.department.deptName, lastObserved: r.lastObservedTerm?.label ?? NOT_OBSERVED, dueSemester: r.dueTerm.label, status: r.dueStatus,
+      observedThisCycle: r.observedThisCycle,
     }))
     : (fallback.data ?? []).map((r) => ({
       netid: r.professor.netid, name: r.professor.displayName, email: null, rank: r.professor.rank,
       department: r.department.deptName, lastObserved: r.lastObservedTerm?.label ?? NOT_OBSERVED, dueSemester: null, status: r.dueStatus,
+      observedThisCycle: null,
     }));
   const visible = shown.filter((s) => statuses.includes(s));
   // Every word typed must appear in the name, so "dr linda" finds "Dr. Linda Chen".
@@ -178,12 +184,12 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
       </div>
 
       <div className="mt-6 overflow-x-auto">
-        <div className={full ? 'min-w-[800px]' : 'min-w-[700px]'}>
+        <div className={full ? 'min-w-[820px]' : 'min-w-[700px]'}>
           <Table
             label="Faculty"
-            // Columns share the width down to these minimums (the last one fits OVERDUE), then the table scrolls sideways.
+            // Columns share the width down to these minimums (the last one fits OVERDUE; "Observed this cycle" wraps under it), then the table scrolls sideways.
             columns={full
-              ? '56px minmax(140px,2fr) minmax(90px,1fr) minmax(140px,2fr) minmax(110px,1.2fr) minmax(110px,1.2fr) minmax(96px,1fr)'
+              ? '56px minmax(140px,2fr) minmax(90px,1fr) minmax(140px,2fr) minmax(110px,1.2fr) minmax(110px,1.2fr) minmax(120px,1.3fr)'
               : '56px minmax(150px,2fr) minmax(90px,1fr) minmax(150px,2fr) minmax(110px,1.2fr) minmax(96px,1fr)'}
             head={[
               <Checkbox
@@ -218,7 +224,12 @@ function FacultyList({ cycleId, termLabel }: { cycleId: string; termLabel: strin
                 <Cell>{r.department}</Cell>
                 <Cell>{r.lastObserved}</Cell>
                 {full && <Cell>{r.dueSemester}</Cell>}
-                <Cell><DueTag status={r.status} /></Cell>
+                <Cell>
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <DueTag status={r.status} />
+                    {r.observedThisCycle && <Tag wrap tone="signed" icon={<CheckIcon width={10} height={8} />}>{OBSERVED_THIS_CYCLE}</Tag>}
+                  </span>
+                </Cell>
               </Row>
             ))}
             {loading && <p role="status" className="px-4 py-4 text-sm text-gray-500">Loading faculty…</p>}

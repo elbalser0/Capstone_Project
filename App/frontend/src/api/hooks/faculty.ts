@@ -7,6 +7,7 @@ import type {
   CourseSection,
   CreateSignupInput,
   EvaluationStatus,
+  MySurveyStatus,
   ObservationDetail,
   ObservationRequest,
   ObservationSummary,
@@ -30,6 +31,7 @@ const facultyKeys = {
   myObservations: ['me', 'observations', 'observee'] as const,
   assignments: ['me', 'assignments'] as const,
   observation: (observationId: string) => ['observations', observationId] as const,
+  survey: (cycleId: string) => ['me', 'survey', cycleId] as const,
 };
 
 /** Refresh settings a page can add to a read, e.g. polling while answers are still coming in. */
@@ -137,8 +139,14 @@ export function useUploadObservationFile() {
   });
 }
 
+/** GET /api/me/survey?cycleId=: my eligible and already-submitted survey roles, so a reload keeps "submitted". */
+export function useMySurveyStatus(cycleId: string | undefined) {
+  return useQuery(withId(cycleId, facultyKeys.survey, (id) => api<MySurveyStatus>('/me/survey', { query: { cycleId: id } })));
+}
+
 /** POST /api/cycles/{cycleId}/survey-responses: the end-of-process survey (observees and observers). */
 export function useSubmitSurvey(cycleId: string) {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ troubleFile, ...fields }: SurveyInput) => {
       const form = new FormData();
@@ -146,6 +154,8 @@ export function useSubmitSurvey(cycleId: string) {
       if (troubleFile) form.append('troubleFile', troubleFile, troubleFile.name);
       return api<{ responseId: string }>(`/cycles/${cycleId}/survey-responses`, { method: 'POST', body: form });
     },
+    // A duplicate (ALREADY_SUBMITTED) also means the server has that role, so both outcomes refresh the status.
+    onSettled: () => invalidate(qc, facultyKeys.survey(cycleId)),
   });
 }
 

@@ -15,7 +15,7 @@ import type {
   UnmatchedFaculty,
   UpdateCycleInput,
 } from '../../api/types';
-import { alertFor, dueStatus, dueTermId, eligibleObservers, isLocked, isSignedOff, lastCompletedTermId, requestExpiresAt, termOrder } from '../rules';
+import { alertFor, cyclePhase, dueStatus, dueTermId, eligibleObservers, isLocked, isSignedOff, lastCompletedTermId, requestExpiresAt, surveyOpensDate, termOrder } from '../rules';
 import type { EvalCycleRow, SignupRow } from '../schema';
 import {
   byRank,
@@ -31,6 +31,7 @@ import {
   newId,
   notify,
   now,
+  activeObservationOfSignup,
   observationOfSignup,
   person,
   professor,
@@ -196,7 +197,7 @@ export const committeeHandlers = [
     const c = cycleOr404(params.cycleId);
     if (today() <= c.signup_deadline) return fail(409, 'SIGNUP_OPEN', `Run observer selection after the sign-up deadline (${c.signup_deadline}).`);
     for (const s of signupsOf(c)) {
-      if (observationOfSignup(s.signup_id)) continue;
+      if (activeObservationOfSignup(s.signup_id)) continue;
       db.observer_match = db.observer_match.filter((m) => !(m.signup_id === s.signup_id && m.round_no === 1));
       db.alert = db.alert.filter((a) => a.signup_id !== s.signup_id || a.alert_type === 'no_acceptance');
       const list = eligibleObservers(db, s);
@@ -226,7 +227,7 @@ export const committeeHandlers = [
     const { observerNetid } = (await request.json()) as { observerNetid: string };
     // The backend's checks for a hand-added observer: it skips the matching rules on purpose.
     if (observerNetid === s.observee_netid) return fail(400, 'INVALID_CANDIDATE', 'A faculty member cannot observe their own sign-up.');
-    if (observationOfSignup(s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'This sign-up already has an assigned observer.');
+    if (activeObservationOfSignup(s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'This sign-up already has an assigned observer.');
     if (db.observer_match.some((m) => m.signup_id === s.signup_id && m.observer_netid === observerNetid)) {
       return fail(409, 'ALREADY_MATCHED', 'This professor is already on the sign-up’s candidate history.');
     }
@@ -240,12 +241,17 @@ export const committeeHandlers = [
   http.post('/api/cycles/:cycleId/notifications/survey', ({ request, params }) => {
     const me = committeeMember(request);
     const c = cycleOr404(params.cycleId);
+    // Like the backend: only while the survey is open, and anyone already told in this cycle is skipped.
+    if (cyclePhase(db, c, today()) !== 'feedback') {
+      return fail(409, 'SURVEY_CLOSED', `The survey notification can only be sent while the survey is open, from ${surveyOpensDate(c)} to ${c.feedback_deadline}.`);
+    }
     const participants = new Set(signupsOf(c).map((s) => s.observee_netid));
     for (const s of signupsOf(c)) {
-      const o = observationOfSignup(s.signup_id);
-      if (o) participants.add(o.observer_netid);
+      for (const o of db.observation.filter((x) => x.signup_id === s.signup_id)) participants.add(o.observer_netid);
     }
-    return HttpResponse.json({ sent: notify([...participants], 'survey_open', 'The end-of-process survey is open', me.netid, c.cycle_id) });
+    const told = new Set(db.notification.filter((n) => n.cycle_id === c.cycle_id && n.notif_type === 'survey_open').map((n) => n.recipient_netid));
+    const fresh = [...participants].filter((n) => !told.has(n));
+    return HttpResponse.json({ sent: notify(fresh, 'survey_open', 'The end-of-process survey is open', me.netid, c.cycle_id) });
   }),
 
   http.get('/api/cycles/:cycleId/survey-responses', ({ request, params }) => {
@@ -304,7 +310,7 @@ export const committeeHandlers = [
     committeeMember(request);
     const c = currentCycleOr404();
     const items = signupsOf(c)
-      .filter((s) => !observationOfSignup(s.signup_id))
+      .filter((s) => !activeObservationOfSignup(s.signup_id))
       .flatMap((s) => {
         // Like the backend: requests were sent and none is open or accepted, with nobody left to ask, reads as
         // "no one accepted" (expired requests included); otherwise the open no_observer or insufficient_observers alert.

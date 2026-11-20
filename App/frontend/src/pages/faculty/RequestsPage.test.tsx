@@ -197,6 +197,17 @@ test('a fast double-click sends one request', async () => {
   expect(posts).toBe(1);
 });
 
+test('names the observers with no free proposed time when the server refuses the send', async () => {
+  current.candidates = [candidate(observer), candidate(second)];
+  server.use(http.post('*/api/signups/:signupId/requests', () => HttpResponse.json({
+    error: { code: 'NO_AVAILABLE_DATES', message: `No proposed date is available for observer(s): ${second.netid}. Remove them or add another candidate.` },
+  }, { status: 409 })));
+  renderRequests();
+  await screen.findByText('2 of 2 selected');
+  await userEvent.setup().click(sendButton());
+  expect(await screen.findByRole('alert')).toHaveTextContent('Nothing was sent. Dr. Jon Kim teaches or observes at every one of your proposed times. Unselect them and send again.');
+});
+
 test('keeps the selection after a failed send and lets the professor retry', async () => {
   current.candidates = [candidate(observer), candidate(second)];
   let attempts = 0;
@@ -443,6 +454,52 @@ test('after the observation is reported as not done, says it did not happen and 
   expect(screen.queryByText(/accepted first and is your observer/)).not.toBeInTheDocument();
   expect(screen.queryByText('What happens next')).not.toBeInTheDocument();
   expect(screen.queryByText(/you both sign the record/)).not.toBeInTheDocument();
+});
+
+test('after a missed observation, says the sign-up can be paired again instead of "cannot get another observer"', async () => {
+  current.signup = { ...matchedSignup, observation: { ...matchedSignup.observation!, status: 'not_completed' } };
+  current.outgoing = [request(observer, 'accepted', { respondedDate: '2026-09-16T20:00:00Z' })];
+  renderRequests();
+  expect(await screen.findByText(/Your sign-up has no observer now, so it can be paired again/)).toBeVisible();
+  expect(screen.queryByText(/cannot get another observer/)).not.toBeInTheDocument();
+});
+
+test('after a missed observation, a new observer on the list can be asked again', async () => {
+  current.signup = { ...matchedSignup, observation: { ...matchedSignup.observation!, status: 'not_completed' } };
+  current.outgoing = [request(observer, 'accepted', { respondedDate: '2026-09-16T20:00:00Z' })];
+  current.candidates = [candidate(observer, { status: 'accepted', sentDate: '2026-09-16T15:00:00Z' }), candidate(second)];
+  renderRequests();
+  expect(await screen.findByRole('table', { name: 'Recommended observers' })).toBeVisible();
+  expect(within(screen.getByRole('table', { name: 'Recommended observers' })).getByText('Dr. Jon Kim')).toBeVisible();
+  expect(screen.queryByText(/accepted first and is your observer/)).not.toBeInTheDocument();
+});
+
+test('after a missed observation, a request sent to the new observer shows as sent', async () => {
+  current.signup = { ...matchedSignup, observation: { ...matchedSignup.observation!, status: 'not_completed' } };
+  current.outgoing = [request(observer, 'accepted', { respondedDate: '2026-09-16T20:00:00Z' }), request(second, 'pending')];
+  current.candidates = [candidate(observer, { status: 'accepted', sentDate: '2026-09-16T15:00:00Z' }), candidate(second, { status: 'pending', sentDate: '2026-09-17T07:00:00Z' })];
+  renderRequests();
+  expect(await screen.findByText('Dr. Jon Kim')).toBeVisible();
+  expect(screen.queryByText(/did not happen/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/accepted first and is your observer/)).not.toBeInTheDocument();
+});
+
+test('after a missed observation, a second round nobody accepted says so', async () => {
+  current.signup = { ...matchedSignup, observation: { ...matchedSignup.observation!, status: 'not_completed' } };
+  current.outgoing = [request(observer, 'accepted', { respondedDate: '2026-09-16T20:00:00Z' }), request(second, 'declined', { sentDate: '2026-09-17T07:00:00Z', respondedDate: '2026-09-17T07:30:00Z' })];
+  current.candidates = [candidate(observer, { status: 'accepted', sentDate: '2026-09-16T15:00:00Z' }), candidate(second, { status: 'declined', sentDate: '2026-09-17T07:00:00Z' })];
+  renderRequests();
+  expect(await screen.findByText('None of your requests were accepted.')).toBeVisible();
+});
+
+test('after pairing again, the first observer\'s accepted request reads as did not happen', async () => {
+  current.signup = { ...matchedSignup, observation: { observationId: 'o2', observer: second, status: 'scheduled', scheduledDate: '2026-09-23' } };
+  current.outgoing = [request(observer, 'accepted', { respondedDate: '2026-09-16T20:00:00Z' }), request(second, 'accepted', { sentDate: '2026-09-17T07:00:00Z', respondedDate: '2026-09-17T09:00:00Z' })];
+  renderRequests();
+  expect(await screen.findByText(/Dr\. Jon Kim accepted first and is your observer/)).toBeVisible();
+  const table = within(screen.getByRole('table', { name: 'My requests' }));
+  const first = table.getByText('Dr. Elena Ruiz').closest('[role="row"]') as HTMLElement;
+  expect(within(first).getByText('Did not happen')).toBeVisible();
 });
 
 test('the matched view gives an expired request its expiry time', async () => {

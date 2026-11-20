@@ -26,6 +26,7 @@ import {
 } from '../rules';
 import type { EvalCycleRow, ObservationRequestRow, ProfessorRow } from '../schema';
 import {
+  activeObservationOfSignup,
   currentCycleRow,
   currentTerm,
   cycle,
@@ -50,6 +51,12 @@ import {
 
 /** A pending request past its 48 hours reads as expired. */
 const requestStatus = (r: ObservationRequestRow) => (r.status === 'pending' && requestExpiresAt(r.sent_date) <= now() ? 'expired' : r.status);
+/**
+ * A request that no longer counts: declined, cancelled, expired, or accepted by an observer whose observation
+ * was then reported as not done (backend #249), so the observee can ask the others again.
+ */
+const requestEnded = (r: ObservationRequestRow) => ['declined', 'cancelled', 'expired'].includes(requestStatus(r))
+  || (r.status === 'accepted' && db.observation.some((o) => o.signup_id === r.signup_id && o.observer_netid === r.observer_netid && o.status === 'not_completed'));
 
 const toRequest = (r: ObservationRequestRow): ObservationRequest => {
   const s = signupRow(r.signup_id)!;
@@ -151,7 +158,7 @@ export const facultyHandlers = [
       .filter((m) => m.signup_id === s.signup_id)
       .filter((m) => {
         const r = db.observation_request.find((x) => x.signup_id === s.signup_id && x.observer_netid === m.observer_netid);
-        return !r || !['declined', 'cancelled', 'expired'].includes(requestStatus(r));
+        return !r || !requestEnded(r);
       })
       .map((m) => {
         const r = db.observation_request.find((x) => x.signup_id === s.signup_id && x.observer_netid === m.observer_netid);
@@ -169,18 +176,25 @@ export const facultyHandlers = [
   http.post('/api/signups/:signupId/requests', async ({ request, params }) => {
     const me = signedIn(request);
     const s = ownSignup(params, me);
-    if (db.observation.some((o) => o.signup_id === s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'You are already paired with an observer.');
+    if (activeObservationOfSignup(s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'You are already paired with an observer.');
     const input = ((await request.json().catch(() => ({}))) ?? {}) as SendRequestsInput;
     const candidates = db.observer_match
       .filter((m) => m.signup_id === s.signup_id)
       .filter((m) => {
         const r = db.observation_request.find((x) => x.signup_id === s.signup_id && x.observer_netid === m.observer_netid);
-        return !r || !['declined', 'cancelled', 'expired'].includes(requestStatus(r));
+        return !r || !requestEnded(r);
       })
       .map((m) => m.observer_netid);
     const targets = input.observerNetids?.length ? input.observerNetids : candidates;
     if (targets.some((n) => !candidates.includes(n))) return fail(400, 'NOT_A_CANDIDATE', 'Requests can only go to observers on your list.');
-    for (const netid of targets) {
+    // Like the backend (#250): an observer with no free proposed date is refused when picked by hand, or when
+    // nobody else is left; otherwise they are skipped.
+    const conflicting = targets.filter((n) => freeDates(db, s, n).length === 0);
+    const sendTo = targets.filter((n) => !conflicting.includes(n));
+    if (conflicting.length && (input.observerNetids?.length || sendTo.length === 0)) {
+      return fail(409, 'NO_AVAILABLE_DATES', `No proposed date is available for observer(s): ${conflicting.join(', ')}. Remove them or add another candidate.`);
+    }
+    for (const netid of sendTo) {
       const existing = db.observation_request.find((r) => r.signup_id === s.signup_id && r.observer_netid === netid);
       if (existing) continue;
       db.observation_request.push({ signup_id: s.signup_id, observer_netid: netid, status: 'pending', sent_date: now(), responded_date: null });
@@ -248,6 +262,31 @@ export const facultyHandlers = [
     return HttpResponse.json(observationDetail(o));
   }),
 
+  // GET /api/me/survey?cycleId=: same roles as the backend: observee if signed up in the cycle,
+  // observer if they have an observation in it (any status).
+  http.get('/api/me/survey', ({ request }) => {
+    const me = signedIn(request);
+    const id = new URL(request.url).searchParams.get('cycleId') ?? '';
+    // Demo cycle ids are not numbers (C-FA26), so only a missing one is refused here.
+    if (!id) return fail(400, 'INVALID_CYCLE_ID', 'cycleId is required.');
+    const c = cycleOr404(id);
+    const signups = db.sign_up.filter((s) => s.cycle_id === c.cycle_id);
+    const roles = {
+      observee: signups.some((s) => s.observee_netid === me.netid),
+      observer: db.observation.some((o) => o.observer_netid === me.netid && signups.some((s) => s.signup_id === o.signup_id)),
+    };
+    const submitted = new Set(db.survey_response.filter((r) => r.cycle_id === c.cycle_id && r.respondent_id === me.netid).map((r) => r.respondent_role));
+    const order = ['observee', 'observer'] as const;
+    return HttpResponse.json({
+      cycleId: c.cycle_id,
+      open: cyclePhase(db, c, today()) === 'feedback',
+      opensDate: surveyOpensDate(c),
+      closesDate: c.feedback_deadline,
+      eligibleRoles: order.filter((r) => roles[r]),
+      submittedRoles: order.filter((r) => submitted.has(r)),
+    });
+  }),
+
   http.post('/api/cycles/:cycleId/survey-responses', async ({ request, params }) => {
     const me = signedIn(request);
     const c = cycleOr404(params.cycleId);
@@ -297,7 +336,7 @@ export const facultyHandlers = [
     const me = signedIn(request);
     const r = pendingRequestTo(params, me);
     const s = signupRow(r.signup_id)!;
-    if (db.observation.some((o) => o.signup_id === s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'Someone else accepted first.');
+    if (activeObservationOfSignup(s.signup_id)) return fail(409, 'ALREADY_PAIRED', 'Someone else accepted first.');
     if (!isEligible(checkEligibility(db, s, me.netid))) {
       return acceptedCount(db, me.netid, s.cycle_id) >= MAX_ACCEPTED
         ? fail(409, 'LIMIT_REACHED', `You have already accepted ${MAX_ACCEPTED} observations this semester.`)

@@ -130,6 +130,17 @@ describe('survey', () => {
     expect((await survey('observer')).status).toBe(201);
   });
 
+  it('reports the roles the survey accepts and the ones already in, like GET /api/me/survey', async () => {
+    db.meta.today = '2026-11-10';
+    const status = async () => (await (await call(OBSERVEE_EMAIL(), '/api/me/survey?cycleId=C-FA26')).json()) as { open: boolean; eligibleRoles: string[]; submittedRoles: string[] };
+    const before = await status();
+    expect(before.open).toBe(true);
+    expect(before.eligibleRoles).toContain('observee');
+    expect(before.submittedRoles).toEqual([]);
+    expect((await survey('observee')).status).toBe(201);
+    expect((await status()).submittedRoles).toEqual(['observee']);
+  });
+
   it('lets only the committee download a response file, and answers 404 when there is none', async () => {
     const withFile: SurveyResponseRow = { response_id: 'SR-T1', cycle_id: 'C-FA26', respondent_id: OBSERVEE, respondent_role: 'observee', process_ok: false, difficulties: '', additional_feedback: '', trouble_file_key: 'uploads/SR-T1/notes.txt', submitted_date: db.meta.today };
     db.survey_response.push(withFile, { ...withFile, response_id: 'SR-T2', trouble_file_key: null });
@@ -166,6 +177,21 @@ describe('click-test mock fixes', () => {
     expect(await error(await add(someone.netid))).toBe('ALREADY_MATCHED');
     expect(await error(await add(s.observee_netid))).toBe('INVALID_CANDIDATE');
     expect(await error(await add('nobody1'))).toBe('CANDIDATE_NOT_FOUND');
+  });
+
+  it('pairs a sign-up again after its observation is reported as not done', async () => {
+    const o = schedule(db.meta.today, { status: 'not_completed', reason_not_completed: 'Class was cancelled' });
+    db.observation_request.push({ signup_id: o.signup_id, observer_netid: OBSERVER, status: 'accepted', sent_date: '2026-09-15T12:00:00.000Z', responded_date: '2026-09-15T13:00:00.000Z' });
+    db.observer_match.push({ signup_id: o.signup_id, observer_netid: OBSERVER, round_no: 1 } as (typeof db.observer_match)[number]);
+    const someone = db.professor.find((p) => p.is_active && p.netid !== OBSERVEE && p.netid !== OBSERVER && !db.observer_match.some((m) => m.signup_id === o.signup_id && m.observer_netid === p.netid))!;
+    expect((await call(AC, `/api/signups/${o.signup_id}/candidates`, { method: 'POST', body: { observerNetid: someone.netid } })).status).toBe(201);
+
+    const mine = (await (await call(OBSERVEE_EMAIL(), '/api/me/signup')).json()) as { observation: { status: string } | null };
+    expect(mine.observation?.status).toBe('not_completed');
+    const list = (await (await call(OBSERVEE_EMAIL(), `/api/signups/${o.signup_id}/candidates`)).json()) as { observer: { netid: string } }[];
+    expect(list.map((c) => c.observer.netid)).toContain(someone.netid);
+    expect(list.map((c) => c.observer.netid)).not.toContain(OBSERVER);
+    expect((await call(OBSERVEE_EMAIL(), `/api/signups/${o.signup_id}/requests`, { method: 'POST', body: { observerNetids: [someone.netid] } })).status).toBe(201);
   });
 
   it('sends no due reminder to a professor who already signed up', async () => {

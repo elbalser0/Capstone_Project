@@ -65,6 +65,16 @@ function TopBar({ title, mode }: { title: string; mode: Mode }) {
   );
 }
 
+const LAST_MODE_KEY = 'assessment-helper.last-mode';
+
+function readLastMode(): Mode {
+  try {
+    return sessionStorage.getItem(LAST_MODE_KEY) === 'committee' ? 'committee' : 'faculty';
+  } catch {
+    return 'faculty';
+  }
+}
+
 /**
  * Signed-in layout for professors. Pages under /committee need role "AC"; other professors are sent
  * to their Faculty pages. An admin who is not a professor has no pages here and is sent to /admin.
@@ -78,10 +88,13 @@ export function AppShell() {
   const [navOverride, setNavOverride] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   // The Process guide is shared by both views, so it keeps the view it was opened from.
-  const [lastMode, setLastMode] = useState<Mode>('faculty');
+  // It is kept for the tab, so reloading the guide does not drop a committee member back to the faculty view.
+  const [lastMode, setLastMode] = useState<Mode>(readLastMode);
   useEffect(() => {
-    if (pathname.startsWith('/committee')) setLastMode('committee');
-    else if (pathname.startsWith('/faculty')) setLastMode('faculty');
+    const next: Mode | null = pathname.startsWith('/committee') ? 'committee' : pathname.startsWith('/faculty') ? 'faculty' : null;
+    if (!next) return;
+    setLastMode(next);
+    try { sessionStorage.setItem(LAST_MODE_KEY, next); } catch { /* storage blocked: the view is kept until reload only */ }
   }, [pathname]);
   const menuButton = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);

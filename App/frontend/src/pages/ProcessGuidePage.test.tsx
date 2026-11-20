@@ -40,7 +40,7 @@ function openApp(path: string) {
   }], path);
 }
 
-afterEach(() => sessionStorage.removeItem(SESSION_KEY));
+afterEach(() => { sessionStorage.removeItem(SESSION_KEY); sessionStorage.removeItem('assessment-helper.last-mode'); });
 
 describe('Process guide', () => {
   it("shows the current cycle's three deadlines in the cycle card only", async () => {
@@ -118,6 +118,35 @@ describe('Process guide link in the sidebar', () => {
     await user.click(screen.getByRole('link', { name: 'Process guide' }));
     expect(router.state.location.pathname).toBe('/guide');
     expect(await screen.findByRole('heading', { name: 'How a semester works' })).toBeVisible();
+  });
+
+  it('stays in Committee mode when the guide is reloaded', async () => {
+    serve(committeeMe);
+    const first = openApp('/committee/dashboard');
+    expect(await screen.findByText('Dashboard page')).toBeVisible();
+    first.unmount();
+    openApp('/guide');
+    expect(await screen.findByRole('heading', { name: 'How a semester works' })).toBeVisible();
+    expect(await screen.findByRole('navigation', { name: 'Assessment Committee' })).toBeVisible();
+    expect(screen.getByText('Assessment Committee', { selector: 'span' })).toBeVisible();
+  });
+
+  it('opens the guide in Faculty mode after a reload when the last view was Faculty', async () => {
+    serve(committeeMe);
+    const first = openApp('/faculty/evaluation');
+    expect(await screen.findByText('My evaluation page')).toBeVisible();
+    first.unmount();
+    openApp('/guide');
+    expect(await screen.findByRole('heading', { name: 'How a semester works' })).toBeVisible();
+    expect(screen.queryByRole('navigation', { name: 'Assessment Committee' })).not.toBeInTheDocument();
+  });
+
+  it('never shows the committee view on the guide to a faculty-only account, even with a saved committee view', async () => {
+    sessionStorage.setItem('assessment-helper.last-mode', 'committee');
+    serve();
+    openApp('/guide');
+    expect(await screen.findByRole('heading', { name: 'How a semester works' })).toBeVisible();
+    expect(screen.queryByRole('navigation', { name: 'Assessment Committee' })).not.toBeInTheDocument();
   });
 
   it('lets a faculty-only account open the guide but not the dashboard', async () => {
