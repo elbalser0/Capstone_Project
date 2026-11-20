@@ -1,7 +1,7 @@
 // Database tests for the AC notification-sending endpoints. Setup is in db-test-helper.ts.
 import assert from 'node:assert/strict';
 import { after, beforeEach, describe, test } from 'node:test';
-import { skip, sql, useTestDatabase } from './db-test-helper.js';
+import { getPool, skip, sql, useTestDatabase } from './db-test-helper.js';
 
 const { listMyNotifications, sendDueReminders, sendListsReady, sendSurveyOpen } =
   await import('../src/services/notification.service.js');
@@ -159,6 +159,28 @@ describe('sending notifications against the database', { skip }, () => {
     await sql(`INSERT INTO sign_up (cycle_id, observee_netid, section_id) VALUES (1, 'late', 3)`);
     assert.deepEqual(await sendSurveyOpen(1, 'ac1'), { sent: 1 });
     assert.deepEqual((await sent('survey_open')).map((r) => r.recipient_netid), ['due1', 'ee3', 'late', 'obs']);
+  });
+
+  test('a survey send waits for one already in progress, so nobody is told twice', async () => {
+    await openSurvey();
+    // Another send is mid-way: it holds the cycle row and has told due1, but has not committed.
+    const other = await getPool().connect();
+    try {
+      await other.query('BEGIN');
+      await other.query('SELECT 1 FROM eval_cycle WHERE cycle_id = 1 FOR UPDATE');
+      await other.query(`INSERT INTO notification (cycle_id, recipient_netid, sent_by, notif_type, subject)
+                         VALUES (1, 'due1', 'ac1', 'survey_open', 'The end-of-process survey is open.')`);
+      let finished = false;
+      const second = sendSurveyOpen(1, 'ac1').then((result) => { finished = true; return result; });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(finished, false, 'the second send must wait for the first');
+      await other.query('COMMIT');
+      // After the first commits, the second sees due1 was told and skips them.
+      assert.deepEqual(await second, { sent: 2 });
+    } finally {
+      other.release();
+    }
+    assert.deepEqual((await sent('survey_open')).map((r) => r.recipient_netid), ['due1', 'ee3', 'obs']);
   });
 
   test('the survey notice is refused before the survey opens and after it closes, and sends nothing', async () => {

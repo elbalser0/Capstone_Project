@@ -1,4 +1,6 @@
+import type { PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
+import { inTransaction } from '../db/transaction.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { queueReminderEmails } from './email.service.js';
 import { displayName, type Rank } from './user.service.js';
@@ -57,8 +59,9 @@ type NotifType = 'reminder' | 'matches_ready' | 'survey_open';
 // Inserts one notification per recipient chosen by `recipientsSql` (a query returning `netid`
 // and `subject` columns, with the cycle as $1 and the cycle's deadlines in the `deadlines`
 // row) and returns each recipient's email and subject. Extra parameters start at $7.
-async function sendToCycle(cycleId: number, sentBy: string, type: NotifType, recipientsSql: string, extra: unknown[] = []) {
-  const db = getPool();
+// Pass a client to run inside a caller's transaction.
+async function sendToCycle(cycleId: number, sentBy: string, type: NotifType, recipientsSql: string,
+  extra: unknown[] = [], db: Pick<PoolClient, 'query'> = getPool()) {
   // Deadlines read as text like 'Wed, Nov 25, 2026', the same format as the forward email.
   const { rows: [cycle] } = await db.query<{ signup: string; observation: string; feedback: string }>(`
     SELECT to_char(signup_deadline, 'Dy, Mon FMDD, YYYY') AS signup,
@@ -118,26 +121,29 @@ export async function sendListsReady(cycleId: number, sentBy: string) {
 // POST /api/cycles/{cycleId}/notifications/survey: every observee and observer in the cycle,
 // once each. Only while the survey is open (the day after the observation deadline through the
 // feedback deadline). Anyone already told in this cycle is skipped, so sending again only
-// reaches participants who were not told yet.
+// reaches participants who were not told yet. The cycle row is locked for the whole send, so
+// two sends at the same moment run one after the other and the second sees the first's rows.
 export async function sendSurveyOpen(cycleId: number, sentBy: string) {
-  const { rows: [cycle] } = await getPool().query<{ open: boolean; opens: string; closes: string }>(`
-    SELECT CURRENT_DATE > observation_deadline AND CURRENT_DATE <= feedback_deadline AS open,
-           (observation_deadline + 1)::text AS opens, feedback_deadline::text AS closes
-    FROM eval_cycle WHERE cycle_id = $1
-  `, [cycleId]);
-  if (!cycle) throw new ApiError(404, 'NOT_FOUND', 'Cycle not found.');
-  if (!cycle.open) {
-    throw new ApiError(409, 'SURVEY_CLOSED',
-      `The survey notification can only be sent while the survey is open, from ${cycle.opens} to ${cycle.closes}.`);
-  }
-  return { sent: (await sendToCycle(cycleId, sentBy, 'survey_open', `
-    SELECT netid, 'The end-of-process survey is open until ' || deadlines.feedback || '.' AS subject FROM (
-      SELECT s.observee_netid AS netid FROM sign_up AS s WHERE s.cycle_id = $1
-      UNION
-      SELECT o.observer_netid FROM observation AS o
-      JOIN sign_up AS s ON s.signup_id = o.signup_id WHERE s.cycle_id = $1
-    ) AS participants CROSS JOIN deadlines
-    WHERE NOT EXISTS (SELECT 1 FROM notification AS n
-                      WHERE n.cycle_id = $1 AND n.notif_type = 'survey_open' AND n.recipient_netid = participants.netid)
-  `)).length };
+  return inTransaction(async (client) => {
+    const { rows: [cycle] } = await client.query<{ open: boolean; opens: string; closes: string }>(`
+      SELECT CURRENT_DATE > observation_deadline AND CURRENT_DATE <= feedback_deadline AS open,
+             (observation_deadline + 1)::text AS opens, feedback_deadline::text AS closes
+      FROM eval_cycle WHERE cycle_id = $1 FOR UPDATE
+    `, [cycleId]);
+    if (!cycle) throw new ApiError(404, 'NOT_FOUND', 'Cycle not found.');
+    if (!cycle.open) {
+      throw new ApiError(409, 'SURVEY_CLOSED',
+        `The survey notification can only be sent while the survey is open, from ${cycle.opens} to ${cycle.closes}.`);
+    }
+    return { sent: (await sendToCycle(cycleId, sentBy, 'survey_open', `
+      SELECT netid, 'The end-of-process survey is open until ' || deadlines.feedback || '.' AS subject FROM (
+        SELECT s.observee_netid AS netid FROM sign_up AS s WHERE s.cycle_id = $1
+        UNION
+        SELECT o.observer_netid FROM observation AS o
+        JOIN sign_up AS s ON s.signup_id = o.signup_id WHERE s.cycle_id = $1
+      ) AS participants CROSS JOIN deadlines
+      WHERE NOT EXISTS (SELECT 1 FROM notification AS n
+                        WHERE n.cycle_id = $1 AND n.notif_type = 'survey_open' AND n.recipient_netid = participants.netid)
+    `, [], client)).length };
+  });
 }
